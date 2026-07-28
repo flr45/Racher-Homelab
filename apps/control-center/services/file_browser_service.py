@@ -43,17 +43,27 @@ def _is_blocked(path):
 
 def resolve_path(root, relative_path=""):
     root = Path(root).resolve()
-    candidate = (root / str(relative_path or "")).resolve()
+    relative = Path(str(relative_path or ""))
+    if relative.is_absolute():
+        raise FileNotAllowedError("Stien er ikke tilladt.")
+
+    current = root
+    for part in relative.parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            raise FileNotAllowedError("Stien er ikke tilladt.")
+        current = current / part
+        if current.is_symlink():
+            raise FileNotAllowedError("Symbolske links er ikke tilladt.")
+        if _is_blocked(current) or current.name.startswith("."):
+            raise FileNotAllowedError("Filen er beskyttet.")
+
+    candidate = current.resolve()
     try:
         candidate.relative_to(root)
     except ValueError as exc:
         raise FileNotAllowedError("Stien er ikke tilladt.") from exc
-    if candidate != root and any(_is_blocked(part) for part in candidate.parents if part != root):
-        raise FileNotAllowedError("Stien er ikke tilladt.")
-    if candidate != root and _is_blocked(candidate):
-        raise FileNotAllowedError("Filen er beskyttet.")
-    if candidate.is_symlink():
-        raise FileNotAllowedError("Symbolske links er ikke tilladt.")
     return candidate
 
 
@@ -82,7 +92,9 @@ def list_directory(root, relative_path="", *, limit=500):
         if child.is_symlink() or _is_blocked(child) or child.name.startswith("."):
             continue
         entries.append(_entry(child, root))
-    entries.sort(key=lambda item: (item["type"] != "directory", item["name"].casefold()))
+    entries.sort(
+        key=lambda item: (item["type"] != "directory", item["name"].casefold())
+    )
     bounded_limit = max(1, min(int(limit), 500))
     return {
         "root": root.name,
