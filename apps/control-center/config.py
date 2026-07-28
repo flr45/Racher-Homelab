@@ -97,6 +97,8 @@ class Config:
             int(os.getenv("FILE_BROWSER_MAX_DOWNLOAD_BYTES", str(50 * 1024 * 1024))),
         ),
     )
+    PLUGIN_ROOT = Path(os.getenv("PLUGIN_ROOT", "/plugins"))
+    RACHER_OS_VERSION = os.getenv("RACHER_OS_VERSION", "1.0.0").strip()
 
     ADMIN_ACTIONS_ENABLED = os.getenv("ADMIN_ACTIONS_ENABLED", "false").lower() == "true"
     ALLOWED_EMAILS = _csv_set("ALLOWED_ADMIN_EMAILS", lowercase=True)
