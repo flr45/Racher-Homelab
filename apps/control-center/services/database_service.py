@@ -60,6 +60,7 @@ INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_events_recorded_at ON events(recorded_at)",
     "CREATE INDEX IF NOT EXISTS idx_notifications_dispatch ON notifications(status, next_attempt_at, id)",
     "CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_notifications_event_channel ON notifications(event_key, channel, id DESC)",
 )
 
 
