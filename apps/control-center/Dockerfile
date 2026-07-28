@@ -7,7 +7,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN groupadd --system --gid 1001 app \
-    && useradd --system --uid 1001 --gid app --home-dir /app app
+    && useradd --system --uid 1001 --gid app --home-dir /app app \
+    && mkdir -p /data \
+    && chown app:app /data
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
