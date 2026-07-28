@@ -4,7 +4,7 @@ from pathlib import Path
 
 import docker
 import psutil
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 
 app = Flask(__name__)
 
@@ -17,12 +17,23 @@ APP_LINKS = [
     {"name": "Nginx Proxy Manager", "url": os.getenv("NPM_URL", "#"), "icon": "🌐"},
 ]
 
+DOMAIN_LINKS = [
+    {"name": "Racher OS", "host": os.getenv("RACHER_OS_HOST", "home.racher.dk"), "service": "control-center"},
+    {"name": "Vagtbytte", "host": os.getenv("VAGTBYTTE_HOST", "vagtbytte.racher.dk"), "service": "vagtbytte"},
+    {"name": "Indsatsbrief", "host": os.getenv("INDSATSBRIEF_HOST", "indsatsbrief.racher.dk"), "service": "indsatsbrief"},
+    {"name": "Minutregnskab", "host": os.getenv("MINUTREGNSKAB_HOST", "minutregnskab.racher.dk"), "service": "minutregnskab"},
+]
+
 BACKUP_ROOT = Path(os.getenv("BACKUP_ROOT", "/backups"))
+
+
+def docker_client():
+    return docker.from_env()
 
 
 def docker_status():
     try:
-        client = docker.from_env()
+        client = docker_client()
         containers = []
         for container in client.containers.list(all=True):
             state = container.attrs.get("State", {})
@@ -40,16 +51,33 @@ def docker_status():
         return [], str(exc)
 
 
-def newest_backup():
+def domain_status(containers):
+    states = {container["name"]: container["status"] for container in containers}
+    result = []
+    for domain in DOMAIN_LINKS:
+        state = states.get(domain["service"], "not-found")
+        result.append({**domain, "status": state, "url": f"https://{domain['host']}"})
+    return result
+
+
+def backups(limit=10):
     try:
         candidates = [path for path in BACKUP_ROOT.iterdir() if path.is_dir()]
-        if not candidates:
-            return None
-        newest = max(candidates, key=lambda path: path.stat().st_mtime)
-        timestamp = datetime.fromtimestamp(newest.stat().st_mtime)
-        return {"name": newest.name, "time": timestamp.strftime("%d-%m-%Y %H:%M")}
+        candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        return [
+            {
+                "name": path.name,
+                "time": datetime.fromtimestamp(path.stat().st_mtime).strftime("%d-%m-%Y %H:%M"),
+            }
+            for path in candidates[:limit]
+        ]
     except Exception:
-        return None
+        return []
+
+
+def newest_backup():
+    items = backups(limit=1)
+    return items[0] if items else None
 
 
 def system_metrics():
@@ -89,6 +117,7 @@ def index():
     return render_template(
         "index.html",
         links=APP_LINKS,
+        domains=domain_status(containers),
         containers=containers,
         docker_error=docker_error,
         metrics=system_metrics(),
@@ -104,11 +133,30 @@ def api_status():
         {
             "metrics": system_metrics(),
             "containers": containers,
+            "domains": domain_status(containers),
             "docker_error": docker_error,
             "backup": newest_backup(),
             "updated": datetime.now().isoformat(),
         }
     )
+
+
+@app.get("/api/backups")
+def api_backups():
+    return jsonify({"backups": backups()})
+
+
+@app.get("/api/containers/<container_name>/logs")
+def api_container_logs(container_name):
+    try:
+        tail = min(max(request.args.get("tail", default=100, type=int), 1), 200)
+        container = docker_client().containers.get(container_name)
+        logs = container.logs(tail=tail, timestamps=True).decode("utf-8", errors="replace")
+        return jsonify({"container": container.name, "tail": tail, "logs": logs})
+    except docker.errors.NotFound:
+        return jsonify({"error": "Containeren blev ikke fundet."}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 503
 
 
 @app.get("/health")
