@@ -83,6 +83,19 @@ SCHEMA_STATEMENTS = (
         image_reference TEXT,
         status TEXT
     )""",
+    """CREATE TABLE IF NOT EXISTS rollout_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        container_name TEXT NOT NULL,
+        previous_image TEXT NOT NULL,
+        target_image TEXT NOT NULL,
+        status TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        automatic_rollback INTEGER NOT NULL DEFAULT 1,
+        message TEXT
+    )""",
 )
 
 INDEX_STATEMENTS = (
@@ -95,6 +108,8 @@ INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_deployments_present_project ON deployments(present, compose_project, compose_service)",
     "CREATE INDEX IF NOT EXISTS idx_deployment_history_recorded_at ON deployment_history(recorded_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_deployment_history_container ON deployment_history(container_name, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_rollout_jobs_container_status ON rollout_jobs(container_name, status, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_rollout_jobs_created_at ON rollout_jobs(created_at DESC)",
 )
 
 
