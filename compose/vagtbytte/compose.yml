@@ -1,0 +1,56 @@
+name: vagtbytte
+
+services:
+  vagtbytte-web:
+    image: ${VAGTBYTTE_IMAGE:-ghcr.io/flr45/vagtbytte:latest}
+    container_name: vagtbytte-web
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Copenhagen}
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      AUTH_SECRET: ${VAGTBYTTE_AUTH_SECRET}
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${VAGTBYTTE_VAPID_PUBLIC_KEY}
+      VAPID_PRIVATE_KEY: ${VAGTBYTTE_VAPID_PRIVATE_KEY}
+      VAPID_SUBJECT: ${VAGTBYTTE_VAPID_SUBJECT}
+      NOTIFICATIONS_DISABLE_PUSH: ${VAGTBYTTE_DISABLE_PUSH:-false}
+      BOOTSTRAP_ADMIN_USERNAME: ${VAGTBYTTE_BOOTSTRAP_ADMIN_USERNAME:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${VAGTBYTTE_BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_VC_USERNAME: ${VAGTBYTTE_BOOTSTRAP_VC_USERNAME:-}
+      BOOTSTRAP_VC_PASSWORD: ${VAGTBYTTE_BOOTSTRAP_VC_PASSWORD:-}
+    command: ["sh", "-c", "npm run db:deploy && node server.js"]
+    expose:
+      - "3000"
+    networks:
+      - proxy
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  vagtbytte-worker:
+    image: ${VAGTBYTTE_IMAGE:-ghcr.io/flr45/vagtbytte:latest}
+    container_name: vagtbytte-worker
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Copenhagen}
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${VAGTBYTTE_VAPID_PUBLIC_KEY}
+      VAPID_PRIVATE_KEY: ${VAGTBYTTE_VAPID_PRIVATE_KEY}
+      VAPID_SUBJECT: ${VAGTBYTTE_VAPID_SUBJECT}
+      NOTIFICATIONS_DISABLE_PUSH: ${VAGTBYTTE_DISABLE_PUSH:-false}
+    command: ["node", "scripts/notifications-worker.mjs"]
+    networks:
+      - backend
+
+networks:
+  proxy:
+    external: true
+  backend:
+    external: true
