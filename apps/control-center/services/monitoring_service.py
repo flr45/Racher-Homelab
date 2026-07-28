@@ -6,6 +6,10 @@ from services.backup_service import newest_backup
 from services.docker_service import docker_status
 from services.event_service import append_event
 from services.metrics_service import record_metrics, system_metrics
+from services.notification_service import (
+    configured_channels,
+    enqueue_finding_notifications,
+)
 
 
 def analyze_system(metrics, containers, backup, database_factory, docker_error=None):
@@ -90,14 +94,26 @@ def analyze_system(metrics, containers, backup, database_factory, docker_error=N
                 }
             )
 
+    channels = configured_channels(current_app.config)
+    minimum_severity = current_app.config.get(
+        "NOTIFICATION_MIN_SEVERITY",
+        "critical",
+    )
     for finding in findings:
-        append_event(
+        created = append_event(
             finding["key"],
             finding["severity"],
             finding["title"],
             finding["message"],
             database_factory,
         )
+        if created:
+            enqueue_finding_notifications(
+                finding,
+                database_factory,
+                channels,
+                minimum_severity=minimum_severity,
+            )
 
     return findings
 

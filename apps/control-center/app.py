@@ -25,6 +25,11 @@ from services.monitoring_service import (
     analyze_system as inspect_system,
 )
 from services.monitoring_service import collect_snapshot
+from services.notification_service import (
+    configured_channels,
+    list_notifications,
+    notification_center_status,
+)
 from services.worker_service import get_worker_status
 
 blueprint = Blueprint("control_center", __name__)
@@ -112,6 +117,14 @@ def worker_status():
     )
 
 
+def notifications_status():
+    return notification_center_status(
+        database,
+        configured_channels(current_app.config),
+        minimum_severity=current_app.config["NOTIFICATION_MIN_SEVERITY"],
+    )
+
+
 def assistant_answer(question, metrics, containers, backup, findings):
     q = question.lower().strip()
     stopped = [c["name"] for c in containers if c["status"] != "running"]
@@ -171,6 +184,7 @@ def index():
         findings=findings,
         events=event_history(10),
         worker=worker_status(),
+        notifications=notifications_status(),
         admin_enabled=admin_allowed(),
         csrf_token=csrf_token(),
         audit=audit_history(10),
@@ -191,6 +205,7 @@ def api_status():
             "backup": backup,
             "findings": findings,
             "worker": worker_status(),
+            "notifications": notifications_status(),
             "admin_enabled": admin_allowed(),
             "updated": datetime.now().isoformat(),
         }
@@ -223,6 +238,17 @@ def api_events():
 @blueprint.get("/api/worker")
 def api_worker():
     return jsonify({"worker": worker_status()})
+
+
+@blueprint.get("/api/notifications")
+def api_notifications():
+    limit = min(max(request.args.get("limit", default=50, type=int), 1), 200)
+    return jsonify(
+        {
+            "notification_center": notifications_status(),
+            "notifications": list_notifications(limit, database),
+        }
+    )
 
 
 @blueprint.post("/api/assistant")

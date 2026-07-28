@@ -38,12 +38,29 @@ SCHEMA_STATEMENTS = (
         last_error TEXT,
         consecutive_failures INTEGER NOT NULL DEFAULT 0
     )""",
+    """CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        event_key TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT,
+        sent_at TEXT,
+        last_error TEXT
+    )""",
 )
 
 INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_audit_recorded_at ON audit_log(recorded_at)",
     "CREATE INDEX IF NOT EXISTS idx_events_key_id ON events(event_key, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_events_recorded_at ON events(recorded_at)",
+    "CREATE INDEX IF NOT EXISTS idx_notifications_dispatch ON notifications(status, next_attempt_at, id)",
+    "CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_notifications_event_channel ON notifications(event_key, channel, id DESC)",
 )
 
 
