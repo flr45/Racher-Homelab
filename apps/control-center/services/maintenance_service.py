@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 
 
 DEFAULT_MESSAGE = "Racher OS er midlertidigt i vedligeholdelsestilstand."
