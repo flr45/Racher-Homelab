@@ -6,8 +6,10 @@ from file_browser_extension import init_file_browser
 from github_extension import init_github_center
 from maintenance_extension import init_maintenance
 from observability_extension import init_observability
+from rbac_extension import init_rbac
 
 app = create_app()
+init_rbac(app)
 init_maintenance(app)
 init_github_center(app)
 init_configuration_center(app)
