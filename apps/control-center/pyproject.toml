@@ -12,3 +12,5 @@ ignore = ["E501", "UP017"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/test_deployments.py" = ["E402"]
+"services/docker_center_service.py" = ["I001"]
+"tests/test_docker_center_extended.py" = ["I001"]
