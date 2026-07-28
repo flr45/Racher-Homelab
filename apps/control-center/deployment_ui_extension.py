@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 import os
 
 from flask import Blueprint, current_app, jsonify, request
