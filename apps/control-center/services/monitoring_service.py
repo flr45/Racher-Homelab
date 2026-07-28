@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from flask import current_app
 
 from services.backup_service import newest_backup
+from services.deployment_service import sync_deployment_inventory
 from services.docker_service import docker_status
 from services.event_service import append_event
 from services.metrics_service import record_metrics, system_metrics
@@ -118,11 +119,62 @@ def analyze_system(metrics, containers, backup, database_factory, docker_error=N
     return findings
 
 
+def record_deployment_changes(changes, database_factory):
+    details = {
+        "image_changed": (
+            "info",
+            "Nyt container-image registreret",
+            "kører nu image {image_reference}",
+        ),
+        "image_reference_changed": (
+            "info",
+            "Container-image reference ændret",
+            "bruger nu {image_reference}",
+        ),
+        "container_recreated": (
+            "info",
+            "Container genoprettet",
+            "er genoprettet med container-id {container_id}",
+        ),
+        "missing": (
+            "warning",
+            "Deployment mangler",
+            "findes ikke længere i Docker inventory",
+        ),
+        "restored": (
+            "info",
+            "Deployment tilbage",
+            "er igen fundet i Docker inventory",
+        ),
+    }
+    for change in changes:
+        change_type = change["change_type"]
+        if change_type == "discovered" or change_type not in details:
+            continue
+        severity, title, message_template = details[change_type]
+        marker = (
+            change.get("image_id")
+            or change.get("container_id")
+            or change.get("image_reference")
+            or change_type
+        )
+        append_event(
+            f"deployment:{change['container_name']}:{change_type}:{marker}",
+            severity,
+            title,
+            f"{change['container_name']} {message_template.format(**change)}.",
+            database_factory,
+        )
+
+
 def collect_snapshot(database_factory, *, include_usage=True):
     containers, docker_error = docker_status(include_usage=include_usage)
     metrics = system_metrics()
     backup = newest_backup()
     record_metrics(metrics, database_factory)
+    if not docker_error:
+        changes = sync_deployment_inventory(containers, database_factory)
+        record_deployment_changes(changes, database_factory)
     findings = analyze_system(
         metrics,
         containers,

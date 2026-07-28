@@ -52,6 +52,37 @@ SCHEMA_STATEMENTS = (
         sent_at TEXT,
         last_error TEXT
     )""",
+    """CREATE TABLE IF NOT EXISTS deployments (
+        container_name TEXT PRIMARY KEY,
+        compose_project TEXT,
+        compose_service TEXT,
+        image_reference TEXT,
+        image_id TEXT,
+        image_digest TEXT,
+        container_id TEXT,
+        container_created_at TEXT,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        last_change_at TEXT NOT NULL,
+        status TEXT,
+        health TEXT,
+        present INTEGER NOT NULL DEFAULT 1,
+        missing_since TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS deployment_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recorded_at TEXT NOT NULL,
+        container_name TEXT NOT NULL,
+        compose_project TEXT,
+        compose_service TEXT,
+        change_type TEXT NOT NULL,
+        previous_image_id TEXT,
+        image_id TEXT,
+        previous_container_id TEXT,
+        container_id TEXT,
+        image_reference TEXT,
+        status TEXT
+    )""",
 )
 
 INDEX_STATEMENTS = (
@@ -61,6 +92,9 @@ INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_notifications_dispatch ON notifications(status, next_attempt_at, id)",
     "CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_notifications_event_channel ON notifications(event_key, channel, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_deployments_present_project ON deployments(present, compose_project, compose_service)",
+    "CREATE INDEX IF NOT EXISTS idx_deployment_history_recorded_at ON deployment_history(recorded_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_deployment_history_container ON deployment_history(container_name, id DESC)",
 )
 
 

@@ -37,12 +37,29 @@ def container_usage(container):
         return {"cpu": None, "memory_mb": None}
 
 
+def _container_image_metadata(container):
+    image = container.image
+    tags = getattr(image, "tags", None) or []
+    image_id = getattr(image, "id", None) or getattr(image, "short_id", None)
+    image_attrs = getattr(image, "attrs", None) or {}
+    repo_digests = image_attrs.get("RepoDigests") or []
+    return {
+        "image": tags[0] if tags else getattr(image, "short_id", image_id),
+        "image_id": image_id,
+        "image_digest": repo_digests[0] if repo_digests else None,
+    }
+
+
 def docker_status(include_usage=True):
     try:
         containers = []
         protected_containers = current_app.config["PROTECTED_CONTAINERS"]
         for container in docker_client().containers.list(all=True):
-            state = container.attrs.get("State", {})
+            attrs = container.attrs or {}
+            state = attrs.get("State", {})
+            labels = getattr(container, "labels", None) or attrs.get("Config", {}).get(
+                "Labels", {}
+            )
             usage = (
                 container_usage(container)
                 if include_usage and container.status == "running"
@@ -51,13 +68,15 @@ def docker_status(include_usage=True):
             containers.append(
                 {
                     "name": container.name,
+                    "container_id": getattr(container, "id", None),
                     "status": container.status,
                     "healthy": state.get("Health", {}).get("Status"),
-                    "image": container.image.tags[0]
-                    if container.image.tags
-                    else container.image.short_id,
                     "started_at": state.get("StartedAt"),
+                    "created_at": attrs.get("Created"),
+                    "compose_project": labels.get("com.docker.compose.project"),
+                    "compose_service": labels.get("com.docker.compose.service"),
                     "protected": container.name in protected_containers,
+                    **_container_image_metadata(container),
                     **usage,
                 }
             )
