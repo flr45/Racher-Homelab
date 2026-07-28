@@ -3,6 +3,7 @@ from cloudflare_extension import init_cloudflare_center
 from configuration_extension import init_configuration_center
 from database_browser_extension import init_database_browser
 from deployment_ui_extension import init_deployment_ui
+from docker_center_extension import init_docker_center
 from file_browser_extension import init_file_browser
 from github_extension import init_github_center
 from logging_extension import init_structured_logging
@@ -29,3 +30,4 @@ init_cloudflare_center(app)
 init_plugin_center(app)
 init_deployment_ui(app)
 init_restore_ui(app)
+init_docker_center(app)
