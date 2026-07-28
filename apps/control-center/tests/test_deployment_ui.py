@@ -1,9 +1,8 @@
 from pathlib import Path
 
-from flask import Flask
-
 import deployment_ui_extension
 from deployment_ui_extension import init_deployment_ui
+from flask import Flask
 from rbac_extension import init_rbac
 
 
