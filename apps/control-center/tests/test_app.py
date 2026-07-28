@@ -1,4 +1,4 @@
-import importlib.util
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 
@@ -11,10 +11,10 @@ def load_app(monkeypatch, tmp_path):
     monkeypatch.setenv("RACHER_OS_SECRET_KEY", "test-secret-key")
     monkeypatch.setenv("ADMIN_ACTIONS_ENABLED", "false")
 
-    spec = importlib.util.spec_from_file_location("racher_os_app", APP_PATH)
+    spec = spec_from_file_location("racher_os_app", APP_PATH)
     assert spec is not None and spec.loader is not None
 
-    module = importlib.util.module_from_spec(spec)
+    module = module_from_spec(spec)
     spec.loader.exec_module(module)
     module.app.config.update(TESTING=True)
     return module
