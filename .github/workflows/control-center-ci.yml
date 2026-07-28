@@ -37,16 +37,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements-dev.txt
 
-      - name: Capture lint autofix diff
-        run: ruff check --fix --diff . > ruff-fix-diff.txt 2>&1 || true
-
-      - name: Upload lint autofix diff
-        uses: actions/upload-artifact@v4
-        with:
-          name: maintenance-ruff-fix-diff
-          path: apps/control-center/ruff-fix-diff.txt
-
-      - name: Fail on lint findings
+      - name: Lint
         run: ruff check .
 
       - name: Test
