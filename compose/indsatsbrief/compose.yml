@@ -5,6 +5,8 @@ services:
     image: ${INDSATSBRIEF_IMAGE:-ghcr.io/flr45/indsatsbrief-api:latest}
     container_name: indsatsbrief
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     environment:
       TZ: ${TZ:-Europe/Copenhagen}
       FLASK_SECRET_KEY: ${INDSATSBRIEF_FLASK_SECRET_KEY}
