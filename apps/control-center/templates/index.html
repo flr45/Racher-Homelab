@@ -8,16 +8,17 @@
     :root{color-scheme:dark;--bg:#071019;--panel:#0f1b27;--panel2:#142434;--line:rgba(255,255,255,.08);--text:#f4f7fb;--muted:#8fa2b6;--accent:#62a8ff;--green:#31d17c;--yellow:#ffc857;--red:#ff6b7d}
     *{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 80% 0,#123558 0,transparent 32%),var(--bg);color:var(--text)}button{font:inherit}
     .shell{min-height:100vh;display:grid;grid-template-columns:250px 1fr}.sidebar{position:sticky;top:0;height:100vh;padding:24px 18px;border-right:1px solid var(--line);background:rgba(7,16,25,.86);backdrop-filter:blur(18px)}
-    .brand{display:flex;align-items:center;gap:12px;padding:4px 8px 24px}.logo{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,var(--accent),#7b63ff);font-weight:900}.brand strong{display:block;font-size:1.05rem}.brand small{color:var(--muted)}
-    nav{display:grid;gap:6px}.nav-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:13px;color:var(--muted);text-decoration:none;font-weight:700}.nav-item.active,.nav-item:hover{color:var(--text);background:rgba(98,168,255,.12)}.sidebar-bottom{position:absolute;left:18px;right:18px;bottom:22px;padding:14px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.035)}.sidebar-bottom small{display:block;color:var(--muted);margin-top:5px}
+    .brand{display:flex;align-items:center;gap:12px;padding:4px 8px 24px}.logo{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,var(--accent),#7b63ff);font-weight:900}.brand strong{display:block}.brand small,.muted{color:var(--muted)}
+    nav{display:grid;gap:6px}.nav-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:13px;color:var(--muted);text-decoration:none;font-weight:700}.nav-item.active,.nav-item:hover{color:var(--text);background:rgba(98,168,255,.12)}.sidebar-bottom{position:absolute;left:18px;right:18px;bottom:22px;padding:14px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.035)}
     .main{padding:30px;min-width:0}.topbar{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:24px}.eyebrow{color:var(--accent);font-size:.73rem;letter-spacing:.16em;text-transform:uppercase;font-weight:900}.topbar h1{font-size:clamp(2rem,4vw,3.3rem);letter-spacing:-.05em;margin:5px 0 0}.status-pill{display:flex;align-items:center;gap:9px;padding:10px 14px;border:1px solid var(--line);border-radius:999px;background:rgba(49,209,124,.08);font-weight:800}
     .dot{width:9px;height:9px;border-radius:50%;background:var(--red);box-shadow:0 0 16px currentColor}.dot.running{background:var(--green)}.dot.restarting,.dot.created{background:var(--yellow)}.dot.not-found,.dot.exited,.dot.dead{background:var(--red)}
     .grid{display:grid;gap:16px}.metrics{grid-template-columns:repeat(5,minmax(0,1fr));margin-bottom:16px}.card{background:linear-gradient(145deg,rgba(20,36,52,.96),rgba(12,24,36,.96));border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 50px rgba(0,0,0,.2)}.metric span,.label{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.1em;font-weight:800}.metric strong{display:block;font-size:1.8rem;margin-top:8px}.bar{height:7px;background:rgba(255,255,255,.08);border-radius:999px;margin-top:14px;overflow:hidden}.bar i{display:block;height:100%;width:var(--value);background:linear-gradient(90deg,var(--accent),var(--green));border-radius:inherit}
-    .content{grid-template-columns:1.35fr .8fr;align-items:start}.section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.section-title h2{margin:0;font-size:1.05rem}.section-title small{color:var(--muted)}.services,.domains{display:grid;gap:10px}.service,.domain{display:grid;grid-template-columns:12px minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px 14px;background:rgba(255,255,255,.035);border-radius:14px}.service-name,.domain-name{font-weight:800}.service small,.domain small{display:block;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.state{color:var(--muted);font-size:.76rem;text-transform:uppercase;font-weight:900}.ghost{border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer}.ghost:hover{background:rgba(98,168,255,.12)}
-    .apps{display:grid;grid-template-columns:1fr 1fr;gap:10px}.app-link{display:block;color:var(--text);text-decoration:none;background:rgba(255,255,255,.04);border:1px solid transparent;padding:15px;border-radius:15px;font-weight:800;transition:.15s ease}.app-link:hover{transform:translateY(-2px);border-color:rgba(98,168,255,.28);background:rgba(98,168,255,.10)}.app-link span{display:block;font-size:1.35rem;margin-bottom:8px}.stack{display:grid;gap:16px}.backup{display:flex;justify-content:space-between;align-items:center;gap:16px}.backup strong{display:block;margin-top:6px}.ok{color:var(--green);font-weight:800}.warning{color:var(--yellow);font-weight:800}.error{color:var(--red);padding:12px;border-radius:12px;background:rgba(255,107,125,.1);margin-bottom:12px}.footer{color:var(--muted);font-size:.8rem;text-align:center;margin-top:18px}
-    dialog{width:min(920px,calc(100% - 24px));border:1px solid var(--line);border-radius:20px;background:#09131e;color:var(--text);padding:0;box-shadow:0 30px 100px rgba(0,0,0,.55)}dialog::backdrop{background:rgba(0,0,0,.7);backdrop-filter:blur(5px)}.modal-head{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--line)}.modal-head h2{margin:0;font-size:1rem}.logs{margin:0;padding:18px;max-height:65vh;overflow:auto;white-space:pre-wrap;color:#cfe0f2;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
-    @media(max-width:1050px){.shell{grid-template-columns:82px 1fr}.brand div:last-child,.nav-item span:last-child,.sidebar-bottom{display:none}.brand{justify-content:center}.nav-item{justify-content:center}.metrics{grid-template-columns:repeat(2,1fr)}}
-    @media(max-width:760px){.shell{display:block}.sidebar{position:static;height:auto;display:flex;align-items:center;overflow:auto;padding:12px;border-right:0;border-bottom:1px solid var(--line)}.brand{padding:0 10px 0 0}.logo{width:38px;height:38px}.sidebar nav{display:flex}.nav-item{padding:10px}.main{padding:20px 12px}.topbar{align-items:flex-start;flex-direction:column}.content{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.card{border-radius:18px;padding:16px}}
+    .content{grid-template-columns:1.35fr .8fr;align-items:start}.section-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}.section-title h2{margin:0;font-size:1.05rem}.section-title small{color:var(--muted)}.stack,.services,.domains{display:grid;gap:10px}.service,.domain{display:grid;grid-template-columns:12px minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px 14px;background:rgba(255,255,255,.035);border-radius:14px}.service-name,.domain-name{font-weight:800}.service small,.domain small{display:block;color:var(--muted);margin-top:3px}.usage{display:flex;gap:10px;color:var(--muted);font-size:.75rem}.state{color:var(--muted);font-size:.76rem;text-transform:uppercase;font-weight:900}.ghost,.range button{border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer}.ghost:hover,.range button:hover,.range button.active{background:rgba(98,168,255,.14);border-color:rgba(98,168,255,.35)}
+    .apps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.app-card{display:grid;gap:10px;padding:15px;border-radius:15px;background:rgba(255,255,255,.04);border:1px solid transparent;color:var(--text);text-decoration:none}.app-card:hover{border-color:rgba(98,168,255,.28);background:rgba(98,168,255,.09)}.app-top{display:flex;justify-content:space-between;align-items:center}.app-icon{font-size:1.45rem}.app-name{font-weight:850}.app-meta{display:flex;justify-content:space-between;color:var(--muted);font-size:.78rem}.backup{display:flex;justify-content:space-between;align-items:center}.ok{color:var(--green);font-weight:800}.warning{color:var(--yellow);font-weight:800}.error{color:var(--red);padding:12px;border-radius:12px;background:rgba(255,107,125,.1);margin-bottom:12px}
+    .chart-card{margin-bottom:16px}.range{display:flex;gap:6px;flex-wrap:wrap}.charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.chart{padding:14px;background:rgba(255,255,255,.03);border-radius:15px}.chart-head{display:flex;justify-content:space-between;margin-bottom:8px}.chart svg{width:100%;height:120px;overflow:visible}.chart polyline{fill:none;stroke:var(--accent);stroke-width:2.5;vector-effect:non-scaling-stroke}.chart .gridline{stroke:rgba(255,255,255,.07);stroke-width:1}.empty-chart{display:grid;place-items:center;height:120px;color:var(--muted)}
+    .footer{color:var(--muted);font-size:.8rem;text-align:center;margin-top:18px}dialog{width:min(920px,calc(100% - 24px));border:1px solid var(--line);border-radius:20px;background:#09131e;color:var(--text);padding:0}dialog::backdrop{background:rgba(0,0,0,.7);backdrop-filter:blur(5px)}.modal-head{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--line)}.logs{margin:0;padding:18px;max-height:65vh;overflow:auto;white-space:pre-wrap;color:#cfe0f2;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
+    @media(max-width:1050px){.shell{grid-template-columns:82px 1fr}.brand div:last-child,.nav-item span:last-child,.sidebar-bottom{display:none}.brand,.nav-item{justify-content:center}.metrics{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:760px){.shell{display:block}.sidebar{position:static;height:auto;display:flex;align-items:center;overflow:auto;padding:12px;border-right:0;border-bottom:1px solid var(--line)}.brand{padding:0 10px 0 0}.sidebar nav{display:flex}.main{padding:20px 12px}.topbar{align-items:flex-start;flex-direction:column}.content,.charts{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.card{border-radius:18px;padding:16px}.apps{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -26,83 +27,75 @@
     <div class="brand"><div class="logo">R</div><div><strong>Racher OS</strong><small>HomeLab Core</small></div></div>
     <nav>
       <a class="nav-item active" href="#"><span>⌂</span><span>Dashboard</span></a>
+      <a class="nav-item" href="#history"><span>⌁</span><span>Statistik</span></a>
       <a class="nav-item" href="#apps"><span>▦</span><span>Apps</span></a>
       <a class="nav-item" href="#docker"><span>◈</span><span>Docker</span></a>
       <a class="nav-item" href="#domains"><span>◎</span><span>Domæner</span></a>
       <a class="nav-item" href="#backup"><span>◫</span><span>Backup</span></a>
     </nav>
-    <div class="sidebar-bottom"><strong>Privat adgang</strong><small>Cloudflare Access aktiveres ved deployment.</small></div>
+    <div class="sidebar-bottom"><strong>Sikker drift</strong><small>Administrative handlinger kommer først efter Cloudflare Access.</small></div>
   </aside>
 
   <main class="main">
     <header class="topbar">
-      <div><div class="eyebrow">Raspberry Pi 5 · Sprint 2</div><h1>Goddag, Frederik</h1></div>
-      <div class="status-pill"><i class="dot running"></i> Skrivebeskyttet</div>
+      <div><div class="eyebrow">Raspberry Pi 5 · Sprint 3</div><h1>Infrastructure Control</h1></div>
+      <div class="status-pill"><i class="dot running"></i> Live overvågning</div>
     </header>
 
     <section class="grid metrics" id="system">
       {% for title, value, suffix in [('CPU', metrics.cpu, '%'), ('RAM', metrics.ram, '%'), ('SSD', metrics.disk, '%')] %}
-      <article class="card metric"><span>{{ title }}</span><strong>{{ value }}{{ suffix }}</strong><div class="bar" style="--value:{{ value }}%"><i></i></div></article>
+      <article class="card metric"><span>{{ title }}</span><strong data-metric="{{ title|lower }}">{{ value }}{{ suffix }}</strong><div class="bar" style="--value:{{ value }}%"><i></i></div></article>
       {% endfor %}
-      <article class="card metric"><span>Temperatur</span><strong>{{ metrics.temperature if metrics.temperature is not none else '–' }}{% if metrics.temperature is not none %}°C{% endif %}</strong></article>
-      <article class="card metric"><span>Oppetid</span><strong>{{ metrics.uptime }}</strong></article>
+      <article class="card metric"><span>Temperatur</span><strong data-metric="temperature">{{ metrics.temperature if metrics.temperature is not none else '–' }}{% if metrics.temperature is not none %}°C{% endif %}</strong></article>
+      <article class="card metric"><span>Oppetid</span><strong data-metric="uptime">{{ metrics.uptime }}</strong></article>
     </section>
+
+    <article class="card chart-card" id="history">
+      <div class="section-title"><div><h2>Historiske målinger</h2><small>Gemmes lokalt i op til 30 dage</small></div><div class="range"><button data-hours="1">1t</button><button class="active" data-hours="24">24t</button><button data-hours="168">7d</button><button data-hours="720">30d</button></div></div>
+      <div class="charts">
+        <div class="chart" data-series="cpu"><div class="chart-head"><strong>CPU</strong><span class="muted">%</span></div><div class="chart-body"></div></div>
+        <div class="chart" data-series="ram"><div class="chart-head"><strong>RAM</strong><span class="muted">%</span></div><div class="chart-body"></div></div>
+        <div class="chart" data-series="temperature"><div class="chart-head"><strong>Temperatur</strong><span class="muted">°C</span></div><div class="chart-body"></div></div>
+        <div class="chart" data-series="disk"><div class="chart-head"><strong>SSD</strong><span class="muted">%</span></div><div class="chart-body"></div></div>
+      </div>
+    </article>
 
     <section class="grid content">
       <div class="stack">
         <article class="card" id="docker">
-          <div class="section-title"><h2>Docker-tjenester</h2><small>Læsestatus og seneste logs</small></div>
+          <div class="section-title"><h2>Docker-tjenester</h2><small>Live ressourceforbrug</small></div>
           {% if docker_error %}<div class="error">Docker kunne ikke læses: {{ docker_error }}</div>{% endif %}
           <div class="services">
             {% for container in containers %}
-            <div class="service"><i class="dot {{ container.status }}"></i><div><div class="service-name">{{ container.name }}</div><small>{{ container.image }}{% if container.healthy %} · health: {{ container.healthy }}{% endif %}</small></div><button class="ghost" data-log-container="{{ container.name }}">Logs</button></div>
+            <div class="service"><i class="dot {{ container.status }}"></i><div><div class="service-name">{{ container.name }}</div><small>{{ container.image }}{% if container.healthy %} · health: {{ container.healthy }}{% endif %}</small><div class="usage"><span>CPU {{ container.cpu if container.cpu is not none else '–' }}%</span><span>RAM {{ container.memory_mb if container.memory_mb is not none else '–' }} MB</span></div></div><button class="ghost" data-log-container="{{ container.name }}">Logs</button></div>
             {% else %}<div class="warning">Ingen containere fundet.</div>{% endfor %}
           </div>
         </article>
 
-        <article class="card" id="domains">
-          <div class="section-title"><h2>Domæner</h2><small>Forventet routing</small></div>
-          <div class="domains">
-            {% for domain in domains %}
-            <div class="domain"><i class="dot {{ domain.status }}"></i><div><div class="domain-name">{{ domain.name }}</div><small>{{ domain.host }}</small></div><div class="state">{{ domain.status }}</div></div>
-            {% endfor %}
-          </div>
-        </article>
+        <article class="card" id="domains"><div class="section-title"><h2>Domæner</h2><small>Routing og servicestatus</small></div><div class="domains">{% for domain in domains %}<div class="domain"><i class="dot {{ domain.status }}"></i><div><div class="domain-name">{{ domain.name }}</div><small>{{ domain.host }}</small></div><div class="state">{{ domain.status }}</div></div>{% endfor %}</div></article>
       </div>
 
       <aside class="stack">
-        <article class="card" id="apps"><div class="section-title"><h2>Apps</h2><small>Hurtig adgang</small></div><div class="apps">{% for link in links %}<a class="app-link" href="{{ link.url }}" {% if link.url != '#' %}target="_blank" rel="noreferrer"{% endif %}><span>{{ link.icon }}</span>{{ link.name }}</a>{% endfor %}</div></article>
+        <article class="card" id="apps"><div class="section-title"><h2>App Center</h2><small>Status og version</small></div><div class="apps">{% for app in apps %}<a class="app-card" href="{{ app.url }}" {% if app.url != '#' %}target="_blank" rel="noreferrer"{% endif %}><div class="app-top"><span class="app-icon">{{ app.icon }}</span><i class="dot {{ app.status }}"></i></div><div class="app-name">{{ app.name }}</div><div class="app-meta"><span>v{{ app.version }}</span><span>{{ app.status }}</span></div></a>{% endfor %}</div></article>
         <article class="card backup" id="backup"><div><div class="label">Seneste backup</div>{% if backup %}<strong>{{ backup.time }}</strong><small class="ok">Fundet: {{ backup.name }}</small>{% else %}<strong>Ingen fundet</strong><small class="warning">Aktiveres på Raspberry Pi</small>{% endif %}</div><div style="font-size:2rem">💾</div></article>
+        <article class="card"><div class="label">Netværk siden opstart</div><p><strong>{{ metrics.network_recv_mb }} MB</strong> modtaget · <strong>{{ metrics.network_sent_mb }} MB</strong> sendt</p></article>
       </aside>
     </section>
-    <div class="footer">Racher OS Sprint 2 · kun læseadgang · opdateret {{ updated }}</div>
+    <div class="footer">Racher OS Sprint 3 · overvågning og indsigt · opdateret {{ updated }}</div>
   </main>
 </div>
 
-<dialog id="log-dialog">
-  <div class="modal-head"><h2 id="log-title">Containerlogs</h2><button class="ghost" id="close-logs">Luk</button></div>
-  <pre class="logs" id="log-output">Henter logs…</pre>
-</dialog>
+<dialog id="log-dialog"><div class="modal-head"><h2 id="log-title">Containerlogs</h2><button class="ghost" id="close-logs">Luk</button></div><pre class="logs" id="log-output">Henter logs…</pre></dialog>
 <script>
-  const dialog = document.getElementById('log-dialog');
-  const output = document.getElementById('log-output');
-  const title = document.getElementById('log-title');
-  document.querySelectorAll('[data-log-container]').forEach(button => {
-    button.addEventListener('click', async () => {
-      const name = button.dataset.logContainer;
-      title.textContent = `Logs · ${name}`;
-      output.textContent = 'Henter logs…';
-      dialog.showModal();
-      try {
-        const response = await fetch(`/api/containers/${encodeURIComponent(name)}/logs?tail=100`);
-        const data = await response.json();
-        output.textContent = response.ok ? (data.logs || 'Ingen logs fundet.') : (data.error || 'Logs kunne ikke hentes.');
-      } catch (error) {
-        output.textContent = 'Forbindelsen til Racher OS fejlede.';
-      }
-    });
-  });
-  document.getElementById('close-logs').addEventListener('click', () => dialog.close());
+  const dialog=document.getElementById('log-dialog'),output=document.getElementById('log-output'),title=document.getElementById('log-title');
+  document.querySelectorAll('[data-log-container]').forEach(button=>button.addEventListener('click',async()=>{const name=button.dataset.logContainer;title.textContent=`Logs · ${name}`;output.textContent='Henter logs…';dialog.showModal();try{const response=await fetch(`/api/containers/${encodeURIComponent(name)}/logs?tail=150`);const data=await response.json();output.textContent=response.ok?(data.logs||'Ingen logs fundet.'):(data.error||'Logs kunne ikke hentes.')}catch{output.textContent='Forbindelsen til Racher OS fejlede.'}}));
+  document.getElementById('close-logs').addEventListener('click',()=>dialog.close());
+
+  function drawChart(element,points,key){const values=points.map(p=>p[key]).filter(v=>v!==null&&v!==undefined);const body=element.querySelector('.chart-body');if(values.length<2){body.innerHTML='<div class="empty-chart">Indsamler data…</div>';return}const min=Math.min(...values),max=Math.max(...values),span=Math.max(max-min,1);const coords=values.map((v,i)=>`${(i/(values.length-1))*100},${100-((v-min)/span)*90-5}`).join(' ');body.innerHTML=`<svg viewBox="0 0 100 100" preserveAspectRatio="none"><line class="gridline" x1="0" y1="25" x2="100" y2="25"/><line class="gridline" x1="0" y1="50" x2="100" y2="50"/><line class="gridline" x1="0" y1="75" x2="100" y2="75"/><polyline points="${coords}"/></svg>`}
+  async function loadHistory(hours=24){try{const response=await fetch(`/api/history?hours=${hours}`);const data=await response.json();document.querySelectorAll('[data-series]').forEach(el=>drawChart(el,data.points,el.dataset.series))}catch{document.querySelectorAll('.chart-body').forEach(el=>el.innerHTML='<div class="empty-chart">Kunne ikke hente data</div>')}}
+  document.querySelectorAll('[data-hours]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-hours]').forEach(b=>b.classList.remove('active'));button.classList.add('active');loadHistory(button.dataset.hours)}));
+  async function refreshStatus(){try{const response=await fetch('/api/status');const data=await response.json();for(const key of ['cpu','ram','disk']){const el=document.querySelector(`[data-metric="${key}"]`);if(el)el.textContent=`${data.metrics[key]}%`}const temp=document.querySelector('[data-metric="temperature"]');if(temp)temp.textContent=data.metrics.temperature===null?'–':`${data.metrics.temperature}°C`;const uptime=document.querySelector('[data-metric="uptime"]');if(uptime)uptime.textContent=data.metrics.uptime}catch{}}
+  loadHistory(24);setInterval(()=>{refreshStatus();const active=document.querySelector('[data-hours].active');loadHistory(active?active.dataset.hours:24)},30000);
 </script>
 </body>
 </html>
