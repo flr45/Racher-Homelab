@@ -1,19 +1,26 @@
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
-import docker
-import psutil
 from flask import Blueprint, Flask, current_app, jsonify, render_template, request, session
 
 from config import Config
+from services.backup_service import backups, newest_backup
+from services.docker_service import (
+    ContainerNotFoundError,
+    app_status,
+    container_logs,
+    docker_status,
+    domain_status,
+    perform_container_action,
+)
+from services.metrics_service import (
+    metric_history as load_metric_history,
+    record_metrics as store_metrics,
+    system_metrics,
+)
 
 blueprint = Blueprint("control_center", __name__)
-
-
-def docker_client():
-    return docker.from_env()
 
 
 def current_user():
@@ -31,154 +38,6 @@ def csrf_token():
     if "csrf_token" not in session:
         session["csrf_token"] = secrets.token_urlsafe(32)
     return session["csrf_token"]
-
-
-def container_usage(container):
-    try:
-        stats = container.stats(stream=False)
-        cpu_stats = stats.get("cpu_stats", {})
-        pre_cpu = stats.get("precpu_stats", {})
-        cpu_delta = cpu_stats.get("cpu_usage", {}).get("total_usage", 0) - pre_cpu.get(
-            "cpu_usage", {}
-        ).get("total_usage", 0)
-        system_delta = cpu_stats.get("system_cpu_usage", 0) - pre_cpu.get(
-            "system_cpu_usage", 0
-        )
-        cpu_count = len(cpu_stats.get("cpu_usage", {}).get("percpu_usage", [])) or 1
-        cpu_percent = (
-            cpu_delta / system_delta * cpu_count * 100
-            if system_delta > 0 and cpu_delta >= 0
-            else 0
-        )
-        memory = stats.get("memory_stats", {}).get("usage", 0)
-        cache = stats.get("memory_stats", {}).get("stats", {}).get("cache", 0)
-        return {
-            "cpu": round(cpu_percent, 1),
-            "memory_mb": round(max(memory - cache, 0) / 1024 / 1024, 1),
-        }
-    except Exception:
-        return {"cpu": None, "memory_mb": None}
-
-
-def docker_status(include_usage=True):
-    try:
-        containers = []
-        protected_containers = current_app.config["PROTECTED_CONTAINERS"]
-        for container in docker_client().containers.list(all=True):
-            state = container.attrs.get("State", {})
-            usage = (
-                container_usage(container)
-                if include_usage and container.status == "running"
-                else {"cpu": None, "memory_mb": None}
-            )
-            containers.append(
-                {
-                    "name": container.name,
-                    "status": container.status,
-                    "healthy": state.get("Health", {}).get("Status"),
-                    "image": container.image.tags[0]
-                    if container.image.tags
-                    else container.image.short_id,
-                    "started_at": state.get("StartedAt"),
-                    "protected": container.name in protected_containers,
-                    **usage,
-                }
-            )
-        containers.sort(key=lambda item: item["name"])
-        return containers, None
-    except Exception as exc:
-        return [], str(exc)
-
-
-def app_status(containers):
-    states = {container["name"]: container for container in containers}
-    return [
-        {
-            **item,
-            "container": states.get(item["service"]),
-            "status": states.get(item["service"], {}).get("status", "not-found"),
-        }
-        for item in current_app.config["APP_LINKS"]
-    ]
-
-
-def domain_status(containers):
-    states = {container["name"]: container["status"] for container in containers}
-    return [
-        {
-            **domain,
-            "status": states.get(domain["service"], "not-found"),
-            "url": f"https://{domain['host']}",
-        }
-        for domain in current_app.config["DOMAIN_LINKS"]
-    ]
-
-
-def directory_size(path):
-    try:
-        return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
-    except Exception:
-        return 0
-
-
-def backups(limit=20):
-    try:
-        backup_root = current_app.config["BACKUP_ROOT"]
-        candidates = [path for path in backup_root.iterdir() if path.is_dir()]
-        candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
-        return [
-            {
-                "name": path.name,
-                "time": datetime.fromtimestamp(path.stat().st_mtime).strftime(
-                    "%d-%m-%Y %H:%M"
-                ),
-                "recorded_at": datetime.fromtimestamp(
-                    path.stat().st_mtime, timezone.utc
-                ).isoformat(),
-                "size_mb": round(directory_size(path) / 1024 / 1024, 1),
-            }
-            for path in candidates[:limit]
-        ]
-    except Exception:
-        return []
-
-
-def newest_backup():
-    items = backups(limit=1)
-    return items[0] if items else None
-
-
-def system_metrics():
-    disk = psutil.disk_usage("/")
-    network = psutil.net_io_counters()
-    return {
-        "cpu": round(psutil.cpu_percent(interval=0.2), 1),
-        "ram": round(psutil.virtual_memory().percent, 1),
-        "disk": round(disk.percent, 1),
-        "temperature": read_temperature(),
-        "uptime": format_uptime(),
-        "network_sent_mb": round(network.bytes_sent / 1024 / 1024, 1),
-        "network_recv_mb": round(network.bytes_recv / 1024 / 1024, 1),
-    }
-
-
-def read_temperature():
-    for path in [
-        Path("/host-sys/class/thermal/thermal_zone0/temp"),
-        Path("/sys/class/thermal/thermal_zone0/temp"),
-    ]:
-        try:
-            return round(float(path.read_text().strip()) / 1000, 1)
-        except Exception:
-            continue
-    return None
-
-
-def format_uptime():
-    seconds = int(datetime.now().timestamp() - psutil.boot_time())
-    days, remainder = divmod(seconds, 86400)
-    hours, minutes = divmod(remainder, 3600)
-    return f"{days}d {hours}t {minutes // 60}m"
 
 
 def database():
@@ -199,41 +58,11 @@ def database():
 
 
 def record_metrics(metrics):
-    now = datetime.now(timezone.utc)
-    with database() as connection:
-        latest = connection.execute(
-            "SELECT recorded_at FROM metrics ORDER BY recorded_at DESC LIMIT 1"
-        ).fetchone()
-        if latest and now - datetime.fromisoformat(latest["recorded_at"]) < timedelta(
-            seconds=25
-        ):
-            return
-        connection.execute(
-            "INSERT OR REPLACE INTO metrics VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                now.isoformat(),
-                metrics["cpu"],
-                metrics["ram"],
-                metrics["disk"],
-                metrics["temperature"],
-                metrics["network_sent_mb"],
-                metrics["network_recv_mb"],
-            ),
-        )
-        connection.execute(
-            "DELETE FROM metrics WHERE recorded_at < ?",
-            ((now - timedelta(days=30)).isoformat(),),
-        )
+    store_metrics(metrics, database)
 
 
 def metric_history(hours=24):
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    with database() as connection:
-        rows = connection.execute(
-            "SELECT * FROM metrics WHERE recorded_at >= ? ORDER BY recorded_at",
-            (since.isoformat(),),
-        ).fetchall()
-    return [dict(row) for row in rows]
+    return load_metric_history(hours, database)
 
 
 def write_audit(action, target, success, message=""):
@@ -502,12 +331,9 @@ def api_assistant():
 def api_container_logs(container_name):
     try:
         tail = min(max(request.args.get("tail", default=100, type=int), 1), 500)
-        container = docker_client().containers.get(container_name)
-        logs = container.logs(tail=tail, timestamps=True).decode(
-            "utf-8", errors="replace"
-        )
-        return jsonify({"container": container.name, "tail": tail, "logs": logs})
-    except docker.errors.NotFound:
+        resolved_name, logs = container_logs(container_name, tail)
+        return jsonify({"container": resolved_name, "tail": tail, "logs": logs})
+    except ContainerNotFoundError:
         return jsonify({"error": "Containeren blev ikke fundet."}), 404
     except Exception as exc:
         return jsonify({"error": str(exc)}), 503
@@ -533,14 +359,10 @@ def api_container_action(container_name, action):
         write_audit(action, container_name, False, "Beskyttet container")
         return jsonify({"error": "Containeren er beskyttet mod denne handling."}), 409
     try:
-        container = docker_client().containers.get(container_name)
-        if action in {"stop", "restart"}:
-            getattr(container, action)(timeout=20)
-        else:
-            container.start()
+        perform_container_action(container_name, action)
         write_audit(action, container_name, True, "Udført")
         return jsonify({"ok": True, "container": container_name, "action": action})
-    except docker.errors.NotFound:
+    except ContainerNotFoundError:
         write_audit(action, container_name, False, "Ikke fundet")
         return jsonify({"error": "Containeren blev ikke fundet."}), 404
     except Exception as exc:
