@@ -3,19 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="30">
+  <meta name="theme-color" content="#071019">
   <title>Racher OS</title>
   <style>
-    :root{color-scheme:dark;--bg:#071019;--panel:#0f1b27;--panel2:#142434;--line:rgba(255,255,255,.08);--text:#f4f7fb;--muted:#8fa2b6;--accent:#62a8ff;--green:#31d17c;--yellow:#ffc857;--red:#ff6b7d}
-    *{box-sizing:border-box} body{margin:0;min-height:100vh;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 80% 0,#123558 0,transparent 32%),var(--bg);color:var(--text)}
-    .shell{min-height:100vh;display:grid;grid-template-columns:250px 1fr}.sidebar{position:sticky;top:0;height:100vh;padding:24px 18px;border-right:1px solid var(--line);background:rgba(7,16,25,.86);backdrop-filter:blur(18px)}
-    .brand{display:flex;align-items:center;gap:12px;padding:4px 8px 24px}.logo{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,var(--accent),#7b63ff);font-weight:900}.brand strong{display:block;font-size:1.05rem}.brand small{color:var(--muted)}
-    nav{display:grid;gap:6px}.nav-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:13px;color:var(--muted);text-decoration:none;font-weight:700}.nav-item.active,.nav-item:hover{color:var(--text);background:rgba(98,168,255,.12)}.sidebar-bottom{position:absolute;left:18px;right:18px;bottom:22px;padding:14px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.035)}
-    .sidebar-bottom small{display:block;color:var(--muted);margin-top:5px}.main{padding:30px;min-width:0}.topbar{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:24px}.eyebrow{color:var(--accent);font-size:.73rem;letter-spacing:.16em;text-transform:uppercase;font-weight:900}.topbar h1{font-size:clamp(2rem,4vw,3.3rem);letter-spacing:-.05em;margin:5px 0 0}.status-pill{display:flex;align-items:center;gap:9px;padding:10px 14px;border:1px solid var(--line);border-radius:999px;background:rgba(49,209,124,.08);font-weight:800}.dot{width:9px;height:9px;border-radius:50%;background:var(--red);box-shadow:0 0 16px currentColor}.dot.running{background:var(--green)}.dot.restarting,.dot.created{background:var(--yellow)}
-    .grid{display:grid;gap:16px}.metrics{grid-template-columns:repeat(5,minmax(0,1fr));margin-bottom:16px}.card{background:linear-gradient(145deg,rgba(20,36,52,.96),rgba(12,24,36,.96));border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 50px rgba(0,0,0,.2)}.metric span,.label{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.1em;font-weight:800}.metric strong{display:block;font-size:1.8rem;margin-top:8px}.bar{height:7px;background:rgba(255,255,255,.08);border-radius:999px;margin-top:14px;overflow:hidden}.bar i{display:block;height:100%;width:var(--value);background:linear-gradient(90deg,var(--accent),var(--green));border-radius:inherit}
+    :root{color-scheme:dark;--bg:#071019;--panel:#0f1b27;--panel2:#142434;--line:rgba(255,255,255,.08);--text:#f4f7fb;--muted:#8fa2b6;--accent:#62a8ff;--green:#31d17c;--yellow:#ffc857;--red:#ff6b7d;--shadow:0 18px 50px rgba(0,0,0,.22)}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-height:100vh;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 80% 0,#123558 0,transparent 32%),var(--bg);color:var(--text)}button,input{font:inherit}
+    .shell{min-height:100vh;display:grid;grid-template-columns:250px 1fr}.sidebar{position:sticky;top:0;height:100vh;padding:24px 18px;border-right:1px solid var(--line);background:rgba(7,16,25,.86);backdrop-filter:blur(18px);z-index:20}.brand{display:flex;align-items:center;gap:12px;padding:4px 8px 24px}.logo{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,var(--accent),#7b63ff);font-weight:900;box-shadow:0 10px 30px rgba(98,168,255,.22)}.brand strong{display:block;font-size:1.05rem}.brand small{color:var(--muted)}
+    nav{display:grid;gap:6px}.nav-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:13px;color:var(--muted);text-decoration:none;font-weight:750;transition:.16s ease}.nav-item.active,.nav-item:hover{color:var(--text);background:rgba(98,168,255,.12);transform:translateX(2px)}.sidebar-bottom{position:absolute;left:18px;right:18px;bottom:22px;padding:14px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.035)}.sidebar-bottom small{display:block;color:var(--muted);margin-top:5px}
+    .main{padding:30px;min-width:0}.topbar{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:24px}.eyebrow{color:var(--accent);font-size:.73rem;letter-spacing:.16em;text-transform:uppercase;font-weight:900}.topbar h1{font-size:clamp(2rem,4vw,3.3rem);letter-spacing:-.05em;margin:5px 0 0}.actions{display:flex;align-items:center;gap:10px}.button{border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.04);color:var(--text);padding:10px 13px;font-weight:800;cursor:pointer}.button:hover{background:rgba(98,168,255,.12)}.status-pill{display:flex;align-items:center;gap:9px;padding:10px 14px;border:1px solid var(--line);border-radius:999px;background:rgba(49,209,124,.08);font-weight:800}.dot{width:9px;height:9px;border-radius:50%;background:var(--red);box-shadow:0 0 16px currentColor}.dot.running{background:var(--green)}.dot.restarting,.dot.created{background:var(--yellow)}
+    .grid{display:grid;gap:16px}.metrics{grid-template-columns:repeat(5,minmax(0,1fr));margin-bottom:16px}.card{background:linear-gradient(145deg,rgba(20,36,52,.96),rgba(12,24,36,.96));border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:var(--shadow)}.metric span,.label{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.1em;font-weight:800}.metric strong{display:block;font-size:1.8rem;margin-top:8px}.bar{height:7px;background:rgba(255,255,255,.08);border-radius:999px;margin-top:14px;overflow:hidden}.bar i{display:block;height:100%;width:var(--value);background:linear-gradient(90deg,var(--accent),var(--green));border-radius:inherit;transition:width .35s ease}
     .content{grid-template-columns:1.35fr .8fr;align-items:start}.section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.section-title h2{margin:0;font-size:1.05rem}.section-title small{color:var(--muted)}.services{display:grid;gap:10px}.service{display:grid;grid-template-columns:12px minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px 14px;background:rgba(255,255,255,.035);border-radius:14px}.service-name{font-weight:800}.service small{display:block;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.state{color:var(--muted);font-size:.76rem;text-transform:uppercase;font-weight:900}.apps{display:grid;grid-template-columns:1fr 1fr;gap:10px}.app-link{display:block;color:var(--text);text-decoration:none;background:rgba(255,255,255,.04);border:1px solid transparent;padding:15px;border-radius:15px;font-weight:800;transition:.15s ease}.app-link:hover{transform:translateY(-2px);border-color:rgba(98,168,255,.28);background:rgba(98,168,255,.10)}.app-link span{display:block;font-size:1.35rem;margin-bottom:8px}.stack{display:grid;gap:16px}.backup{display:flex;justify-content:space-between;align-items:center;gap:16px}.backup strong{display:block;margin-top:6px}.ok{color:var(--green);font-weight:800}.warning{color:var(--yellow);font-weight:800}.error{color:var(--red);padding:12px;border-radius:12px;background:rgba(255,107,125,.1);margin-bottom:12px}.placeholder{color:var(--muted);line-height:1.5}.footer{color:var(--muted);font-size:.8rem;text-align:center;margin-top:18px}
+    .palette{position:fixed;inset:0;background:rgba(1,7,12,.72);display:none;place-items:start center;padding-top:12vh;z-index:50;backdrop-filter:blur(10px)}.palette.open{display:grid}.palette-box{width:min(620px,calc(100% - 24px));border:1px solid var(--line);border-radius:20px;background:#0d1823;box-shadow:0 35px 100px rgba(0,0,0,.55);overflow:hidden}.palette input{width:100%;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--text);padding:18px 20px;outline:none;font-size:1.05rem}.commands{padding:8px;max-height:50vh;overflow:auto}.command{display:flex;justify-content:space-between;gap:16px;width:100%;border:0;background:transparent;color:var(--text);padding:13px;border-radius:12px;text-align:left;cursor:pointer}.command:hover,.command.active{background:rgba(98,168,255,.12)}.command small{color:var(--muted)}
     @media(max-width:1050px){.shell{grid-template-columns:82px 1fr}.brand div:last-child,.nav-item span:last-child,.sidebar-bottom{display:none}.brand{justify-content:center}.nav-item{justify-content:center}.metrics{grid-template-columns:repeat(2,1fr)}}
-    @media(max-width:760px){.shell{display:block}.sidebar{position:static;height:auto;display:flex;align-items:center;overflow:auto;padding:12px;border-right:0;border-bottom:1px solid var(--line)}.brand{padding:0 10px 0 0}.logo{width:38px;height:38px}.sidebar nav{display:flex}.nav-item{padding:10px}.main{padding:20px 12px}.topbar{align-items:flex-start;flex-direction:column}.content{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.card{border-radius:18px;padding:16px}}
+    @media(max-width:760px){.shell{display:block}.sidebar{position:sticky;height:auto;display:flex;align-items:center;overflow:auto;padding:12px;border-right:0;border-bottom:1px solid var(--line)}.brand{padding:0 10px 0 0}.logo{width:38px;height:38px}.sidebar nav{display:flex}.nav-item{padding:10px}.main{padding:20px 12px}.topbar{align-items:flex-start;flex-direction:column}.actions{width:100%;justify-content:space-between}.content{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.card{border-radius:18px;padding:16px}.status-pill{font-size:.86rem}}
   </style>
 </head>
 <body>
@@ -23,33 +23,33 @@
   <aside class="sidebar">
     <div class="brand"><div class="logo">R</div><div><strong>Racher OS</strong><small>HomeLab Core</small></div></div>
     <nav>
-      <a class="nav-item active" href="#"><span>⌂</span><span>Dashboard</span></a>
+      <a class="nav-item active" href="#top"><span>⌂</span><span>Dashboard</span></a>
       <a class="nav-item" href="#apps"><span>▦</span><span>Apps</span></a>
       <a class="nav-item" href="#docker"><span>◈</span><span>Docker</span></a>
       <a class="nav-item" href="#system"><span>⌁</span><span>System</span></a>
       <a class="nav-item" href="#backup"><span>◫</span><span>Backup</span></a>
-      <a class="nav-item" href="#"><span>⚙</span><span>Settings</span></a>
+      <a class="nav-item" href="#settings"><span>⚙</span><span>Settings</span></a>
     </nav>
     <div class="sidebar-bottom"><strong>Privat adgang</strong><small>Beskyttes af Cloudflare Access ved deployment.</small></div>
   </aside>
 
-  <main class="main">
+  <main class="main" id="top">
     <header class="topbar">
       <div><div class="eyebrow">Raspberry Pi 5 · kontrolcenter</div><h1>Goddag, Frederik</h1></div>
-      <div class="status-pill"><i class="dot running"></i> Systemstatus</div>
+      <div class="actions"><button class="button" id="openPalette">⌘ K</button><div class="status-pill"><i class="dot running"></i> Systemstatus</div></div>
     </header>
 
     <section class="grid metrics" id="system">
-      {% for title, value, suffix in [('CPU', metrics.cpu, '%'), ('RAM', metrics.ram, '%'), ('SSD', metrics.disk, '%')] %}
-      <article class="card metric"><span>{{ title }}</span><strong>{{ value }}{{ suffix }}</strong><div class="bar" style="--value:{{ value }}%"><i></i></div></article>
+      {% for key, title, value, suffix in [('cpu','CPU', metrics.cpu, '%'), ('ram','RAM', metrics.ram, '%'), ('disk','SSD', metrics.disk, '%')] %}
+      <article class="card metric"><span>{{ title }}</span><strong data-metric="{{ key }}">{{ value }}{{ suffix }}</strong><div class="bar"><i data-bar="{{ key }}" style="--value:{{ value }}%"></i></div></article>
       {% endfor %}
-      <article class="card metric"><span>Temperatur</span><strong>{{ metrics.temperature if metrics.temperature is not none else '–' }}{% if metrics.temperature is not none %}°C{% endif %}</strong></article>
-      <article class="card metric"><span>Oppetid</span><strong>{{ metrics.uptime }}</strong></article>
+      <article class="card metric"><span>Temperatur</span><strong data-metric="temperature">{{ metrics.temperature if metrics.temperature is not none else '–' }}{% if metrics.temperature is not none %}°C{% endif %}</strong></article>
+      <article class="card metric"><span>Oppetid</span><strong data-metric="uptime">{{ metrics.uptime }}</strong></article>
     </section>
 
     <section class="grid content">
       <article class="card" id="docker">
-        <div class="section-title"><h2>Docker-tjenester</h2><small>Opdateret {{ updated }}</small></div>
+        <div class="section-title"><h2>Docker-tjenester</h2><small id="updated">Opdateret {{ updated }}</small></div>
         {% if docker_error %}<div class="error">Docker kunne ikke læses: {{ docker_error }}</div>{% endif %}
         <div class="services">
           {% for container in containers %}
@@ -63,16 +63,38 @@
           <div class="section-title"><h2>Apps</h2><small>Hurtig adgang</small></div>
           <div class="apps">{% for link in links %}<a class="app-link" href="{{ link.url }}" {% if link.url != '#' %}target="_blank" rel="noreferrer"{% endif %}><span>{{ link.icon }}</span>{{ link.name }}</a>{% endfor %}</div>
         </article>
-
-        <article class="card backup" id="backup">
-          <div><div class="label">Seneste backup</div>{% if backup %}<strong>{{ backup.time }}</strong><small class="ok">Fundet: {{ backup.name }}</small>{% else %}<strong>Ingen fundet</strong><small class="warning">Aktiveres på Raspberry Pi</small>{% endif %}</div><div style="font-size:2rem">💾</div>
-        </article>
-
-        <article class="card"><div class="label">Næste trin</div><p class="placeholder">Cloudflare Tunnel, Access-login og live status kobles på, når Raspberry Pi’en er klar.</p></article>
+        <article class="card backup" id="backup"><div><div class="label">Seneste backup</div>{% if backup %}<strong>{{ backup.time }}</strong><small class="ok">Fundet: {{ backup.name }}</small>{% else %}<strong>Ingen fundet</strong><small class="warning">Aktiveres på Raspberry Pi</small>{% endif %}</div><div style="font-size:2rem">💾</div></article>
+        <article class="card" id="settings"><div class="label">Sprint 1</div><p class="placeholder">Designsystem, navigation, live status og kommandopalette er nu samlet i Racher OS 0.1.</p></article>
       </aside>
     </section>
-    <div class="footer">Racher OS 0.1 · skrivebeskyttet kontrolcenter · automatisk opdatering hvert 30. sekund</div>
+    <div class="footer">Racher OS 0.1 · skrivebeskyttet kontrolcenter · live status hvert 30. sekund</div>
   </main>
 </div>
+
+<div class="palette" id="palette" aria-hidden="true">
+  <div class="palette-box" role="dialog" aria-modal="true" aria-label="Kommandopalette">
+    <input id="commandSearch" autocomplete="off" placeholder="Søg i Racher OS…">
+    <div class="commands" id="commands">
+      <button class="command" data-target="#apps"><span>Åbn Apps</span><small>Navigation</small></button>
+      <button class="command" data-target="#docker"><span>Åbn Docker</span><small>Status</small></button>
+      <button class="command" data-target="#system"><span>Se systemstatus</span><small>CPU · RAM · SSD</small></button>
+      <button class="command" data-target="#backup"><span>Se seneste backup</span><small>Backup</small></button>
+      <button class="command" data-target="#settings"><span>Åbn indstillinger</span><small>Kommer senere</small></button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const palette=document.getElementById('palette');const search=document.getElementById('commandSearch');const commands=[...document.querySelectorAll('.command')];
+  function openPalette(){palette.classList.add('open');palette.setAttribute('aria-hidden','false');search.value='';commands.forEach(x=>x.hidden=false);setTimeout(()=>search.focus(),10)}
+  function closePalette(){palette.classList.remove('open');palette.setAttribute('aria-hidden','true')}
+  document.getElementById('openPalette').addEventListener('click',openPalette);
+  document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openPalette()}if(e.key==='Escape')closePalette()});
+  palette.addEventListener('click',e=>{if(e.target===palette)closePalette()});
+  search.addEventListener('input',()=>{const q=search.value.toLowerCase();commands.forEach(x=>x.hidden=!x.textContent.toLowerCase().includes(q))});
+  commands.forEach(button=>button.addEventListener('click',()=>{document.querySelector(button.dataset.target)?.scrollIntoView({behavior:'smooth'});closePalette()}));
+  async function refreshStatus(){try{const response=await fetch('/api/status',{cache:'no-store'});if(!response.ok)return;const data=await response.json();const m=data.metrics||{};for(const key of ['cpu','ram','disk']){const label=document.querySelector(`[data-metric="${key}"]`);const bar=document.querySelector(`[data-bar="${key}"]`);if(label)label.textContent=`${m[key]}%`;if(bar)bar.style.setProperty('--value',`${m[key]}%`)}const temp=document.querySelector('[data-metric="temperature"]');if(temp)temp.textContent=m.temperature==null?'–':`${m.temperature}°C`;const uptime=document.querySelector('[data-metric="uptime"]');if(uptime)uptime.textContent=m.uptime;document.getElementById('updated').textContent=`Opdateret ${new Date(data.updated).toLocaleString('da-DK')}`}catch(e){console.warn('Status kunne ikke opdateres',e)}}
+  setInterval(refreshStatus,30000);
+</script>
 </body>
 </html>
