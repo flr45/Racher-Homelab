@@ -5,9 +5,8 @@ from flask import Blueprint, Flask, current_app, jsonify, render_template, reque
 
 from config import Config
 from services.audit_service import append_audit_entry, list_audit_entries
-from services.database_service import open_database
-from services.event_service import append_event, list_events
 from services.backup_service import backups, newest_backup
+from services.database_service import open_database
 from services.docker_service import (
     ContainerNotFoundError,
     app_status,
@@ -16,6 +15,7 @@ from services.docker_service import (
     domain_status,
     perform_container_action,
 )
+from services.event_service import append_event, list_events
 from services.metrics_service import (
     metric_history as load_metric_history,
 )
