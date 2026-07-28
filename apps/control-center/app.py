@@ -1,11 +1,12 @@
 import secrets
-import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Flask, current_app, jsonify, render_template, request, session
 
 from config import Config
+from services.audit_service import append_audit_entry, list_audit_entries
 from services.backup_service import backups, newest_backup
+from services.database_service import open_database
 from services.docker_service import (
     ContainerNotFoundError,
     app_status,
@@ -14,6 +15,7 @@ from services.docker_service import (
     domain_status,
     perform_container_action,
 )
+from services.event_service import append_event, list_events
 from services.metrics_service import (
     metric_history as load_metric_history,
 )
@@ -45,20 +47,10 @@ def csrf_token():
 
 
 def database():
-    data_root = current_app.config["DATA_ROOT"]
-    data_root.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(current_app.config["DATABASE_PATH"])
-    connection.row_factory = sqlite3.Row
-    connection.execute(
-        """CREATE TABLE IF NOT EXISTS metrics (recorded_at TEXT PRIMARY KEY, cpu REAL NOT NULL, ram REAL NOT NULL, disk REAL NOT NULL, temperature REAL, network_sent_mb REAL NOT NULL, network_recv_mb REAL NOT NULL)"""
+    return open_database(
+        current_app.config["DATA_ROOT"],
+        current_app.config["DATABASE_PATH"],
     )
-    connection.execute(
-        """CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, recorded_at TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, success INTEGER NOT NULL, message TEXT)"""
-    )
-    connection.execute(
-        """CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, recorded_at TEXT NOT NULL, event_key TEXT NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL)"""
-    )
-    return connection
 
 
 def record_metrics(metrics):
@@ -70,55 +62,32 @@ def metric_history(hours=24):
 
 
 def write_audit(action, target, success, message=""):
-    with database() as connection:
-        connection.execute(
-            "INSERT INTO audit_log (recorded_at, actor, action, target, success, message) VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                datetime.now(timezone.utc).isoformat(),
-                current_user() or "unknown",
-                action,
-                target,
-                int(success),
-                message[:500],
-            ),
-        )
+    append_audit_entry(
+        action,
+        target,
+        success,
+        message,
+        current_user() or "unknown",
+        database,
+    )
 
 
 def audit_history(limit=50):
-    with database() as connection:
-        rows = connection.execute(
-            "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
-    return [dict(row) for row in rows]
+    return list_audit_entries(limit, database)
 
 
 def write_event(event_key, severity, title, message):
-    now = datetime.now(timezone.utc)
-    with database() as connection:
-        latest = connection.execute(
-            "SELECT recorded_at FROM events WHERE event_key = ? ORDER BY id DESC LIMIT 1",
-            (event_key,),
-        ).fetchone()
-        if latest and now - datetime.fromisoformat(latest["recorded_at"]) < timedelta(
-            hours=1
-        ):
-            return
-        connection.execute(
-            "INSERT INTO events (recorded_at, event_key, severity, title, message) VALUES (?, ?, ?, ?, ?)",
-            (now.isoformat(), event_key, severity, title, message[:500]),
-        )
-        connection.execute(
-            "DELETE FROM events WHERE recorded_at < ?",
-            ((now - timedelta(days=30)).isoformat(),),
-        )
+    return append_event(
+        event_key,
+        severity,
+        title,
+        message,
+        database,
+    )
 
 
 def event_history(limit=50):
-    with database() as connection:
-        rows = connection.execute(
-            "SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
-    return [dict(row) for row in rows]
+    return list_events(limit, database)
 
 
 def analyze_system(metrics, containers, backup):

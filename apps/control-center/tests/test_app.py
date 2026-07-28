@@ -115,3 +115,42 @@ def test_metrics_service_records_and_reads_history(monkeypatch, tmp_path):
     assert len(points) == 1
     assert points[0]["cpu"] == 10.0
     assert points[0]["network_recv_mb"] == 60.0
+
+
+def test_audit_service_records_actor_and_truncates_message(monkeypatch, tmp_path):
+    module, flask_app = load_app(monkeypatch, tmp_path)
+
+    with flask_app.test_request_context(
+        "/",
+        headers={"Cf-Access-Authenticated-User-Email": "Admin@Example.com"},
+    ):
+        module.write_audit("restart", "api", True, "x" * 600)
+
+    with flask_app.app_context():
+        entries = module.audit_history()
+
+    assert len(entries) == 1
+    assert entries[0]["actor"] == "admin@example.com"
+    assert entries[0]["action"] == "restart"
+    assert entries[0]["target"] == "api"
+    assert entries[0]["success"] == 1
+    assert len(entries[0]["message"]) == 500
+
+
+def test_event_service_deduplicates_same_key(monkeypatch, tmp_path):
+    module, flask_app = load_app(monkeypatch, tmp_path)
+
+    with flask_app.app_context():
+        first_created = module.write_event(
+            "metric:cpu", "warning", "Høj CPU", "CPU er høj."
+        )
+        duplicate_created = module.write_event(
+            "metric:cpu", "warning", "Høj CPU", "CPU er stadig høj."
+        )
+        events = module.event_history()
+
+    assert first_created is True
+    assert duplicate_created is False
+    assert len(events) == 1
+    assert events[0]["event_key"] == "metric:cpu"
+    assert events[0]["message"] == "CPU er høj."
