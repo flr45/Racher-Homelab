@@ -1,14 +1,54 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+ROOT="${HOMELAB_ROOT:-$HOME/homelab/Racher-Homelab}"
+ENV_FILE="${ENV_FILE:-$ROOT/.env}"
 BACKUP_ROOT="${BACKUP_ROOT:-$HOME/homelab/backups}"
+BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
+BACKUP_MIRROR_DIR="${BACKUP_MIRROR_DIR:-}"
 STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
 DEST="$BACKUP_ROOT/$STAMP"
+
+log() {
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
+fail() {
+  log "FEJL: $*"
+  exit 1
+}
+
+command -v docker >/dev/null 2>&1 || fail "Docker blev ikke fundet."
+[[ -f "$ENV_FILE" ]] || fail "Miljøfilen mangler: $ENV_FILE"
+
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+
+: "${POSTGRES_USER:?POSTGRES_USER mangler i .env}"
+: "${POSTGRES_DB:?POSTGRES_DB mangler i .env}"
+: "${NPM_DB_USER:?NPM_DB_USER mangler i .env}"
+: "${NPM_DB_PASSWORD:?NPM_DB_PASSWORD mangler i .env}"
+: "${NPM_DB_NAME:?NPM_DB_NAME mangler i .env}"
+
 mkdir -p "$DEST"
+trap 'log "Backup mislykkedes. Den ufuldstændige mappe bevares i $DEST"' ERR
+
+container_running() {
+  [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" == "true" ]]
+}
 
 backup_volume() {
   local volume="$1"
   local filename="$2"
+
+  docker volume inspect "$volume" >/dev/null 2>&1 || {
+    log "Springer over manglende volume: $volume"
+    return 0
+  }
+
+  log "Sikkerhedskopierer volume $volume"
   docker run --rm \
     -v "${volume}:/source:ro" \
     -v "$DEST:/backup" \
@@ -16,14 +56,66 @@ backup_volume() {
     tar -czf "/backup/${filename}.tar.gz" -C /source .
 }
 
-backup_volume racher-homelab-core_npm_db_data npm-db
+log "Starter backup til $DEST"
+
+if container_running postgres; then
+  log "Opretter konsistent PostgreSQL-dump"
+  docker exec postgres pg_dump \
+    --username "$POSTGRES_USER" \
+    --dbname "$POSTGRES_DB" \
+    --format=custom \
+    --no-owner \
+    --no-privileges > "$DEST/postgres.dump"
+else
+  fail "PostgreSQL-containeren kører ikke."
+fi
+
+if container_running npm-db; then
+  log "Opretter konsistent MariaDB-dump til Nginx Proxy Manager"
+  docker exec \
+    -e MYSQL_PWD="$NPM_DB_PASSWORD" \
+    npm-db mariadb-dump \
+    --user="$NPM_DB_USER" \
+    --single-transaction \
+    --quick \
+    --skip-lock-tables \
+    "$NPM_DB_NAME" | gzip -9 > "$DEST/npm-database.sql.gz"
+else
+  fail "Nginx Proxy Manager-databasen kører ikke."
+fi
+
+if container_running redis; then
+  log "Beder Redis skrive data til disk"
+  docker exec redis redis-cli SAVE >/dev/null
+fi
+
 backup_volume racher-homelab-core_npm_data npm-data
 backup_volume racher-homelab-core_npm_letsencrypt npm-letsencrypt
 backup_volume racher-homelab-core_portainer_data portainer
 backup_volume racher-homelab-core_uptime_kuma_data uptime-kuma
-backup_volume racher-homelab-data_postgres_data postgres
 backup_volume racher-homelab-data_redis_data redis
 
-find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
+cp "$ENV_FILE" "$DEST/env.backup"
+chmod 600 "$DEST/env.backup"
 
-echo "Backup gemt i $DEST"
+(
+  cd "$DEST"
+  sha256sum ./* > SHA256SUMS
+)
+
+ln -sfn "$DEST" "$BACKUP_ROOT/latest"
+
+if [[ -n "$BACKUP_MIRROR_DIR" ]]; then
+  mkdir -p "$BACKUP_MIRROR_DIR"
+  log "Kopierer backup til ekstern placering: $BACKUP_MIRROR_DIR"
+  cp -a "$DEST" "$BACKUP_MIRROR_DIR/"
+fi
+
+find "$BACKUP_ROOT" \
+  -mindepth 1 -maxdepth 1 -type d \
+  -mtime "+$BACKUP_RETENTION_DAYS" \
+  -exec rm -rf {} +
+
+trap - ERR
+log "Backup færdig: $DEST"
+log "Kontrol: cd '$DEST' && sha256sum -c SHA256SUMS"
