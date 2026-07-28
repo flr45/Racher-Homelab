@@ -89,7 +89,7 @@ class Config:
     ADMIN_ACTIONS_ENABLED = os.getenv("ADMIN_ACTIONS_ENABLED", "false").lower() == "true"
     ALLOWED_EMAILS = _csv_set("ALLOWED_ADMIN_EMAILS", lowercase=True)
     PROTECTED_CONTAINERS = _csv_set(
-        "PROTECTED_CONTAINERS", "control-center,cloudflared"
+        "PROTECTED_CONTAINERS", "control-center,control-center-worker,cloudflared"
     )
 
     CPU_WARNING = float(os.getenv("CPU_WARNING_PERCENT", "85"))
@@ -97,3 +97,12 @@ class Config:
     DISK_WARNING = float(os.getenv("DISK_WARNING_PERCENT", "85"))
     TEMP_WARNING = float(os.getenv("TEMP_WARNING_C", "75"))
     BACKUP_MAX_AGE_HOURS = int(os.getenv("BACKUP_MAX_AGE_HOURS", "36"))
+
+    MONITOR_INTERVAL_SECONDS = max(
+        10,
+        int(os.getenv("MONITOR_INTERVAL_SECONDS", "60")),
+    )
+    WORKER_HEALTH_MAX_AGE_SECONDS = max(
+        MONITOR_INTERVAL_SECONDS * 2,
+        int(os.getenv("WORKER_HEALTH_MAX_AGE_SECONDS", "180")),
+    )
