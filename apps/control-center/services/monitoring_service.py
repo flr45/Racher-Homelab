@@ -95,6 +95,10 @@ def analyze_system(metrics, containers, backup, database_factory, docker_error=N
             )
 
     channels = configured_channels(current_app.config)
+    minimum_severity = current_app.config.get(
+        "NOTIFICATION_MIN_SEVERITY",
+        "critical",
+    )
     for finding in findings:
         created = append_event(
             finding["key"],
@@ -108,7 +112,7 @@ def analyze_system(metrics, containers, backup, database_factory, docker_error=N
                 finding,
                 database_factory,
                 channels,
-                minimum_severity=current_app.config["NOTIFICATION_MIN_SEVERITY"],
+                minimum_severity=minimum_severity,
             )
 
     return findings
