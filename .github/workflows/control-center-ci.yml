@@ -41,16 +41,7 @@ jobs:
         run: ruff check .
 
       - name: Test
-        run: pytest > pytest-output.txt 2>&1 || true
-
-      - name: Upload pytest output
-        uses: actions/upload-artifact@v4
-        with:
-          name: observability-pytest-output
-          path: apps/control-center/pytest-output.txt
-
-      - name: Fail when tests failed
-        run: grep -q "failed" pytest-output.txt && exit 1 || true
+        run: pytest
 
       - name: Compile Python sources
         run: python -m compileall -q .
