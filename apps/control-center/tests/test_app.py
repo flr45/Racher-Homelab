@@ -1,11 +1,8 @@
-import importlib
-import sys
+import importlib.util
 from pathlib import Path
 
 
-CONTROL_CENTER_ROOT = Path(__file__).resolve().parents[1]
-if str(CONTROL_CENTER_ROOT) not in sys.path:
-    sys.path.insert(0, str(CONTROL_CENTER_ROOT))
+APP_PATH = Path(__file__).resolve().parents[1] / "app.py"
 
 
 def load_app(monkeypatch, tmp_path):
@@ -14,8 +11,11 @@ def load_app(monkeypatch, tmp_path):
     monkeypatch.setenv("RACHER_OS_SECRET_KEY", "test-secret-key")
     monkeypatch.setenv("ADMIN_ACTIONS_ENABLED", "false")
 
-    module = importlib.import_module("app")
-    module = importlib.reload(module)
+    spec = importlib.util.spec_from_file_location("racher_os_app", APP_PATH)
+    assert spec is not None and spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
     module.app.config.update(TESTING=True)
     return module
 
