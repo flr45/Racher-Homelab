@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from services.deployment_service import list_deployments
 
 IMAGE_PATTERN = re.compile(r"^[a-zA-Z0-9._/-]+(?::[a-zA-Z0-9._-]+|@sha256:[a-fA-F0-9]{64})$")
-TERMINAL_STATES = {"succeeded", "rolled_back", "failed"}
 
 
 class RolloutError(RuntimeError):
@@ -116,6 +115,7 @@ def execute_rollout(
     pull_image,
     replace_container,
     inspect_container,
+    cleanup_backups=lambda _container_name: None,
     timeout_seconds=120,
 ):
     rollout = get_rollout(rollout_id, database_factory)
@@ -129,6 +129,7 @@ def execute_rollout(
         replace_container(rollout["container_name"], rollout["target_image"])
         update_rollout(rollout_id, database_factory, phase="healthcheck", message="Afventer healthcheck")
         wait_for_healthy(inspect_container, rollout["container_name"], timeout_seconds)
+        cleanup_backups(rollout["container_name"])
         update_rollout(rollout_id, database_factory, status="succeeded", phase="complete", message="Deployment gennemført")
         return get_rollout(rollout_id, database_factory)
     except Exception as deployment_error:
@@ -137,6 +138,7 @@ def execute_rollout(
             pull_image(rollout["previous_image"])
             replace_container(rollout["container_name"], rollout["previous_image"])
             wait_for_healthy(inspect_container, rollout["container_name"], timeout_seconds)
+            cleanup_backups(rollout["container_name"])
             update_rollout(rollout_id, database_factory, status="rolled_back", phase="complete", message=f"Automatisk rollback: {deployment_error}")
         except Exception as rollback_error:
             update_rollout(rollout_id, database_factory, status="failed", phase="rollback_failed", message=f"Deployment: {deployment_error}; rollback: {rollback_error}")
