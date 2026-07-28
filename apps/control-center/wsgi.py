@@ -2,6 +2,7 @@ from app import create_app
 from cloudflare_extension import init_cloudflare_center
 from configuration_extension import init_configuration_center
 from database_browser_extension import init_database_browser
+from deployment_ui_extension import init_deployment_ui
 from file_browser_extension import init_file_browser
 from github_extension import init_github_center
 from logging_extension import init_structured_logging
@@ -25,3 +26,4 @@ init_database_browser(app)
 init_file_browser(app)
 init_cloudflare_center(app)
 init_plugin_center(app)
+init_deployment_ui(app)
