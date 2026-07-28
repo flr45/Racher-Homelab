@@ -4,8 +4,8 @@ set -Eeuo pipefail
 ROOT="${HOMELAB_ROOT:-$HOME/homelab/Racher-Homelab}"
 ENV_FILE="${ENV_FILE:-$ROOT/.env}"
 BACKUP_ROOT="${BACKUP_ROOT:-$HOME/homelab/backups}"
-BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 BACKUP_MIRROR_DIR="${BACKUP_MIRROR_DIR:-}"
+CONTROL_CENTER_VOLUME="${CONTROL_CENTER_VOLUME:-racher-control-center_control-center-data}"
 STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
 DEST="$BACKUP_ROOT/$STAMP"
 
@@ -33,6 +33,7 @@ set +a
 : "${NPM_DB_NAME:?NPM_DB_NAME mangler i .env}"
 
 mkdir -p "$DEST"
+chmod 700 "$DEST"
 trap 'log "Backup mislykkedes. Den ufuldstændige mappe bevares i $DEST"' ERR
 
 container_running() {
@@ -42,11 +43,15 @@ container_running() {
 backup_volume() {
   local volume="$1"
   local filename="$2"
+  local required="${3:-false}"
 
-  docker volume inspect "$volume" >/dev/null 2>&1 || {
+  if ! docker volume inspect "$volume" >/dev/null 2>&1; then
+    if [[ "$required" == "true" ]]; then
+      fail "Påkrævet volume mangler: $volume"
+    fi
     log "Springer over manglende volume: $volume"
     return 0
-  }
+  fi
 
   log "Sikkerhedskopierer volume $volume"
   docker run --rm \
@@ -94,13 +99,28 @@ backup_volume racher-homelab-core_npm_letsencrypt npm-letsencrypt
 backup_volume racher-homelab-core_portainer_data portainer
 backup_volume racher-homelab-core_uptime_kuma_data uptime-kuma
 backup_volume racher-homelab-data_redis_data redis
+backup_volume "$CONTROL_CENTER_VOLUME" control-center-data true
 
 cp "$ENV_FILE" "$DEST/env.backup"
 chmod 600 "$DEST/env.backup"
 
+cat > "$DEST/MANIFEST.json" <<EOF
+{
+  "format_version": 1,
+  "created_at": "$(date --iso-8601=seconds)",
+  "host": "$(hostname)",
+  "control_center_volume": "$CONTROL_CENTER_VOLUME",
+  "postgres_database": "$POSTGRES_DB",
+  "npm_database": "$NPM_DB_NAME"
+}
+EOF
+
 (
   cd "$DEST"
-  sha256sum ./* > SHA256SUMS
+  find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
+    | sort \
+    | xargs -r sha256sum > SHA256SUMS
+  sha256sum -c SHA256SUMS
 )
 
 ln -sfn "$DEST" "$BACKUP_ROOT/latest"
@@ -111,11 +131,7 @@ if [[ -n "$BACKUP_MIRROR_DIR" ]]; then
   cp -a "$DEST" "$BACKUP_MIRROR_DIR/"
 fi
 
-find "$BACKUP_ROOT" \
-  -mindepth 1 -maxdepth 1 -type d \
-  -mtime "+$BACKUP_RETENTION_DAYS" \
-  -exec rm -rf {} +
-
 trap - ERR
 log "Backup færdig: $DEST"
 log "Kontrol: cd '$DEST' && sha256sum -c SHA256SUMS"
+log "Oprydning af gamle backups udføres bevidst separat efter validering."
