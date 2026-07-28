@@ -5,11 +5,13 @@ from database_browser_extension import init_database_browser
 from file_browser_extension import init_file_browser
 from github_extension import init_github_center
 from maintenance_extension import init_maintenance
+from migration_extension import init_migrations
 from observability_extension import init_observability
 from rbac_extension import init_rbac
 from security_extension import init_security
 
 app = create_app()
+init_migrations(app)
 init_security(app)
 init_rbac(app)
 init_maintenance(app)
