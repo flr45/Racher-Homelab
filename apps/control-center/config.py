@@ -107,7 +107,10 @@ class Config:
         int(os.getenv("WORKER_HEALTH_MAX_AGE_SECONDS", "180")),
     )
 
-    NOTIFICATION_WEBHOOK_URL = os.getenv("NOTIFICATION_WEBHOOK_URL", "")
+    NOTIFICATION_WEBHOOK_URL = os.getenv(
+        "DISCORD_WEBHOOK_URL",
+        os.getenv("NOTIFICATION_WEBHOOK_URL", ""),
+    )
     PUSHOVER_APP_TOKEN = os.getenv("PUSHOVER_APP_TOKEN", "")
     PUSHOVER_USER_KEY = os.getenv("PUSHOVER_USER_KEY", "")
     NOTIFICATION_MIN_SEVERITY = os.getenv(
@@ -131,4 +134,8 @@ class Config:
     NOTIFICATION_HTTP_TIMEOUT_SECONDS = max(
         1,
         int(os.getenv("NOTIFICATION_HTTP_TIMEOUT_SECONDS", "10")),
+    )
+    NOTIFICATION_RETENTION_DAYS = min(
+        365,
+        max(1, int(os.getenv("NOTIFICATION_RETENTION_DAYS", "30"))),
     )
