@@ -11,7 +11,7 @@ _REDACTIONS = (
 
 
 def validate_container_name(name):
-    value = str(name or "").strip()
+    value = str(name or "")
     if not _CONTAINER_NAME.fullmatch(value):
         raise ValueError("Ugyldigt containernavn.")
     return value
