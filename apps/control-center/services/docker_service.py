@@ -1,3 +1,5 @@
+import time
+
 import docker
 from flask import current_app
 
@@ -130,3 +132,115 @@ def perform_container_action(container_name, action):
         getattr(container, action)(timeout=20)
     else:
         container.start()
+
+
+def pull_rollout_image(image_reference):
+    return docker_client().images.pull(image_reference)
+
+
+def inspect_rollout_container(container_name):
+    container = docker_client().containers.get(container_name)
+    container.reload()
+    state = container.attrs.get("State", {})
+    return {
+        "status": state.get("Status", container.status),
+        "health": state.get("Health", {}).get("Status"),
+    }
+
+
+def _mounts_from_container(container):
+    mounts = []
+    for mount in container.attrs.get("Mounts", []):
+        if mount.get("Type") == "volume":
+            mounts.append(
+                docker.types.Mount(
+                    target=mount["Destination"],
+                    source=mount["Name"],
+                    type="volume",
+                    read_only=not mount.get("RW", True),
+                )
+            )
+        elif mount.get("Type") == "bind":
+            mounts.append(
+                docker.types.Mount(
+                    target=mount["Destination"],
+                    source=mount["Source"],
+                    type="bind",
+                    read_only=not mount.get("RW", True),
+                )
+            )
+    return mounts
+
+
+def _ports_from_container(container):
+    result = {}
+    for container_port, bindings in container.attrs.get("HostConfig", {}).get(
+        "PortBindings", {}
+    ).items():
+        if not bindings:
+            continue
+        binding = bindings[0]
+        host_ip = binding.get("HostIp") or None
+        host_port = binding.get("HostPort") or None
+        result[container_port] = (host_ip, host_port) if host_ip else host_port
+    return result
+
+
+def replace_rollout_container(container_name, image_reference):
+    client = docker_client()
+    try:
+        previous = client.containers.get(container_name)
+    except docker.errors.NotFound as exc:
+        raise ContainerNotFoundError(container_name) from exc
+
+    previous.reload()
+    attrs = previous.attrs
+    config = attrs.get("Config", {})
+    host_config = attrs.get("HostConfig", {})
+    rollback_name = f"{container_name}__rollback__{int(time.time())}"
+    was_running = attrs.get("State", {}).get("Running", False)
+
+    previous.rename(rollback_name)
+    if was_running:
+        previous.stop(timeout=20)
+
+    try:
+        replacement = client.containers.create(
+            image_reference,
+            name=container_name,
+            command=config.get("Cmd"),
+            entrypoint=config.get("Entrypoint"),
+            environment=config.get("Env"),
+            labels=config.get("Labels"),
+            hostname=config.get("Hostname"),
+            user=config.get("User") or None,
+            working_dir=config.get("WorkingDir") or None,
+            mounts=_mounts_from_container(previous),
+            ports=_ports_from_container(previous),
+            restart_policy=host_config.get("RestartPolicy") or None,
+            privileged=bool(host_config.get("Privileged", False)),
+            read_only=bool(host_config.get("ReadonlyRootfs", False)),
+            network_mode=host_config.get("NetworkMode") or None,
+            security_opt=host_config.get("SecurityOpt") or None,
+            cap_add=host_config.get("CapAdd") or None,
+            cap_drop=host_config.get("CapDrop") or None,
+            detach=True,
+        )
+        replacement.start()
+        return {"container": replacement.name, "rollback_container": rollback_name}
+    except Exception:
+        try:
+            previous.rename(container_name)
+            if was_running:
+                previous.start()
+        finally:
+            raise
+
+
+def cleanup_rollout_backups(container_name):
+    prefix = f"{container_name}__rollback__"
+    for container in docker_client().containers.list(all=True):
+        if container.name.startswith(prefix):
+            if container.status == "running":
+                container.stop(timeout=20)
+            container.remove(v=True)
