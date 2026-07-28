@@ -1,1 +1,43 @@
-placeholder
+name: racher-homelab-indsatsbrief
+
+services:
+  indsatsbrief:
+    image: ${INDSATSBRIEF_IMAGE:-ghcr.io/flr45/indsatsbrief-api:latest}
+    container_name: indsatsbrief
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Copenhagen}
+      FLASK_SECRET_KEY: ${INDSATSBRIEF_FLASK_SECRET_KEY}
+      BRIEF_ACCESS_CODE: ${INDSATSBRIEF_ACCESS_CODE}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      OPENAI_API_KEY: ${INDSATSBRIEF_OPENAI_API_KEY}
+      OPENAI_MODEL: ${INDSATSBRIEF_OPENAI_MODEL:-gpt-5.4-mini}
+      ADMIN_APPROVAL_REQUIRED: ${INDSATSBRIEF_ADMIN_APPROVAL_REQUIRED:-true}
+      ADMIN_EMAIL: ${INDSATSBRIEF_ADMIN_EMAIL:-}
+      ADMIN_NOTIFY_EMAIL: ${INDSATSBRIEF_ADMIN_NOTIFY_EMAIL:-}
+      CONTACT_EMAIL: ${INDSATSBRIEF_CONTACT_EMAIL:-}
+      APP_BASE_URL: ${INDSATSBRIEF_APP_BASE_URL:-}
+      SHOW_CODE_LOGIN: ${INDSATSBRIEF_SHOW_CODE_LOGIN:-false}
+      SMTP_HOST: ${INDSATSBRIEF_SMTP_HOST:-}
+      SMTP_PORT: ${INDSATSBRIEF_SMTP_PORT:-587}
+      SMTP_USERNAME: ${INDSATSBRIEF_SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${INDSATSBRIEF_SMTP_PASSWORD:-}
+      SMTP_FROM: ${INDSATSBRIEF_SMTP_FROM:-}
+      SMTP_USE_TLS: ${INDSATSBRIEF_SMTP_USE_TLS:-true}
+    networks:
+      - backend
+      - proxy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8000/health >/dev/null || curl --fail --silent http://127.0.0.1:8000/ >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+networks:
+  backend:
+    external: true
+    name: backend
+  proxy:
+    external: true
+    name: proxy
