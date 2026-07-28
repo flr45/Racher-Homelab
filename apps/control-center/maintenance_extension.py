@@ -1,5 +1,7 @@
 from flask import Blueprint, current_app, jsonify, request, session
+from markupsafe import escape
 
+from services.audit_service import append_audit_entry
 from services.database_service import open_database
 from services.maintenance_service import (
     disable_maintenance,
@@ -37,6 +39,17 @@ def csrf_valid():
     )
 
 
+def write_audit(action, success, message):
+    append_audit_entry(
+        action,
+        "maintenance-mode",
+        success,
+        message,
+        current_user() or "unknown",
+        database,
+    )
+
+
 def _unauthorized():
     return jsonify({"error": "Admin-godkendelse og gyldig sikkerhedstoken kræves."}), 403
 
@@ -59,7 +72,13 @@ def activate_maintenance():
             database,
         )
     except (TypeError, ValueError) as exc:
+        write_audit("maintenance-enable", False, str(exc))
         return jsonify({"error": str(exc)}), 400
+    write_audit(
+        "maintenance-enable",
+        True,
+        f"Aktiveret til {status['expires_at']}",
+    )
     return jsonify({"maintenance": status}), 201
 
 
@@ -68,16 +87,17 @@ def deactivate_maintenance():
     if not admin_allowed() or not csrf_valid():
         return _unauthorized()
     status = disable_maintenance(current_user(), database)
+    write_audit("maintenance-disable", True, "Deaktiveret manuelt")
     return jsonify({"maintenance": status})
 
 
 def _banner(status):
-    message = status["message"] or "Vedligeholdelse"
-    expires = status["expires_at"] or ""
+    message = escape(status["message"] or "Vedligeholdelse")
+    expires = escape(status["expires_at"] or "")
     return (
         '<section style="margin-bottom:15px;padding:16px 18px;border:1px solid '
         'rgba(255,200,87,.45);border-radius:16px;background:rgba(255,200,87,.12)">'
-        f'<strong style="color:#ffc857">Vedligeholdelsestilstand aktiv</strong>'
+        '<strong style="color:#ffc857">Vedligeholdelsestilstand aktiv</strong>'
         f'<div style="margin-top:6px">{message}</div>'
         f'<small>Udløber automatisk: {expires}</small></section>'
     )
