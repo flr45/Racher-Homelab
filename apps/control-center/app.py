@@ -31,8 +31,13 @@ BACKUP_ROOT = Path(os.getenv("BACKUP_ROOT", "/backups"))
 DATA_ROOT = Path(os.getenv("RACHER_OS_DATA", "/data"))
 DATABASE_PATH = DATA_ROOT / "racher-os.db"
 ADMIN_ACTIONS_ENABLED = os.getenv("ADMIN_ACTIONS_ENABLED", "false").lower() == "true"
-ALLOWED_EMAILS = {value.strip().lower() for value in os.getenv("ALLOWED_ADMIN_EMAILS", "").split(",") if value.strip()}
-PROTECTED_CONTAINERS = {value.strip() for value in os.getenv("PROTECTED_CONTAINERS", "control-center,cloudflared").split(",") if value.strip()}
+ALLOWED_EMAILS = {v.strip().lower() for v in os.getenv("ALLOWED_ADMIN_EMAILS", "").split(",") if v.strip()}
+PROTECTED_CONTAINERS = {v.strip() for v in os.getenv("PROTECTED_CONTAINERS", "control-center,cloudflared").split(",") if v.strip()}
+CPU_WARNING = float(os.getenv("CPU_WARNING_PERCENT", "85"))
+RAM_WARNING = float(os.getenv("RAM_WARNING_PERCENT", "85"))
+DISK_WARNING = float(os.getenv("DISK_WARNING_PERCENT", "85"))
+TEMP_WARNING = float(os.getenv("TEMP_WARNING_C", "75"))
+BACKUP_MAX_AGE_HOURS = int(os.getenv("BACKUP_MAX_AGE_HOURS", "36"))
 
 
 def docker_client():
@@ -57,9 +62,11 @@ def csrf_token():
 def container_usage(container):
     try:
         stats = container.stats(stream=False)
-        cpu_delta = stats.get("cpu_stats", {}).get("cpu_usage", {}).get("total_usage", 0) - stats.get("precpu_stats", {}).get("cpu_usage", {}).get("total_usage", 0)
-        system_delta = stats.get("cpu_stats", {}).get("system_cpu_usage", 0) - stats.get("precpu_stats", {}).get("system_cpu_usage", 0)
-        cpu_count = len(stats.get("cpu_stats", {}).get("cpu_usage", {}).get("percpu_usage", [])) or 1
+        cpu_stats = stats.get("cpu_stats", {})
+        pre_cpu = stats.get("precpu_stats", {})
+        cpu_delta = cpu_stats.get("cpu_usage", {}).get("total_usage", 0) - pre_cpu.get("cpu_usage", {}).get("total_usage", 0)
+        system_delta = cpu_stats.get("system_cpu_usage", 0) - pre_cpu.get("system_cpu_usage", 0)
+        cpu_count = len(cpu_stats.get("cpu_usage", {}).get("percpu_usage", [])) or 1
         cpu_percent = (cpu_delta / system_delta * cpu_count * 100) if system_delta > 0 and cpu_delta >= 0 else 0
         memory = stats.get("memory_stats", {}).get("usage", 0)
         cache = stats.get("memory_stats", {}).get("stats", {}).get("cache", 0)
@@ -113,6 +120,7 @@ def backups(limit=20):
         return [{
             "name": path.name,
             "time": datetime.fromtimestamp(path.stat().st_mtime).strftime("%d-%m-%Y %H:%M"),
+            "recorded_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
             "size_mb": round(directory_size(path) / 1024 / 1024, 1),
         } for path in candidates[:limit]]
     except Exception:
@@ -160,6 +168,7 @@ def database():
     connection.row_factory = sqlite3.Row
     connection.execute("""CREATE TABLE IF NOT EXISTS metrics (recorded_at TEXT PRIMARY KEY, cpu REAL NOT NULL, ram REAL NOT NULL, disk REAL NOT NULL, temperature REAL, network_sent_mb REAL NOT NULL, network_recv_mb REAL NOT NULL)""")
     connection.execute("""CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, recorded_at TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, success INTEGER NOT NULL, message TEXT)""")
+    connection.execute("""CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, recorded_at TEXT NOT NULL, event_key TEXT NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL)""")
     return connection
 
 
@@ -191,20 +200,95 @@ def audit_history(limit=50):
     return [dict(row) for row in rows]
 
 
-@app.get("/")
-def index():
+def write_event(event_key, severity, title, message):
+    now = datetime.now(timezone.utc)
+    with database() as connection:
+        latest = connection.execute("SELECT recorded_at FROM events WHERE event_key = ? ORDER BY id DESC LIMIT 1", (event_key,)).fetchone()
+        if latest and now - datetime.fromisoformat(latest["recorded_at"]) < timedelta(hours=1):
+            return
+        connection.execute("INSERT INTO events (recorded_at, event_key, severity, title, message) VALUES (?, ?, ?, ?, ?)", (now.isoformat(), event_key, severity, title, message[:500]))
+        connection.execute("DELETE FROM events WHERE recorded_at < ?", ((now - timedelta(days=30)).isoformat(),))
+
+
+def event_history(limit=50):
+    with database() as connection:
+        rows = connection.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def analyze_system(metrics, containers, backup):
+    findings = []
+    for key, value, threshold, label in [
+        ("cpu", metrics["cpu"], CPU_WARNING, "CPU"),
+        ("ram", metrics["ram"], RAM_WARNING, "RAM"),
+        ("disk", metrics["disk"], DISK_WARNING, "SSD"),
+    ]:
+        if value >= threshold:
+            findings.append({"key": f"metric:{key}", "severity": "warning", "title": f"Høj {label}-belastning", "message": f"{label} er på {value}% (grænse {threshold}%)."})
+    if metrics["temperature"] is not None and metrics["temperature"] >= TEMP_WARNING:
+        findings.append({"key": "metric:temperature", "severity": "warning", "title": "Høj temperatur", "message": f"Servertemperaturen er {metrics['temperature']}°C."})
+    for container in containers:
+        if container["status"] != "running":
+            findings.append({"key": f"container:{container['name']}:stopped", "severity": "critical", "title": "Container stoppet", "message": f"{container['name']} har status {container['status']}."})
+        elif container.get("healthy") == "unhealthy":
+            findings.append({"key": f"container:{container['name']}:unhealthy", "severity": "critical", "title": "Container unhealthy", "message": f"{container['name']} fejler sit healthcheck."})
+    if not backup:
+        findings.append({"key": "backup:missing", "severity": "warning", "title": "Ingen backup fundet", "message": "Backupmappen indeholder ingen registreret backup."})
+    else:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(backup["recorded_at"])
+        if age > timedelta(hours=BACKUP_MAX_AGE_HOURS):
+            findings.append({"key": "backup:old", "severity": "warning", "title": "Backup er for gammel", "message": f"Seneste backup er {round(age.total_seconds() / 3600)} timer gammel."})
+    for finding in findings:
+        write_event(finding["key"], finding["severity"], finding["title"], finding["message"])
+    return findings
+
+
+def assistant_answer(question, metrics, containers, backup, findings):
+    q = question.lower().strip()
+    stopped = [c["name"] for c in containers if c["status"] != "running"]
+    unhealthy = [c["name"] for c in containers if c.get("healthy") == "unhealthy"]
+    if any(word in q for word in ["fejl", "problem", "usædvan", "status", "sund"]):
+        if not findings:
+            return "Jeg kan ikke se aktuelle advarsler. Alle fundne containere kører, og systemmålingerne er under de konfigurerede grænser."
+        return "Aktuelle fund: " + " ".join(f"{f['title']}: {f['message']}" for f in findings)
+    if "backup" in q:
+        return f"Seneste backup er {backup['name']} fra {backup['time']} og fylder {backup['size_mb']} MB." if backup else "Der er ikke fundet nogen backup i backupmappen."
+    if "container" in q or "docker" in q:
+        if stopped or unhealthy:
+            return f"Stoppede containere: {', '.join(stopped) or 'ingen'}. Unhealthy containere: {', '.join(unhealthy) or 'ingen'}."
+        return f"Alle {len(containers)} fundne containere kører uden registreret unhealthy-status."
+    if "ram" in q:
+        top = sorted((c for c in containers if c.get("memory_mb") is not None), key=lambda c: c["memory_mb"], reverse=True)[:3]
+        detail = ", ".join(f"{c['name']} {c['memory_mb']} MB" for c in top) or "ingen containerdata"
+        return f"Systemets RAM-forbrug er {metrics['ram']}%. Største containere lige nu: {detail}."
+    if "cpu" in q:
+        top = sorted((c for c in containers if c.get("cpu") is not None), key=lambda c: c["cpu"], reverse=True)[:3]
+        detail = ", ".join(f"{c['name']} {c['cpu']}%" for c in top) or "ingen containerdata"
+        return f"Systemets CPU-forbrug er {metrics['cpu']}%. Største containere lige nu: {detail}."
+    if "temperatur" in q or "varm" in q:
+        return f"Den registrerede temperatur er {metrics['temperature']}°C." if metrics["temperature"] is not None else "Temperaturen kan ikke aflæses på denne installation."
+    return f"Systemet bruger CPU {metrics['cpu']}%, RAM {metrics['ram']}% og SSD {metrics['disk']}%. Jeg har registreret {len(findings)} aktuelle advarsler. Prøv fx: 'Vis fejl', 'Hvordan ser backup ud?' eller 'Hvad bruger mest RAM?'"
+
+
+def snapshot():
     containers, docker_error = docker_status()
     metrics = system_metrics()
+    backup = newest_backup()
     record_metrics(metrics)
-    return render_template("index.html", apps=app_status(containers), domains=domain_status(containers), containers=containers, docker_error=docker_error, metrics=metrics, backup=newest_backup(), admin_enabled=admin_allowed(), csrf_token=csrf_token(), audit=audit_history(10), updated=datetime.now().strftime("%d-%m-%Y %H:%M:%S"))
+    findings = analyze_system(metrics, containers, backup)
+    return containers, docker_error, metrics, backup, findings
+
+
+@app.get("/")
+def index():
+    containers, docker_error, metrics, backup, findings = snapshot()
+    return render_template("index.html", apps=app_status(containers), domains=domain_status(containers), containers=containers, docker_error=docker_error, metrics=metrics, backup=backup, findings=findings, events=event_history(10), admin_enabled=admin_allowed(), csrf_token=csrf_token(), audit=audit_history(10), updated=datetime.now().strftime("%d-%m-%Y %H:%M:%S"))
 
 
 @app.get("/api/status")
 def api_status():
-    containers, docker_error = docker_status()
-    metrics = system_metrics()
-    record_metrics(metrics)
-    return jsonify({"metrics": metrics, "containers": containers, "apps": app_status(containers), "domains": domain_status(containers), "docker_error": docker_error, "backup": newest_backup(), "admin_enabled": admin_allowed(), "updated": datetime.now().isoformat()})
+    containers, docker_error, metrics, backup, findings = snapshot()
+    return jsonify({"metrics": metrics, "containers": containers, "apps": app_status(containers), "domains": domain_status(containers), "docker_error": docker_error, "backup": backup, "findings": findings, "admin_enabled": admin_allowed(), "updated": datetime.now().isoformat()})
 
 
 @app.get("/api/history")
@@ -221,6 +305,21 @@ def api_backups():
 @app.get("/api/audit")
 def api_audit():
     return jsonify({"events": audit_history(min(max(request.args.get("limit", default=50, type=int), 1), 200))})
+
+
+@app.get("/api/events")
+def api_events():
+    return jsonify({"events": event_history(min(max(request.args.get("limit", default=50, type=int), 1), 200))})
+
+
+@app.post("/api/assistant")
+def api_assistant():
+    payload = request.get_json(silent=True) or {}
+    question = str(payload.get("question", ""))[:500]
+    if not question.strip():
+        return jsonify({"error": "Skriv et spørgsmål."}), 400
+    containers, _, metrics, backup, findings = snapshot()
+    return jsonify({"answer": assistant_answer(question, metrics, containers, backup, findings), "findings": findings, "generated_at": datetime.now(timezone.utc).isoformat()})
 
 
 @app.get("/api/containers/<container_name>/logs")
