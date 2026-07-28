@@ -5,6 +5,8 @@ services:
     image: ${VAGTBYTTE_IMAGE:-ghcr.io/flr45/vagtbytte:latest}
     container_name: vagtbytte-web
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     environment:
       TZ: ${TZ:-Europe/Copenhagen}
       NODE_ENV: production
@@ -37,6 +39,8 @@ services:
     image: ${VAGTBYTTE_IMAGE:-ghcr.io/flr45/vagtbytte:latest}
     container_name: vagtbytte-worker
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     environment:
       TZ: ${TZ:-Europe/Copenhagen}
       NODE_ENV: production
