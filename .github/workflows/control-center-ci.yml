@@ -40,16 +40,7 @@ jobs:
       - name: Lint
         run: ruff check .
 
-      - name: Capture test diagnostics
-        run: pytest -vv > pytest-output.txt 2>&1 || true
-
-      - name: Upload test diagnostics
-        uses: actions/upload-artifact@v4
-        with:
-          name: maintenance-pytest-output
-          path: apps/control-center/pytest-output.txt
-
-      - name: Fail on test findings
+      - name: Test
         run: pytest
 
       - name: Compile Python sources
