@@ -30,6 +30,14 @@ SCHEMA_STATEMENTS = (
         title TEXT NOT NULL,
         message TEXT NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS worker_status (
+        worker_name TEXT PRIMARY KEY,
+        started_at TEXT NOT NULL,
+        last_heartbeat_at TEXT NOT NULL,
+        last_success_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0
+    )""",
 )
 
 INDEX_STATEMENTS = (
