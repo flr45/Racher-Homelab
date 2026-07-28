@@ -1,3 +1,5 @@
+import os
+
 from flask import Blueprint, current_app, jsonify, request
 
 from rbac_extension import current_identity
@@ -109,4 +111,12 @@ def create_and_execute_rollout():
 
 
 def init_deployment_ui(app):
+    app.config.setdefault(
+        "DEPLOYMENT_ACTIONS_ENABLED",
+        os.getenv("DEPLOYMENT_ACTIONS_ENABLED", "false").lower() == "true",
+    )
+    app.config.setdefault(
+        "DEPLOYMENT_HEALTH_TIMEOUT_SECONDS",
+        min(600, max(15, int(os.getenv("DEPLOYMENT_HEALTH_TIMEOUT_SECONDS", "120")))),
+    )
     app.register_blueprint(deployment_ui_blueprint)
