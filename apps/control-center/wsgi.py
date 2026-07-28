@@ -1,4 +1,5 @@
 from app import create_app
+from cloudflare_extension import init_cloudflare_center
 from configuration_extension import init_configuration_center
 from database_browser_extension import init_database_browser
 from file_browser_extension import init_file_browser
@@ -13,3 +14,4 @@ init_configuration_center(app)
 init_observability(app)
 init_database_browser(app)
 init_file_browser(app)
+init_cloudflare_center(app)
