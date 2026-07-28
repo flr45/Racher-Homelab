@@ -50,6 +50,30 @@ def test_database_schema_is_created(monkeypatch, tmp_path):
     assert {"metrics", "audit_log", "events"}.issubset(tables)
 
 
+def test_database_enables_sqlite_hardening_and_indexes(monkeypatch, tmp_path):
+    module, flask_app = load_app(monkeypatch, tmp_path)
+
+    with flask_app.app_context(), module.database() as connection:
+        journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+        busy_timeout = connection.execute("PRAGMA busy_timeout").fetchone()[0]
+        foreign_keys = connection.execute("PRAGMA foreign_keys").fetchone()[0]
+        indexes = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            ).fetchall()
+        }
+
+    assert journal_mode == "wal"
+    assert busy_timeout == 5_000
+    assert foreign_keys == 1
+    assert {
+        "idx_audit_recorded_at",
+        "idx_events_key_id",
+        "idx_events_recorded_at",
+    }.issubset(indexes)
+
+
 def test_create_app_applies_config_overrides(monkeypatch, tmp_path):
     _, flask_app = load_app(monkeypatch, tmp_path)
 
@@ -154,3 +178,15 @@ def test_event_service_deduplicates_same_key(monkeypatch, tmp_path):
     assert len(events) == 1
     assert events[0]["event_key"] == "metric:cpu"
     assert events[0]["message"] == "CPU er høj."
+
+
+def test_container_deployment_persists_writable_data_directory():
+    repository_root = CONTROL_CENTER_ROOT.parents[1]
+    compose = (repository_root / "compose/control-center/compose.yml").read_text()
+    dockerfile = (CONTROL_CENTER_ROOT / "Dockerfile").read_text()
+
+    assert "RACHER_OS_DATA: /data" in compose
+    assert "- control-center-data:/data" in compose
+    assert "\nvolumes:\n  control-center-data:" in compose
+    assert "mkdir -p /data" in dockerfile
+    assert "chown app:app /data" in dockerfile
