@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+import datetime as dt
 
 
 DEFAULT_MESSAGE = "Racher OS er midlertidigt i vedligeholdelsestilstand."
@@ -6,7 +6,7 @@ MAX_DURATION_MINUTES = 24 * 60
 
 
 def utc_now():
-    return datetime.now(timezone.utc)
+    return dt.datetime.now(dt.timezone.utc)
 
 
 def _normalize_message(message):
@@ -24,7 +24,7 @@ def _row_to_status(row, now):
             "remaining_seconds": 0,
         }
 
-    expires_at = datetime.fromisoformat(row["expires_at"])
+    expires_at = dt.datetime.fromisoformat(row["expires_at"])
     enabled = bool(row["enabled"]) and expires_at > now
     remaining = max(0, int((expires_at - now).total_seconds())) if enabled else 0
     return {
@@ -58,7 +58,7 @@ def enable_maintenance(message, duration_minutes, actor, database_factory, *, en
         raise ValueError(f"Varighed skal være mellem 1 og {MAX_DURATION_MINUTES} minutter.")
 
     now = enabled_at or utc_now()
-    expires_at = now + timedelta(minutes=duration_minutes)
+    expires_at = now + dt.timedelta(minutes=duration_minutes)
     normalized_message = _normalize_message(message)
     normalized_actor = (str(actor or "unknown").strip() or "unknown")[:255]
 
