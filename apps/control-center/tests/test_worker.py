@@ -1,17 +1,17 @@
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask
 
-from services.database_service import open_database
-from services.event_service import list_events
-from services.metrics_service import metric_history
-from services.worker_service import get_worker_status, record_worker_heartbeat
-
 CONTROL_CENTER_ROOT = Path(__file__).resolve().parents[1]
+if str(CONTROL_CENTER_ROOT) not in sys.path:
+    sys.path.insert(0, str(CONTROL_CENTER_ROOT))
 
 
 def database_factory(tmp_path):
+    from services.database_service import open_database
+
     data_root = tmp_path / "data"
     database_path = data_root / "racher-os.db"
     return lambda: open_database(data_root, database_path)
@@ -32,6 +32,8 @@ def configured_app():
 
 def test_monitoring_cycle_records_metrics_and_findings(monkeypatch, tmp_path):
     from services import monitoring_service
+    from services.event_service import list_events
+    from services.metrics_service import metric_history
 
     factory = database_factory(tmp_path)
     metrics = {
@@ -77,6 +79,7 @@ def test_monitoring_cycle_records_metrics_and_findings(monkeypatch, tmp_path):
 
 def test_monitoring_cycle_records_docker_connection_failure(monkeypatch, tmp_path):
     from services import monitoring_service
+    from services.event_service import list_events
 
     factory = database_factory(tmp_path)
     metrics = {
@@ -106,6 +109,7 @@ def test_monitoring_cycle_records_docker_connection_failure(monkeypatch, tmp_pat
 
 def test_worker_cycle_records_successful_heartbeat(monkeypatch, tmp_path):
     import worker
+    from services.worker_service import get_worker_status
 
     factory = database_factory(tmp_path)
     monkeypatch.setattr(
@@ -125,6 +129,7 @@ def test_worker_cycle_records_successful_heartbeat(monkeypatch, tmp_path):
 
 def test_worker_cycle_records_failure_without_crashing(monkeypatch, tmp_path):
     import worker
+    from services.worker_service import get_worker_status
 
     factory = database_factory(tmp_path)
 
@@ -142,6 +147,8 @@ def test_worker_cycle_records_failure_without_crashing(monkeypatch, tmp_path):
 
 
 def test_worker_status_detects_stale_heartbeat(tmp_path):
+    from services.worker_service import get_worker_status, record_worker_heartbeat
+
     factory = database_factory(tmp_path)
     recorded_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
     record_worker_heartbeat(factory, success=True, recorded_at=recorded_at)
