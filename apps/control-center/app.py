@@ -7,6 +7,11 @@ from config import Config
 from services.audit_service import append_audit_entry, list_audit_entries
 from services.backup_service import backups
 from services.database_service import open_database
+from services.deployment_service import (
+    deployment_center_status,
+    list_deployment_history,
+    list_deployments,
+)
 from services.docker_service import (
     ContainerNotFoundError,
     app_status,
@@ -125,6 +130,10 @@ def notifications_status():
     )
 
 
+def deployments_status():
+    return deployment_center_status(database)
+
+
 def assistant_answer(question, metrics, containers, backup, findings):
     q = question.lower().strip()
     stopped = [c["name"] for c in containers if c["status"] != "running"]
@@ -185,6 +194,7 @@ def index():
         events=event_history(10),
         worker=worker_status(),
         notifications=notifications_status(),
+        deployments=deployments_status(),
         admin_enabled=admin_allowed(),
         csrf_token=csrf_token(),
         audit=audit_history(10),
@@ -206,6 +216,7 @@ def api_status():
             "findings": findings,
             "worker": worker_status(),
             "notifications": notifications_status(),
+            "deployments": deployments_status(),
             "admin_enabled": admin_allowed(),
             "updated": datetime.now().isoformat(),
         }
@@ -247,6 +258,18 @@ def api_notifications():
         {
             "notification_center": notifications_status(),
             "notifications": list_notifications(limit, database),
+        }
+    )
+
+
+@blueprint.get("/api/deployments")
+def api_deployments():
+    limit = min(max(request.args.get("limit", default=50, type=int), 1), 200)
+    return jsonify(
+        {
+            "deployment_center": deployments_status(),
+            "deployments": list_deployments(database),
+            "history": list_deployment_history(limit, database),
         }
     )
 
