@@ -11,6 +11,7 @@ from migration_extension import init_migrations
 from observability_extension import init_observability
 from plugin_extension import init_plugin_center
 from rbac_extension import init_rbac
+from restore_ui_extension import init_restore_ui
 from security_extension import init_security
 
 app = create_app()
@@ -27,3 +28,4 @@ init_file_browser(app)
 init_cloudflare_center(app)
 init_plugin_center(app)
 init_deployment_ui(app)
+init_restore_ui(app)
