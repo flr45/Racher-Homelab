@@ -1,17 +1,16 @@
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from flask import Blueprint, Flask, current_app, jsonify, render_template, request, session
 
 from config import Config
 from services.audit_service import append_audit_entry, list_audit_entries
-from services.backup_service import backups, newest_backup
+from services.backup_service import backups
 from services.database_service import open_database
 from services.docker_service import (
     ContainerNotFoundError,
     app_status,
     container_logs,
-    docker_status,
     domain_status,
     perform_container_action,
 )
@@ -22,9 +21,11 @@ from services.metrics_service import (
 from services.metrics_service import (
     record_metrics as store_metrics,
 )
-from services.metrics_service import (
-    system_metrics,
+from services.monitoring_service import (
+    analyze_system as inspect_system,
 )
+from services.monitoring_service import collect_snapshot
+from services.worker_service import get_worker_status
 
 blueprint = Blueprint("control_center", __name__)
 
@@ -90,81 +91,25 @@ def event_history(limit=50):
     return list_events(limit, database)
 
 
-def analyze_system(metrics, containers, backup):
-    findings = []
-    for key, value, threshold, label in [
-        ("cpu", metrics["cpu"], current_app.config["CPU_WARNING"], "CPU"),
-        ("ram", metrics["ram"], current_app.config["RAM_WARNING"], "RAM"),
-        ("disk", metrics["disk"], current_app.config["DISK_WARNING"], "SSD"),
-    ]:
-        if value >= threshold:
-            findings.append(
-                {
-                    "key": f"metric:{key}",
-                    "severity": "warning",
-                    "title": f"Høj {label}-belastning",
-                    "message": f"{label} er på {value}% (grænse {threshold}%).",
-                }
-            )
-    if (
-        metrics["temperature"] is not None
-        and metrics["temperature"] >= current_app.config["TEMP_WARNING"]
-    ):
-        findings.append(
-            {
-                "key": "metric:temperature",
-                "severity": "warning",
-                "title": "Høj temperatur",
-                "message": f"Servertemperaturen er {metrics['temperature']}°C.",
-            }
-        )
-    for container in containers:
-        if container["status"] != "running":
-            findings.append(
-                {
-                    "key": f"container:{container['name']}:stopped",
-                    "severity": "critical",
-                    "title": "Container stoppet",
-                    "message": f"{container['name']} har status {container['status']}.",
-                }
-            )
-        elif container.get("healthy") == "unhealthy":
-            findings.append(
-                {
-                    "key": f"container:{container['name']}:unhealthy",
-                    "severity": "critical",
-                    "title": "Container unhealthy",
-                    "message": f"{container['name']} fejler sit healthcheck.",
-                }
-            )
-    if not backup:
-        findings.append(
-            {
-                "key": "backup:missing",
-                "severity": "warning",
-                "title": "Ingen backup fundet",
-                "message": "Backupmappen indeholder ingen registreret backup.",
-            }
-        )
-    else:
-        age = datetime.now(timezone.utc) - datetime.fromisoformat(backup["recorded_at"])
-        if age > timedelta(hours=current_app.config["BACKUP_MAX_AGE_HOURS"]):
-            findings.append(
-                {
-                    "key": "backup:old",
-                    "severity": "warning",
-                    "title": "Backup er for gammel",
-                    "message": f"Seneste backup er {round(age.total_seconds() / 3600)} timer gammel.",
-                }
-            )
-    for finding in findings:
-        write_event(
-            finding["key"],
-            finding["severity"],
-            finding["title"],
-            finding["message"],
-        )
-    return findings
+def analyze_system(metrics, containers, backup, docker_error=None):
+    return inspect_system(
+        metrics,
+        containers,
+        backup,
+        database,
+        docker_error=docker_error,
+    )
+
+
+def snapshot():
+    return collect_snapshot(database)
+
+
+def worker_status():
+    return get_worker_status(
+        database,
+        max_age_seconds=current_app.config["WORKER_HEALTH_MAX_AGE_SECONDS"],
+    )
 
 
 def assistant_answer(question, metrics, containers, backup, findings):
@@ -212,15 +157,6 @@ def assistant_answer(question, metrics, containers, backup, findings):
     return f"Systemet bruger CPU {metrics['cpu']}%, RAM {metrics['ram']}% og SSD {metrics['disk']}%. Jeg har registreret {len(findings)} aktuelle advarsler. Prøv fx: 'Vis fejl', 'Hvordan ser backup ud?' eller 'Hvad bruger mest RAM?'"
 
 
-def snapshot():
-    containers, docker_error = docker_status()
-    metrics = system_metrics()
-    backup = newest_backup()
-    record_metrics(metrics)
-    findings = analyze_system(metrics, containers, backup)
-    return containers, docker_error, metrics, backup, findings
-
-
 @blueprint.get("/")
 def index():
     containers, docker_error, metrics, backup, findings = snapshot()
@@ -234,6 +170,7 @@ def index():
         backup=backup,
         findings=findings,
         events=event_history(10),
+        worker=worker_status(),
         admin_enabled=admin_allowed(),
         csrf_token=csrf_token(),
         audit=audit_history(10),
@@ -253,6 +190,7 @@ def api_status():
             "docker_error": docker_error,
             "backup": backup,
             "findings": findings,
+            "worker": worker_status(),
             "admin_enabled": admin_allowed(),
             "updated": datetime.now().isoformat(),
         }
@@ -280,6 +218,11 @@ def api_audit():
 def api_events():
     limit = min(max(request.args.get("limit", default=50, type=int), 1), 200)
     return jsonify({"events": event_history(limit)})
+
+
+@blueprint.get("/api/worker")
+def api_worker():
+    return jsonify({"worker": worker_status()})
 
 
 @blueprint.post("/api/assistant")
