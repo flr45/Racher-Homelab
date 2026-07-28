@@ -3,25 +3,16 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from flask import Flask
+
 CONTROL_CENTER_ROOT = Path(__file__).resolve().parents[1]
 if str(CONTROL_CENTER_ROOT) not in sys.path:
     sys.path.insert(0, str(CONTROL_CENTER_ROOT))
 
-from flask import Flask
-
-from services.database_service import open_database
-from services.monitoring_service import analyze_system
-from services.notification_service import (
-    configured_channels,
-    dispatch_pending_notifications,
-    enqueue_finding_notifications,
-    list_notifications,
-    notification_center_status,
-    purge_old_notifications,
-)
-
 
 def database_factory(tmp_path):
+    from services.database_service import open_database
+
     data_root = tmp_path / "data"
     database_path = data_root / "racher-os.db"
     return lambda: open_database(data_root, database_path)
@@ -37,6 +28,8 @@ def critical_finding():
 
 
 def test_configured_channels_require_valid_complete_configuration():
+    from services.notification_service import configured_channels
+
     assert configured_channels(
         {
             "NOTIFICATION_WEBHOOK_URL": "file:///tmp/not-allowed",
@@ -56,6 +49,12 @@ def test_configured_channels_require_valid_complete_configuration():
 
 
 def test_enqueue_respects_minimum_severity_and_dispatches_successfully(tmp_path):
+    from services.notification_service import (
+        dispatch_pending_notifications,
+        enqueue_finding_notifications,
+        list_notifications,
+    )
+
     factory = database_factory(tmp_path)
     channels = {"webhook": {"kind": "webhook", "url": "https://example.test/hook"}}
     timestamp = datetime(2026, 7, 28, 18, 0, tzinfo=timezone.utc)
@@ -115,6 +114,12 @@ def test_enqueue_respects_minimum_severity_and_dispatches_successfully(tmp_path)
 
 
 def test_dispatch_retries_then_fails_and_redacts_credentials(tmp_path):
+    from services.notification_service import (
+        dispatch_pending_notifications,
+        enqueue_finding_notifications,
+        list_notifications,
+    )
+
     factory = database_factory(tmp_path)
     secret_url = "https://example.test/very-secret-token"
     channels = {"webhook": {"kind": "webhook", "url": secret_url}}
@@ -170,6 +175,11 @@ def test_dispatch_retries_then_fails_and_redacts_credentials(tmp_path):
 
 
 def test_notification_status_never_exposes_channel_credentials(tmp_path):
+    from services.notification_service import (
+        enqueue_finding_notifications,
+        notification_center_status,
+    )
+
     factory = database_factory(tmp_path)
     channels = {
         "webhook": {
@@ -195,6 +205,9 @@ def test_notification_status_never_exposes_channel_credentials(tmp_path):
 
 
 def test_monitoring_only_queues_notifications_for_new_deduplicated_events(tmp_path):
+    from services.monitoring_service import analyze_system
+    from services.notification_service import list_notifications
+
     factory = database_factory(tmp_path)
     flask_app = Flask(__name__)
     flask_app.config.update(
@@ -226,6 +239,13 @@ def test_monitoring_only_queues_notifications_for_new_deduplicated_events(tmp_pa
 
 
 def test_notification_retention_only_purges_terminal_history(tmp_path):
+    from services.notification_service import (
+        dispatch_pending_notifications,
+        enqueue_finding_notifications,
+        list_notifications,
+        purge_old_notifications,
+    )
+
     factory = database_factory(tmp_path)
     channels = {"webhook": {"kind": "webhook", "url": "https://example.test/hook"}}
     old = datetime(2026, 1, 1, tzinfo=timezone.utc)
