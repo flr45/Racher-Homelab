@@ -39,13 +39,12 @@ def run_cycle(flask_app, database_factory=None):
                 limit=flask_app.config.get("NOTIFICATION_BATCH_SIZE", 20),
                 max_attempts=flask_app.config.get("NOTIFICATION_MAX_ATTEMPTS", 5),
                 retry_base_seconds=flask_app.config.get(
-                    "NOTIFICATION_RETRY_BASE_SECONDS",
-                    60,
+                    "NOTIFICATION_RETRY_BASE_SECONDS", 60
                 ),
                 timeout_seconds=flask_app.config.get(
-                    "NOTIFICATION_HTTP_TIMEOUT_SECONDS",
-                    10,
+                    "NOTIFICATION_HTTP_TIMEOUT_SECONDS", 10
                 ),
+                retention_days=flask_app.config.get("NOTIFICATION_RETENTION_DAYS", 30),
             )
             record_worker_heartbeat(database_factory, success=True)
             LOGGER.info(
