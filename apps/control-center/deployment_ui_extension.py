@@ -1,7 +1,6 @@
 import os
 
 from flask import Blueprint, current_app, jsonify, request
-
 from rbac_extension import current_identity
 from services.database_service import open_database
 from services.docker_service import (
@@ -12,10 +11,10 @@ from services.docker_service import (
 )
 from services.rbac_service import has_permission
 from services.rollout_service import (
-    RolloutError,
     create_rollout,
     execute_rollout,
     list_rollouts,
+    RolloutError,
 )
 
 
