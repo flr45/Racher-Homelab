@@ -35,6 +35,38 @@ services:
       retries: 3
       start_period: 20s
 
+  control-center-worker:
+    image: ${CONTROL_CENTER_IMAGE:-ghcr.io/flr45/racher-homelab/control-center:latest}
+    container_name: control-center-worker
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    environment:
+      TZ: ${TZ:-Europe/Copenhagen}
+      RACHER_OS_DATA: /data
+      BACKUP_ROOT: /backups
+      MONITOR_INTERVAL_SECONDS: ${MONITOR_INTERVAL_SECONDS:-60}
+      WORKER_HEALTH_MAX_AGE_SECONDS: ${WORKER_HEALTH_MAX_AGE_SECONDS:-180}
+      CPU_WARNING_PERCENT: ${CPU_WARNING_PERCENT:-85}
+      RAM_WARNING_PERCENT: ${RAM_WARNING_PERCENT:-85}
+      DISK_WARNING_PERCENT: ${DISK_WARNING_PERCENT:-85}
+      TEMP_WARNING_C: ${TEMP_WARNING_C:-75}
+      BACKUP_MAX_AGE_HOURS: ${BACKUP_MAX_AGE_HOURS:-36}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/host-sys:ro
+      - ${BACKUP_ROOT:-/home/pi/homelab/backups}:/backups:ro
+      - control-center-data:/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "worker.py", "--healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
 volumes:
   control-center-data:
 
