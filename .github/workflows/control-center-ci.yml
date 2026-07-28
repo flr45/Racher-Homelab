@@ -1,0 +1,47 @@
+name: Control Center CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/control-center/**"
+      - ".github/workflows/control-center-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/control-center/**"
+      - ".github/workflows/control-center-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/control-center
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            apps/control-center/requirements.txt
+            apps/control-center/requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Test
+        run: pytest
+
+      - name: Compile Python sources
+        run: python -m compileall -q .
