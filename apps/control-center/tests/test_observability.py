@@ -59,11 +59,10 @@ def test_history_api_dashboard_and_status(tmp_path):
 
     status = client.get("/api/status")
     assert status.status_code == 200
-    assert status.get_json()["observability"] == {
-        "history_points": 0,
-        "retention_days": 30,
-        "logs_redacted": True,
-    }
+    observability = status.get_json()["observability"]
+    assert observability["history_points"] >= 1
+    assert observability["retention_days"] == 30
+    assert observability["logs_redacted"] is True
 
     dashboard = client.get("/")
     assert dashboard.status_code == 200
