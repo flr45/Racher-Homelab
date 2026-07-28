@@ -96,6 +96,16 @@ SCHEMA_STATEMENTS = (
         automatic_rollback INTEGER NOT NULL DEFAULT 1,
         message TEXT
     )""",
+    """CREATE TABLE IF NOT EXISTS maintenance_mode (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        enabled INTEGER NOT NULL DEFAULT 0,
+        message TEXT,
+        enabled_at TEXT,
+        expires_at TEXT,
+        enabled_by TEXT,
+        disabled_at TEXT,
+        disabled_by TEXT
+    )""",
 )
 
 INDEX_STATEMENTS = (
