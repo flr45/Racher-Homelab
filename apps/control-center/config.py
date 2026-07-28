@@ -106,3 +106,29 @@ class Config:
         MONITOR_INTERVAL_SECONDS * 2,
         int(os.getenv("WORKER_HEALTH_MAX_AGE_SECONDS", "180")),
     )
+
+    NOTIFICATION_WEBHOOK_URL = os.getenv("NOTIFICATION_WEBHOOK_URL", "")
+    PUSHOVER_APP_TOKEN = os.getenv("PUSHOVER_APP_TOKEN", "")
+    PUSHOVER_USER_KEY = os.getenv("PUSHOVER_USER_KEY", "")
+    NOTIFICATION_MIN_SEVERITY = os.getenv(
+        "NOTIFICATION_MIN_SEVERITY",
+        "critical",
+    ).lower()
+    if NOTIFICATION_MIN_SEVERITY not in {"info", "warning", "critical"}:
+        NOTIFICATION_MIN_SEVERITY = "critical"
+    NOTIFICATION_BATCH_SIZE = min(
+        100,
+        max(1, int(os.getenv("NOTIFICATION_BATCH_SIZE", "20"))),
+    )
+    NOTIFICATION_MAX_ATTEMPTS = max(
+        1,
+        int(os.getenv("NOTIFICATION_MAX_ATTEMPTS", "5")),
+    )
+    NOTIFICATION_RETRY_BASE_SECONDS = max(
+        10,
+        int(os.getenv("NOTIFICATION_RETRY_BASE_SECONDS", "60")),
+    )
+    NOTIFICATION_HTTP_TIMEOUT_SECONDS = max(
+        1,
+        int(os.getenv("NOTIFICATION_HTTP_TIMEOUT_SECONDS", "10")),
+    )
