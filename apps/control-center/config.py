@@ -107,6 +107,17 @@ class Config:
         int(os.getenv("WORKER_HEALTH_MAX_AGE_SECONDS", "180")),
     )
 
+    GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY", "flr45/Racher-Homelab").strip()
+    GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
+    GITHUB_CACHE_SECONDS = min(
+        3600,
+        max(15, int(os.getenv("GITHUB_CACHE_SECONDS", "120"))),
+    )
+    GITHUB_TIMEOUT_SECONDS = min(
+        30,
+        max(1, int(os.getenv("GITHUB_TIMEOUT_SECONDS", "8"))),
+    )
+
     NOTIFICATION_WEBHOOK_URL = os.getenv(
         "DISCORD_WEBHOOK_URL",
         os.getenv("NOTIFICATION_WEBHOOK_URL", ""),
