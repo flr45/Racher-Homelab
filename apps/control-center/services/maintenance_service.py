@@ -12,19 +12,23 @@ def _normalize_message(message):
     return (str(message or DEFAULT_MESSAGE).strip() or DEFAULT_MESSAGE)[:500]
 
 
+def _disabled_status():
+    return {
+        "enabled": False,
+        "message": None,
+        "enabled_at": None,
+        "expires_at": None,
+        "enabled_by": None,
+        "remaining_seconds": 0,
+    }
+
+
 def _row_to_status(row, now):
-    if row is None:
-        return {
-            "enabled": False,
-            "message": None,
-            "enabled_at": None,
-            "expires_at": None,
-            "enabled_by": None,
-            "remaining_seconds": 0,
-        }
+    if row is None or not row["enabled"] or not row["expires_at"]:
+        return _disabled_status()
 
     expires_at = dt.datetime.fromisoformat(row["expires_at"])
-    enabled = bool(row["enabled"]) and expires_at > now
+    enabled = expires_at > now
     remaining = max(0, int((expires_at - now).total_seconds())) if enabled else 0
     return {
         "enabled": enabled,
