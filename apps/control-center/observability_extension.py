@@ -1,5 +1,3 @@
-from html import escape
-
 from flask import Blueprint, current_app, jsonify, request
 
 from services.database_service import open_database
