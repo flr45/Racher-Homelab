@@ -85,6 +85,18 @@ class Config:
     BACKUP_ROOT = Path(os.getenv("BACKUP_ROOT", "/backups"))
     DATA_ROOT = Path(os.getenv("RACHER_OS_DATA", "/data"))
     DATABASE_PATH = DATA_ROOT / "racher-os.db"
+    FILE_BROWSER_ROOTS = tuple(
+        Path(value.strip())
+        for value in os.getenv("FILE_BROWSER_ROOTS", "/data,/backups").split(",")
+        if value.strip()
+    )
+    FILE_BROWSER_MAX_DOWNLOAD_BYTES = min(
+        1024 * 1024 * 1024,
+        max(
+            1024,
+            int(os.getenv("FILE_BROWSER_MAX_DOWNLOAD_BYTES", str(50 * 1024 * 1024))),
+        ),
+    )
 
     ADMIN_ACTIONS_ENABLED = os.getenv("ADMIN_ACTIONS_ENABLED", "false").lower() == "true"
     ALLOWED_EMAILS = _csv_set("ALLOWED_ADMIN_EMAILS", lowercase=True)
