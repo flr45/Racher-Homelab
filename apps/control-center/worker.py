@@ -7,6 +7,10 @@ from threading import Event
 
 from app import create_app, database
 from services.monitoring_service import collect_snapshot
+from services.notification_service import (
+    configured_channels,
+    dispatch_pending_notifications,
+)
 from services.worker_service import (
     get_worker_status,
     record_worker_heartbeat,
@@ -29,15 +33,30 @@ def run_cycle(flask_app, database_factory=None):
             containers, docker_error, metrics, backup, findings = collect_snapshot(
                 database_factory
             )
+            notification_result = dispatch_pending_notifications(
+                database_factory,
+                configured_channels(flask_app.config),
+                limit=flask_app.config.get("NOTIFICATION_BATCH_SIZE", 20),
+                max_attempts=flask_app.config.get("NOTIFICATION_MAX_ATTEMPTS", 5),
+                retry_base_seconds=flask_app.config.get(
+                    "NOTIFICATION_RETRY_BASE_SECONDS",
+                    60,
+                ),
+                timeout_seconds=flask_app.config.get(
+                    "NOTIFICATION_HTTP_TIMEOUT_SECONDS",
+                    10,
+                ),
+            )
             record_worker_heartbeat(database_factory, success=True)
             LOGGER.info(
-                "Monitoring cycle completed: containers=%s findings=%s cpu=%s ram=%s backup=%s docker_error=%s",
+                "Monitoring cycle completed: containers=%s findings=%s cpu=%s ram=%s backup=%s docker_error=%s notifications=%s",
                 len(containers),
                 len(findings),
                 metrics["cpu"],
                 metrics["ram"],
                 backup["name"] if backup else "missing",
                 docker_error or "none",
+                notification_result,
             )
             return True
         except Exception as exc:
