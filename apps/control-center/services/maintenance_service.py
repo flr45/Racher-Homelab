@@ -1,6 +1,5 @@
 import datetime as dt
 
-
 DEFAULT_MESSAGE = "Racher OS er midlertidigt i vedligeholdelsestilstand."
 MAX_DURATION_MINUTES = 24 * 60
 
