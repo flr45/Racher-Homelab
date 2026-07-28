@@ -5,6 +5,8 @@ services:
     image: ${MINUTREGNSKAB_IMAGE:-ghcr.io/flr45/minutregnskab:latest}
     container_name: minutregnskab
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     environment:
       TZ: ${TZ:-Europe/Copenhagen}
     expose:
