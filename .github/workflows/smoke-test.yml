@@ -1,0 +1,43 @@
+name: Smoke Test
+
+on:
+  pull_request:
+    paths:
+      - 'apps/control-center/**'
+      - 'scripts/smoke-test.sh'
+      - '.github/workflows/smoke-test.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/control-center/**'
+      - 'scripts/smoke-test.sh'
+      - '.github/workflows/smoke-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t racher-control-center:smoke apps/control-center
+      - name: Start isolated container
+        run: |
+          docker run -d --name racher-smoke \
+            -p 127.0.0.1:18080:8080 \
+            -e RACHER_OS_SECRET_KEY=smoke-test-only-secret-value \
+            -e RACHER_OS_DATA=/tmp/racher-data \
+            -e BACKUP_ROOT=/tmp/racher-backups \
+            -e PLUGIN_ROOT=/tmp/racher-plugins \
+            racher-control-center:smoke
+      - name: Run smoke suite
+        run: bash scripts/smoke-test.sh
+      - name: Show logs on failure
+        if: failure()
+        run: docker logs racher-smoke
+      - name: Cleanup
+        if: always()
+        run: docker rm -f racher-smoke || true
