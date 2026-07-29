@@ -9,7 +9,11 @@ ok() { printf '[OK] %s\n' "$*"; pass=$((pass + 1)); }
 warning() { printf '[ADVARSEL] %s\n' "$*"; warn=$((warn + 1)); }
 error() { printf '[FEJL] %s\n' "$*" >&2; fail=$((fail + 1)); }
 
-[[ "$(uname -s)" == "Linux" ]] && ok "Linux registreret" || error "Kun Linux understøttes"
+if [[ "$(uname -s)" == "Linux" ]]; then
+  ok "Linux registreret"
+else
+  error "Kun Linux understøttes"
+fi
 
 arch="$(uname -m)"
 case "$arch" in
@@ -37,18 +41,30 @@ else
 fi
 
 for command in sudo apt-get curl git openssl; do
-  command -v "$command" >/dev/null 2>&1 && ok "$command findes" || error "$command mangler"
+  if command -v "$command" >/dev/null 2>&1; then
+    ok "$command findes"
+  else
+    error "$command mangler"
+  fi
 done
 
 if command -v docker >/dev/null 2>&1; then
-  docker info >/dev/null 2>&1 && ok "Docker Engine svarer" || warning "Docker findes, men brugeren har ikke aktiv adgang endnu"
+  if docker info >/dev/null 2>&1; then
+    ok "Docker Engine svarer"
+  else
+    warning "Docker findes, men brugeren har ikke aktiv adgang endnu"
+  fi
 else
   warning "Docker installeres af bootstrap-scriptet"
 fi
 
 if command -v vcgencmd >/dev/null 2>&1; then
   throttle="$(vcgencmd get_throttled 2>/dev/null || true)"
-  [[ "$throttle" == "throttled=0x0" ]] && ok "Ingen Pi-throttling registreret" || warning "Pi rapporterer: ${throttle:-ukendt}"
+  if [[ "$throttle" == "throttled=0x0" ]]; then
+    ok "Ingen Pi-throttling registreret"
+  else
+    warning "Pi rapporterer: ${throttle:-ukendt}"
+  fi
 fi
 
 printf '\nResultat: %d OK, %d advarsler, %d fejl\n' "$pass" "$warn" "$fail"
