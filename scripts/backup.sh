@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT="${HOMELAB_ROOT:-$HOME/homelab/Racher-Homelab}"
-ENV_FILE="${ENV_FILE:-$ROOT/.env}"
-BACKUP_ROOT="${BACKUP_ROOT:-$HOME/homelab/backups}"
-BACKUP_MIRROR_DIR="${BACKUP_MIRROR_DIR:-}"
-CONTROL_CENTER_VOLUME="${CONTROL_CENTER_VOLUME:-racher-control-center_control-center-data}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${ENV_FILE:-$REPO_ROOT/.env}"
 STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
-DEST="$BACKUP_ROOT/$STAMP"
 
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -26,15 +22,37 @@ set -a
 source "$ENV_FILE"
 set +a
 
+BACKUP_ROOT="${BACKUP_ROOT:-$HOME/homelab/backups}"
+BACKUP_MIRROR_DIR="${BACKUP_MIRROR_DIR:-}"
+CONTROL_CENTER_CONTAINER="${CONTROL_CENTER_CONTAINER:-control-center}"
+CONTROL_CENTER_DATA_DIR="${CONTROL_CENTER_DATA_DIR:-$HOME/homelab/data}"
+DEST="$BACKUP_ROOT/$STAMP"
+CONTROL_CENTER_STAGE=""
+
 : "${POSTGRES_USER:?POSTGRES_USER mangler i .env}"
 : "${POSTGRES_DB:?POSTGRES_DB mangler i .env}"
 : "${NPM_DB_USER:?NPM_DB_USER mangler i .env}"
 : "${NPM_DB_PASSWORD:?NPM_DB_PASSWORD mangler i .env}"
 : "${NPM_DB_NAME:?NPM_DB_NAME mangler i .env}"
 
+[[ -d "$CONTROL_CENTER_DATA_DIR" ]] || fail "Control Center-datamappen mangler: $CONTROL_CENTER_DATA_DIR"
 mkdir -p "$DEST"
 chmod 700 "$DEST"
-trap 'log "Backup mislykkedes. Den ufuldstændige mappe bevares i $DEST"' ERR
+
+cleanup() {
+  if [[ -n "$CONTROL_CENTER_STAGE" && -d "$CONTROL_CENTER_STAGE" ]]; then
+    rm -rf "$CONTROL_CENTER_STAGE"
+  fi
+}
+
+on_error() {
+  local exit_code=$?
+  cleanup
+  log "Backup mislykkedes. Den ufuldstændige mappe bevares i $DEST"
+  exit "$exit_code"
+}
+
+trap on_error ERR
 
 container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" == "true" ]]
@@ -94,22 +112,46 @@ if container_running redis; then
   docker exec redis redis-cli SAVE >/dev/null
 fi
 
+if container_running "$CONTROL_CENTER_CONTAINER"; then
+  CONTROL_CENTER_STAGE="$(mktemp -d)"
+
+  log "Kopierer øvrige Control Center-data til staging"
+  tar \
+    --exclude='./racher-os.db' \
+    --exclude='./racher-os.db-*' \
+    -cf - \
+    -C "$CONTROL_CENTER_DATA_DIR" . | tar -xf - -C "$CONTROL_CENTER_STAGE"
+
+  log "Opretter konsistent SQLite-backup af Control Center"
+  docker exec "$CONTROL_CENTER_CONTAINER" rm -f /tmp/racher-os-backup.db
+  docker exec "$CONTROL_CENTER_CONTAINER" python -c 'import sqlite3; source = sqlite3.connect("/data/racher-os.db"); target = sqlite3.connect("/tmp/racher-os-backup.db"); source.backup(target); target.close(); source.close()'
+  docker cp "$CONTROL_CENTER_CONTAINER:/tmp/racher-os-backup.db" "$CONTROL_CENTER_STAGE/racher-os.db"
+  docker exec "$CONTROL_CENTER_CONTAINER" rm -f /tmp/racher-os-backup.db
+
+  log "Pakker Control Center-data"
+  tar -czf "$DEST/control-center-data.tar.gz" -C "$CONTROL_CENTER_STAGE" .
+  cleanup
+  CONTROL_CENTER_STAGE=""
+else
+  fail "Control Center-containeren kører ikke."
+fi
+
 backup_volume racher-homelab-core_npm_data npm-data
 backup_volume racher-homelab-core_npm_letsencrypt npm-letsencrypt
 backup_volume racher-homelab-core_portainer_data portainer
 backup_volume racher-homelab-core_uptime_kuma_data uptime-kuma
 backup_volume racher-homelab-data_redis_data redis
-backup_volume "$CONTROL_CENTER_VOLUME" control-center-data true
 
 cp "$ENV_FILE" "$DEST/env.backup"
 chmod 600 "$DEST/env.backup"
 
 cat > "$DEST/MANIFEST.json" <<EOF
 {
-  "format_version": 1,
+  "format_version": 2,
   "created_at": "$(date --iso-8601=seconds)",
   "host": "$(hostname)",
-  "control_center_volume": "$CONTROL_CENTER_VOLUME",
+  "control_center_container": "$CONTROL_CENTER_CONTAINER",
+  "control_center_data_dir": "$CONTROL_CENTER_DATA_DIR",
   "postgres_database": "$POSTGRES_DB",
   "npm_database": "$NPM_DB_NAME"
 }
