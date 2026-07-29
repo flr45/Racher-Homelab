@@ -162,6 +162,15 @@ MODULES = (
         "status_endpoint": "/api/setup",
     },
     {
+        "id": "configuration-drift",
+        "name": "Configuration Drift Center",
+        "description": "Sammenligner sikker runtime-konfiguration med den forventede baseline.",
+        "href": "/api/configuration-drift",
+        "category": "platform",
+        "permission": "system.read",
+        "status_endpoint": "/api/configuration-drift",
+    },
+    {
         "id": "configuration",
         "name": "Configuration Center",
         "description": "Secrets- og environment-inventory uden værdilæk.",
