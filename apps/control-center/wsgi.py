@@ -1,4 +1,5 @@
 from app import create_app
+from app_center_extension import init_app_center
 from audit_export_extension import init_audit_export_center
 from backup_verification_extension import init_backup_verification_center
 from cloudflare_extension import init_cloudflare_center
@@ -50,6 +51,7 @@ init_restore_ui(app)
 init_backup_verification_center(app)
 init_audit_export_center(app)
 init_docker_center(app)
+init_app_center(app)
 init_operations_timeline(app)
 init_operations_runbook_center(app)
 init_ssh_console(app)
