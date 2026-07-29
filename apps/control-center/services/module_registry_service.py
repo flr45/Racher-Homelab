@@ -153,6 +153,15 @@ MODULES = (
         "status_endpoint": "/api/release",
     },
     {
+        "id": "setup",
+        "name": "First-Run Setup Center",
+        "description": "Read-only opsætningsstatus og næste nødvendige konfigurationstrin.",
+        "href": "/api/setup",
+        "category": "platform",
+        "permission": "system.read",
+        "status_endpoint": "/api/setup",
+    },
+    {
         "id": "configuration",
         "name": "Configuration Center",
         "description": "Secrets- og environment-inventory uden værdilæk.",
