@@ -53,7 +53,11 @@ def backup_summary(path):
 def backups(limit=20):
     try:
         backup_root = current_app.config["BACKUP_ROOT"]
-        candidates = [path for path in backup_root.iterdir() if path.is_dir()]
+        candidates = [
+            path
+            for path in backup_root.iterdir()
+            if path.is_dir() and not path.is_symlink()
+        ]
         candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
         return [backup_summary(path) for path in candidates[:limit]]
     except Exception:
@@ -102,7 +106,7 @@ def validate_backup(name):
 
     if manifest is None:
         errors.append("Manifest mangler eller er ugyldigt.")
-    elif manifest.get("format_version") != 1:
+    elif manifest.get("format_version") not in {1, 2}:
         errors.append("Backupformatet understøttes ikke.")
 
     if checksum_path.is_file():
