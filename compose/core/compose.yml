@@ -68,6 +68,37 @@ services:
     networks:
       - proxy
 
+  control-center:
+    image: ${CONTROL_CENTER_IMAGE:-ghcr.io/flr45/racher-homelab/control-center:latest}
+    container_name: control-center
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: ${TZ:-Europe/Copenhagen}
+      RACHER_OS_DATA: /data
+      BACKUP_ROOT: /backups
+      VAGTBYTTE_URL: ${CONTROL_CENTER_VAGTBYTTE_URL:-#}
+      INDSATSBRIEF_URL: ${CONTROL_CENTER_INDSATSBRIEF_URL:-#}
+      MINUTREGNSKAB_URL: ${CONTROL_CENTER_MINUTREGNSKAB_URL:-#}
+      PORTAINER_URL: ${CONTROL_CENTER_PORTAINER_URL:-https://racher-pi.local:9443}
+      UPTIME_KUMA_URL: ${CONTROL_CENTER_UPTIME_KUMA_URL:-#}
+      NPM_URL: ${CONTROL_CENTER_NPM_URL:-http://racher-pi.local:81}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/homelab/data:/data
+      - ${HOME}/homelab/backups:/backups
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
 networks:
   proxy:
     name: proxy
