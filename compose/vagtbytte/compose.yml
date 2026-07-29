@@ -50,6 +50,8 @@ services:
       VAPID_SUBJECT: ${VAGTBYTTE_VAPID_SUBJECT}
       NOTIFICATIONS_DISABLE_PUSH: ${VAGTBYTTE_DISABLE_PUSH:-false}
     command: ["node", "scripts/notifications-worker.mjs"]
+    healthcheck:
+      disable: true
     networks:
       - backend
 
