@@ -1,0 +1,14 @@
+{
+  "id": "nginx-proxy-manager",
+  "name": "Nginx Proxy Manager",
+  "description": "Reverse proxy, lokale adresser og TLS-certifikater.",
+  "icon": "🌐",
+  "category": "infrastructure",
+  "service": "nginx-proxy-manager",
+  "image": "jc21/nginx-proxy-manager:latest",
+  "compose_file": "compose/core/compose.yml",
+  "url_env": "NPM_URL",
+  "url_default": "http://racher-pi.local:81",
+  "backup": true,
+  "auto_update": false
+}
