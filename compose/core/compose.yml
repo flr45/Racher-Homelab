@@ -74,6 +74,8 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    group_add:
+      - "${DOCKER_GID:-999}"
     ports:
       - "8080:8080"
     environment:
