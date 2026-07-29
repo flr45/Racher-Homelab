@@ -14,6 +14,7 @@ from observability_extension import init_observability
 from operations_timeline_extension import init_operations_timeline
 from plugin_extension import init_plugin_center
 from rbac_extension import init_rbac
+from readiness_extension import init_readiness_center
 from restore_ui_extension import init_restore_ui
 from security_extension import init_security
 from ssh_console_extension import init_ssh_console
@@ -36,4 +37,5 @@ init_restore_ui(app)
 init_docker_center(app)
 init_operations_timeline(app)
 init_ssh_console(app)
+init_readiness_center(app)
 init_module_registry(app)
