@@ -90,6 +90,15 @@ MODULES = (
         "status_endpoint": "/api/plugins",
     },
     {
+        "id": "readiness",
+        "name": "Readiness Center",
+        "description": "Installationskontrol for Docker, data, backup, database og integrationer.",
+        "href": "/api/readiness",
+        "category": "platform",
+        "permission": "system.read",
+        "status_endpoint": "/api/readiness",
+    },
+    {
         "id": "configuration",
         "name": "Configuration Center",
         "description": "Secrets- og environment-inventory uden værdilæk.",
