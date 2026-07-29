@@ -27,6 +27,7 @@ BACKUP_MIRROR_DIR="${BACKUP_MIRROR_DIR:-}"
 CONTROL_CENTER_CONTAINER="${CONTROL_CENTER_CONTAINER:-control-center}"
 CONTROL_CENTER_DATA_DIR="${CONTROL_CENTER_DATA_DIR:-$HOME/homelab/data}"
 DEST="$BACKUP_ROOT/$STAMP"
+CONTROL_CENTER_STAGE=""
 
 : "${POSTGRES_USER:?POSTGRES_USER mangler i .env}"
 : "${POSTGRES_DB:?POSTGRES_DB mangler i .env}"
@@ -37,7 +38,21 @@ DEST="$BACKUP_ROOT/$STAMP"
 [[ -d "$CONTROL_CENTER_DATA_DIR" ]] || fail "Control Center-datamappen mangler: $CONTROL_CENTER_DATA_DIR"
 mkdir -p "$DEST"
 chmod 700 "$DEST"
-trap 'log "Backup mislykkedes. Den ufuldstændige mappe bevares i $DEST"' ERR
+
+cleanup() {
+  if [[ -n "$CONTROL_CENTER_STAGE" && -d "$CONTROL_CENTER_STAGE" ]]; then
+    rm -rf "$CONTROL_CENTER_STAGE"
+  fi
+}
+
+on_error() {
+  local exit_code=$?
+  cleanup
+  log "Backup mislykkedes. Den ufuldstændige mappe bevares i $DEST"
+  exit "$exit_code"
+}
+
+trap on_error ERR
 
 container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" == "true" ]]
@@ -98,18 +113,25 @@ if container_running redis; then
 fi
 
 if container_running "$CONTROL_CENTER_CONTAINER"; then
-  log "Opretter konsistent SQLite-backup af Control Center"
-  docker exec \
-    -e BACKUP_DB_PATH="/backups/$STAMP/control-center.sqlite3" \
-    "$CONTROL_CENTER_CONTAINER" \
-    python -c 'import os, sqlite3; source = sqlite3.connect("/data/racher-os.db"); target = sqlite3.connect(os.environ["BACKUP_DB_PATH"]); source.backup(target); target.close(); source.close()'
+  CONTROL_CENTER_STAGE="$(mktemp -d)"
 
-  log "Sikkerhedskopierer øvrige Control Center-data"
+  log "Kopierer øvrige Control Center-data til staging"
   tar \
     --exclude='./racher-os.db' \
     --exclude='./racher-os.db-*' \
-    -czf "$DEST/control-center-files.tar.gz" \
-    -C "$CONTROL_CENTER_DATA_DIR" .
+    -cf - \
+    -C "$CONTROL_CENTER_DATA_DIR" . | tar -xf - -C "$CONTROL_CENTER_STAGE"
+
+  log "Opretter konsistent SQLite-backup af Control Center"
+  docker exec "$CONTROL_CENTER_CONTAINER" rm -f /tmp/racher-os-backup.db
+  docker exec "$CONTROL_CENTER_CONTAINER" python -c 'import sqlite3; source = sqlite3.connect("/data/racher-os.db"); target = sqlite3.connect("/tmp/racher-os-backup.db"); source.backup(target); target.close(); source.close()'
+  docker cp "$CONTROL_CENTER_CONTAINER:/tmp/racher-os-backup.db" "$CONTROL_CENTER_STAGE/racher-os.db"
+  docker exec "$CONTROL_CENTER_CONTAINER" rm -f /tmp/racher-os-backup.db
+
+  log "Pakker Control Center-data"
+  tar -czf "$DEST/control-center-data.tar.gz" -C "$CONTROL_CENTER_STAGE" .
+  cleanup
+  CONTROL_CENTER_STAGE=""
 else
   fail "Control Center-containeren kører ikke."
 fi
