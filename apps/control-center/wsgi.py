@@ -1,5 +1,6 @@
 from app import create_app
 from cloudflare_extension import init_cloudflare_center
+from configuration_drift_extension import init_configuration_drift_center
 from configuration_extension import init_configuration_center
 from database_browser_extension import init_database_browser
 from deployment_ui_extension import init_deployment_ui
@@ -35,6 +36,7 @@ init_rbac(app)
 init_maintenance(app)
 init_github_center(app)
 init_configuration_center(app)
+init_configuration_drift_center(app)
 init_observability(app)
 init_database_browser(app)
 init_file_browser(app)
