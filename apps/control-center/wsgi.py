@@ -17,6 +17,7 @@ from operations_timeline_extension import init_operations_timeline
 from plugin_extension import init_plugin_center
 from rbac_extension import init_rbac
 from readiness_extension import init_readiness_center
+from release_extension import init_release_center
 from restore_ui_extension import init_restore_ui
 from security_extension import init_security
 from service_health_extension import init_service_health_center
@@ -50,4 +51,5 @@ init_storage_center(app)
 init_service_health_center(app)
 init_update_center(app)
 init_support_bundle_center(app)
+init_release_center(app)
 init_module_registry(app)
