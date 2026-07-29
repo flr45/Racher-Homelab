@@ -58,7 +58,7 @@ def test_registry_rejects_invalid_and_duplicate_manifests(tmp_path):
     registry_root = tmp_path / "registry"
     registry_root.mkdir()
     write_manifest(registry_root)
-    write_manifest(registry_root, id="duplicate", service="minutregnskab")
+    write_manifest(registry_root, id="z-duplicate", service="minutregnskab")
     (registry_root / "broken.json").write_text("{", encoding="utf-8")
 
     apps, errors = load_app_registry(registry_root)
