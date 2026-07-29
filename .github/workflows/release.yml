@@ -1,6 +1,12 @@
 name: Release
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'apps/control-center/VERSION'
+      - 'scripts/**'
+      - 'compose/**'
   push:
     tags:
       - 'v*.*.*'
@@ -29,9 +35,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           version="${{ github.event.inputs.version || '' }}"
-          if [[ -z "$version" ]]; then version="${GITHUB_REF_NAME#v}"; fi
-          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          if [[ -z "$version" && "${GITHUB_EVENT_NAME}" == "push" ]]; then version="${GITHUB_REF_NAME#v}"; fi
           file_version="$(tr -d '[:space:]' < apps/control-center/VERSION)"
+          if [[ -z "$version" ]]; then version="$file_version"; fi
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
           [[ "$version" == "$file_version" ]]
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Run Control Center tests
@@ -48,6 +55,7 @@ jobs:
           docker compose --env-file .env.example -f compose/core/compose.yml config --quiet
 
   release:
+    if: github.event_name != 'pull_request'
     needs: validate
     runs-on: ubuntu-latest
     steps:
