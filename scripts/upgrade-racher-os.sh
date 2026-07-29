@@ -15,7 +15,9 @@ OLD_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 TARGET="${1:-origin/main}"
 
 [[ -f "$ENV_FILE" ]] || fail ".env mangler."
-git -C "$REPO_ROOT" diff --quiet && git -C "$REPO_ROOT" diff --cached --quiet || fail "Arbejdstræet har lokale ændringer."
+if ! git -C "$REPO_ROOT" diff --quiet || ! git -C "$REPO_ROOT" diff --cached --quiet; then
+  fail "Arbejdstræet har lokale ændringer."
+fi
 
 rollback() {
   log "Ruller tilbage til $OLD_COMMIT"
