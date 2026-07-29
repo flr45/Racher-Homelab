@@ -1,0 +1,14 @@
+{
+  "id": "portainer",
+  "name": "Portainer",
+  "description": "Docker-administration og containeroversigt.",
+  "icon": "🐳",
+  "category": "infrastructure",
+  "service": "portainer",
+  "image": "portainer/portainer-ce:lts",
+  "compose_file": "compose/core/compose.yml",
+  "url_env": "PORTAINER_URL",
+  "url_default": "https://racher-pi.local:9443",
+  "backup": true,
+  "auto_update": false
+}

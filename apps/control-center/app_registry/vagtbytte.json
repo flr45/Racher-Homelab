@@ -1,0 +1,14 @@
+{
+  "id": "vagtbytte",
+  "name": "Vagtbytte",
+  "description": "Vagtbytte, notifikationer og godkendelsesflow.",
+  "icon": "🚒",
+  "category": "apps",
+  "service": "vagtbytte-web",
+  "image": "ghcr.io/flr45/vagtbytte:latest",
+  "compose_file": "compose/vagtbytte/compose.yml",
+  "url_env": "VAGTBYTTE_URL",
+  "url_default": "#",
+  "backup": true,
+  "auto_update": true
+}
