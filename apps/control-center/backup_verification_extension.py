@@ -17,6 +17,9 @@ def build_backup_verification_report():
             "latest": None,
             "validation": None,
             "age_hours": None,
+            "max_age_hours": max(
+                1, int(current_app.config.get("BACKUP_MAX_AGE_HOURS", 36))
+            ),
             "read_only": True,
         }
 
