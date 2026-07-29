@@ -1,0 +1,14 @@
+{
+  "id": "uptime-kuma",
+  "name": "Uptime Kuma",
+  "description": "Healthchecks, oppetid og ekstern serviceovervågning.",
+  "icon": "📈",
+  "category": "infrastructure",
+  "service": "uptime-kuma",
+  "image": "louislam/uptime-kuma:1",
+  "compose_file": "compose/core/compose.yml",
+  "url_env": "UPTIME_KUMA_URL",
+  "url_default": "#",
+  "backup": true,
+  "auto_update": false
+}
