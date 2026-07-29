@@ -1,0 +1,14 @@
+{
+  "id": "minutregnskab",
+  "name": "Minutregnskab",
+  "description": "Mobilvenligt minutregnskab til ambulancevagter.",
+  "icon": "⏱️",
+  "category": "apps",
+  "service": "minutregnskab",
+  "image": "ghcr.io/flr45/minutregnskab:latest",
+  "compose_file": "compose/minutregnskab/compose.yml",
+  "url_env": "MINUTREGNSKAB_URL",
+  "url_default": "#",
+  "backup": false,
+  "auto_update": true
+}
