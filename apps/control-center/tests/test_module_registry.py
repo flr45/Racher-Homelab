@@ -34,6 +34,7 @@ def test_viewer_only_sees_readable_modules():
     ids = {item["id"] for item in response.get_json()["modules"]}
     assert "dashboard" in ids
     assert "docker" in ids
+    assert "readiness" in ids
     assert "ssh" not in ids
     assert "deployments" not in ids
 
@@ -44,8 +45,9 @@ def test_admin_sees_all_modules_and_group_order():
     ids = {item["id"] for item in payload["modules"]}
     assert "ssh" in ids
     assert "deployments" in ids
+    assert "readiness" in ids
     assert payload["groups"][0]["category"] == "overview"
-    assert len(payload["modules"]) == 12
+    assert len(payload["modules"]) == 13
 
 
 def test_control_center_renders_mobile_friendly_module_cards():
