@@ -45,7 +45,7 @@ def make_app(
     protected_containers=None,
 ):
     registry_root = tmp_path / "registry"
-    registry_root.mkdir()
+    registry_root.mkdir(parents=True)
     write_manifest(registry_root, **(manifest_overrides or {}))
 
     template_root = Path(__file__).resolve().parents[1] / "templates"
