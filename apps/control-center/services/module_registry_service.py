@@ -135,6 +135,15 @@ MODULES = (
         "status_endpoint": "/api/service-health",
     },
     {
+        "id": "updates",
+        "name": "Update Center",
+        "description": "Read-only oversigt over tilgængelige systempakkeopdateringer.",
+        "href": "/api/updates",
+        "category": "operations",
+        "permission": "system.read",
+        "status_endpoint": "/api/updates",
+    },
+    {
         "id": "configuration",
         "name": "Configuration Center",
         "description": "Secrets- og environment-inventory uden værdilæk.",
