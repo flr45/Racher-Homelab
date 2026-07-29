@@ -9,6 +9,7 @@ from github_extension import init_github_center
 from logging_extension import init_structured_logging
 from maintenance_extension import init_maintenance
 from migration_extension import init_migrations
+from module_registry_extension import init_module_registry
 from observability_extension import init_observability
 from operations_timeline_extension import init_operations_timeline
 from plugin_extension import init_plugin_center
@@ -35,3 +36,4 @@ init_restore_ui(app)
 init_docker_center(app)
 init_operations_timeline(app)
 init_ssh_console(app)
+init_module_registry(app)

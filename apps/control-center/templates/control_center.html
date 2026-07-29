@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Racher OS · Control Center</title>
+  <style>
+    :root{color-scheme:dark;--bg:#071019;--panel:#102030;--line:rgba(255,255,255,.09);--text:#f5f7fb;--muted:#91a4b7;--accent:#62a8ff;--green:#31d17c}*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:radial-gradient(circle at 80% 0,#123558 0,transparent 34%),var(--bg);color:var(--text)}a{color:inherit}.shell{min-height:100vh;display:grid;grid-template-columns:260px 1fr}.sidebar{border-right:1px solid var(--line);padding:24px 18px;background:rgba(7,16,25,.9);position:sticky;top:0;height:100vh}.brand{display:flex;gap:12px;align-items:center;margin-bottom:28px}.logo{width:44px;height:44px;border-radius:14px;background:linear-gradient(145deg,var(--accent),#7b63ff);display:grid;place-items:center;font-weight:900}.muted,small{color:var(--muted)}.identity{padding:14px;border:1px solid var(--line);border-radius:15px;background:rgba(255,255,255,.035)}.identity strong{display:block;margin-bottom:5px}.nav{display:grid;gap:7px;margin-top:20px}.nav a{padding:11px 13px;text-decoration:none;border-radius:11px;color:var(--muted);font-weight:700}.nav a:hover{background:rgba(98,168,255,.12);color:var(--text)}main{padding:32px;min-width:0}.eyebrow{color:var(--accent);font-size:.75rem;text-transform:uppercase;letter-spacing:.16em;font-weight:900}h1{margin:6px 0 8px;font-size:clamp(2rem,5vw,3.7rem);letter-spacing:-.05em}.summary{display:flex;gap:10px;flex-wrap:wrap;margin:22px 0 30px}.pill{border:1px solid var(--line);border-radius:999px;padding:9px 13px;font-weight:800;background:rgba(255,255,255,.035)}.group{margin-bottom:30px}.group h2{text-transform:capitalize;font-size:1rem;color:var(--muted);letter-spacing:.08em;margin:0 0 12px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.card{display:flex;flex-direction:column;min-height:180px;padding:18px;border:1px solid var(--line);border-radius:19px;text-decoration:none;background:linear-gradient(145deg,rgba(20,36,52,.97),rgba(12,24,36,.97));transition:.18s ease}.card:hover{transform:translateY(-2px);border-color:rgba(98,168,255,.4);box-shadow:0 18px 44px rgba(0,0,0,.2)}.card-top{display:flex;justify-content:space-between;gap:10px}.card h3{margin:0;font-size:1.05rem}.status{font-size:.72rem;color:var(--green);font-weight:900;text-transform:uppercase;letter-spacing:.08em}.card p{color:var(--muted);line-height:1.5;margin:14px 0;flex:1}.open{color:var(--accent);font-weight:800;font-size:.86rem}.footer{text-align:center;color:var(--muted);font-size:.8rem;padding-top:12px}@media(max-width:1050px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.shell{display:block}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.nav{display:flex;overflow:auto}.nav a{white-space:nowrap}main{padding:22px 14px}.grid{grid-template-columns:1fr}.card{min-height:150px}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><div class="logo">R</div><div><strong>Racher OS</strong><small>Unified Control Center</small></div></div>
+    <div class="identity"><strong>{{ identity.email or 'Ukendt bruger' }}</strong><small>Rolle: {{ identity.role }}</small></div>
+    <nav class="nav"><a href="/">Dashboard</a><a href="/control">Alle moduler</a><a href="/api/modules">Modul-API</a></nav>
+  </aside>
+  <main>
+    <div class="eyebrow">Racher OS v1.0 · moduloverblik</div>
+    <h1>Control Center</h1>
+    <div class="muted">Én samlet indgang til de moduler, din rolle har adgang til.</div>
+    <div class="summary"><span class="pill">{{ module_count }} moduler</span><span class="pill">Rolle: {{ identity.role }}</span><span class="pill">Read-only navigation</span></div>
+    {% for group in groups %}
+      <section class="group">
+        <h2>{{ group.category }}</h2>
+        <div class="grid">
+          {% for module in group.modules %}
+            <a class="card" href="{{ module.href }}">
+              <div class="card-top"><h3>{{ module.name }}</h3><span class="status">Tilgængelig</span></div>
+              <p>{{ module.description }}</p>
+              <span class="open">Åbn modul →</span>
+            </a>
+          {% endfor %}
+        </div>
+      </section>
+    {% else %}
+      <div class="muted">Din rolle har endnu ikke adgang til nogen moduler.</div>
+    {% endfor %}
+    <div class="footer">Racher OS · rollebaseret navigation · ingen data ændres fra denne side</div>
+  </main>
+</div>
+</body>
+</html>
