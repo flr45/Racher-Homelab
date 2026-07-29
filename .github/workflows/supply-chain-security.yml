@@ -45,10 +45,12 @@ jobs:
       - name: Build local image
         run: docker build --tag racher-control-center:audit apps/control-center
       - name: Scan image for fixable high and critical vulnerabilities
-        uses: aquasecurity/trivy-action@0.32.0
-        with:
-          image-ref: racher-control-center:audit
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
+        run: >-
+          docker run --rm
+          -v /var/run/docker.sock:/var/run/docker.sock
+          aquasec/trivy:0.66.0 image
+          --exit-code 1
+          --ignore-unfixed
+          --severity HIGH,CRITICAL
+          --format table
+          racher-control-center:audit
