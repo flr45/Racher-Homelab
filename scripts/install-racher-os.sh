@@ -8,6 +8,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${RACHER_ENV_FILE:-$REPO_ROOT/.env}"
 HEALTH_URL="${RACHER_HEALTH_URL:-http://127.0.0.1:81}"
 HEALTH_TIMEOUT="${RACHER_HEALTH_TIMEOUT:-120}"
+HOMELAB_ROOT="${HOMELAB_ROOT:-$HOME/homelab}"
+CONTROL_CENTER_GID=1001
 STACKS=(compose/data/compose.yml compose/core/compose.yml)
 REQUIRED_SECRETS=(NPM_DB_PASSWORD NPM_DB_ROOT_PASSWORD POSTGRES_PASSWORD)
 STARTED=()
@@ -28,6 +30,16 @@ read_env_value() {
   sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n 1
 }
 
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    sed -i "s/^${key}=.*/${key}=${value}/" "$ENV_FILE"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >>"$ENV_FILE"
+  fi
+}
+
 [[ "${EUID}" -ne 0 ]] || fail "Kør som normal bruger, ikke root."
 [[ "$HEALTH_TIMEOUT" =~ ^[0-9]+$ ]] || fail "RACHER_HEALTH_TIMEOUT skal være et heltal."
 (( HEALTH_TIMEOUT >= 30 && HEALTH_TIMEOUT <= 600 )) || fail "Health timeout skal være 30-600 sekunder."
@@ -35,6 +47,7 @@ command -v curl >/dev/null 2>&1 || fail "curl mangler."
 command -v docker >/dev/null 2>&1 || fail "Docker mangler. Kør scripts/bootstrap.sh først."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose-plugin mangler."
 docker info >/dev/null 2>&1 || fail "Docker kan ikke tilgås. Log ud og ind efter bootstrap."
+[[ -S /var/run/docker.sock ]] || fail "Docker-socketen mangler."
 
 if [[ ! -f "$ENV_FILE" ]]; then
   cp "$REPO_ROOT/.env.example" "$ENV_FILE"
@@ -42,6 +55,15 @@ if [[ ! -f "$ENV_FILE" ]]; then
   fail ".env er oprettet. Udfyld de obligatoriske værdier og kør igen."
 fi
 chmod 0600 "$ENV_FILE"
+
+DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+[[ "$DOCKER_GID" =~ ^[0-9]+$ ]] || fail "Docker-socketens gruppe-ID kunne ikke bestemmes."
+set_env_value "DOCKER_GID" "$DOCKER_GID"
+log "Docker-socket gruppe-ID registreret: $DOCKER_GID"
+
+install -d -m 0770 "$HOMELAB_ROOT/data" "$HOMELAB_ROOT/backups"
+sudo chown -R "$USER:$CONTROL_CENTER_GID" "$HOMELAB_ROOT/data" "$HOMELAB_ROOT/backups"
+sudo chmod -R u+rwX,g+rwX,o-rwx "$HOMELAB_ROOT/data" "$HOMELAB_ROOT/backups"
 
 for key in "${REQUIRED_SECRETS[@]}"; do
   value="$(read_env_value "$key")"
