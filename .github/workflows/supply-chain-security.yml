@@ -19,7 +19,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   python-audit:
@@ -45,17 +44,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build local image
         run: docker build --tag racher-control-center:audit apps/control-center
-      - name: Scan image
+      - name: Scan image for fixable high and critical vulnerabilities
         uses: aquasecurity/trivy-action@0.32.0
         with:
           image-ref: racher-control-center:audit
-          format: sarif
-          output: trivy-results.sarif
+          format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
-      - name: Upload scan report
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-results.sarif
