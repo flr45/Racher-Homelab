@@ -1,0 +1,14 @@
+{
+  "id": "indsatsbrief",
+  "name": "Indsatsbrief",
+  "description": "Indsatsbriefing og operationelt beslutningsstøtteværktøj.",
+  "icon": "🚑",
+  "category": "emergency",
+  "service": "indsatsbrief",
+  "image": "ghcr.io/flr45/indsatsbrief-api:latest",
+  "compose_file": "compose/indsatsbrief/compose.yml",
+  "url_env": "INDSATSBRIEF_URL",
+  "url_default": "#",
+  "backup": true,
+  "auto_update": true
+}
