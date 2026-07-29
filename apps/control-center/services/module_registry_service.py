@@ -144,6 +144,15 @@ MODULES = (
         "status_endpoint": "/api/updates",
     },
     {
+        "id": "release",
+        "name": "Release & Version Center",
+        "description": "Installeret version, releasekanal, build-tidspunkt og commit.",
+        "href": "/api/release",
+        "category": "platform",
+        "permission": "system.read",
+        "status_endpoint": "/api/release",
+    },
+    {
         "id": "configuration",
         "name": "Configuration Center",
         "description": "Secrets- og environment-inventory uden værdilæk.",
