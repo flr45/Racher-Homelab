@@ -10,6 +10,7 @@ from logging_extension import init_structured_logging
 from maintenance_extension import init_maintenance
 from migration_extension import init_migrations
 from module_registry_extension import init_module_registry
+from node_hardware_extension import init_node_hardware_center
 from observability_extension import init_observability
 from operations_timeline_extension import init_operations_timeline
 from plugin_extension import init_plugin_center
@@ -38,4 +39,5 @@ init_docker_center(app)
 init_operations_timeline(app)
 init_ssh_console(app)
 init_readiness_center(app)
+init_node_hardware_center(app)
 init_module_registry(app)
