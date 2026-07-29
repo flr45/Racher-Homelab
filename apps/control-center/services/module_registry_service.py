@@ -108,6 +108,15 @@ MODULES = (
         "status_endpoint": "/api/node-hardware",
     },
     {
+        "id": "network",
+        "name": "Network Center",
+        "description": "Interfaces, IP-adresser, linkstatus og lyttende porte.",
+        "href": "/api/network",
+        "category": "platform",
+        "permission": "system.read",
+        "status_endpoint": "/api/network",
+    },
+    {
         "id": "configuration",
         "name": "Configuration Center",
         "description": "Secrets- og environment-inventory uden værdilæk.",

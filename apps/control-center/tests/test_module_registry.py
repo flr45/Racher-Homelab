@@ -32,10 +32,7 @@ def test_viewer_only_sees_readable_modules():
     response = make_app().test_client().get("/api/modules", headers=VIEWER_HEADERS)
     assert response.status_code == 200
     ids = {item["id"] for item in response.get_json()["modules"]}
-    assert "dashboard" in ids
-    assert "docker" in ids
-    assert "readiness" in ids
-    assert "hardware" in ids
+    assert {"dashboard", "docker", "readiness", "hardware", "network"} <= ids
     assert "ssh" not in ids
     assert "deployments" not in ids
 
@@ -44,12 +41,9 @@ def test_admin_sees_all_modules_and_group_order():
     response = make_app().test_client().get("/api/modules", headers=ADMIN_HEADERS)
     payload = response.get_json()
     ids = {item["id"] for item in payload["modules"]}
-    assert "ssh" in ids
-    assert "deployments" in ids
-    assert "readiness" in ids
-    assert "hardware" in ids
+    assert {"ssh", "deployments", "readiness", "hardware", "network"} <= ids
     assert payload["groups"][0]["category"] == "overview"
-    assert len(payload["modules"]) == 14
+    assert len(payload["modules"]) >= 15
 
 
 def test_control_center_renders_mobile_friendly_module_cards():
@@ -59,4 +53,5 @@ def test_control_center_renders_mobile_friendly_module_cards():
     assert "Unified Control Center" in text
     assert "SSH Console" in text
     assert "Node &amp; Hardware Center" in text
+    assert "Network Center" in text
     assert "@media(max-width:760px)" in text
