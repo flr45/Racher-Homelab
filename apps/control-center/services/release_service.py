@@ -16,9 +16,10 @@ def _safe_value(name, default=""):
     return value[:MAX_VALUE_LENGTH]
 
 
-def read_version(path=VERSION_FILE):
+def read_version(path=None):
+    version_path = VERSION_FILE if path is None else Path(path)
     try:
-        version = path.read_text(encoding="utf-8").strip()
+        version = version_path.read_text(encoding="utf-8").strip()
     except OSError:
         version = ""
     override = _safe_value("RACHER_OS_VERSION")
