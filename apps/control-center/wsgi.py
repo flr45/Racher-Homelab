@@ -1,4 +1,5 @@
 from app import create_app
+from backup_verification_extension import init_backup_verification_center
 from cloudflare_extension import init_cloudflare_center
 from configuration_drift_extension import init_configuration_drift_center
 from configuration_extension import init_configuration_center
@@ -44,6 +45,7 @@ init_cloudflare_center(app)
 init_plugin_center(app)
 init_deployment_ui(app)
 init_restore_ui(app)
+init_backup_verification_center(app)
 init_docker_center(app)
 init_operations_timeline(app)
 init_ssh_console(app)

@@ -45,6 +45,15 @@ MODULES = (
         "status_endpoint": "/api/restore",
     },
     {
+        "id": "backup-verification",
+        "name": "Backup Verification Center",
+        "description": "Checksum-, manifest- og alderskontrol af seneste backup.",
+        "href": "/api/backup-verification",
+        "category": "recovery",
+        "permission": "system.read",
+        "status_endpoint": "/api/backup-verification",
+    },
+    {
         "id": "database",
         "name": "Database Browser",
         "description": "Read-only tabel-, schema- og rækkevisning.",
