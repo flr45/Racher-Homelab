@@ -22,6 +22,7 @@ from security_extension import init_security
 from service_health_extension import init_service_health_center
 from ssh_console_extension import init_ssh_console
 from storage_center_extension import init_storage_center
+from support_bundle_extension import init_support_bundle_center
 from update_center_extension import init_update_center
 
 app = create_app()
@@ -48,4 +49,5 @@ init_network_center(app)
 init_storage_center(app)
 init_service_health_center(app)
 init_update_center(app)
+init_support_bundle_center(app)
 init_module_registry(app)

@@ -153,6 +153,15 @@ MODULES = (
         "status_endpoint": "/api/configuration",
     },
     {
+        "id": "support",
+        "name": "Support Bundle Center",
+        "description": "Sanitiseret admin-only diagnosepakke uden credentials eller logs.",
+        "href": "/api/support-bundle",
+        "category": "administration",
+        "permission": "support.export",
+        "status_endpoint": "/api/support-bundle",
+    },
+    {
         "id": "ssh",
         "name": "SSH Console",
         "description": "Allowlistede diagnosekommandoer uden fri shell.",
