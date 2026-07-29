@@ -15,6 +15,7 @@ from plugin_extension import init_plugin_center
 from rbac_extension import init_rbac
 from restore_ui_extension import init_restore_ui
 from security_extension import init_security
+from ssh_console_extension import init_ssh_console
 
 app = create_app()
 init_structured_logging(app)
@@ -33,3 +34,4 @@ init_deployment_ui(app)
 init_restore_ui(app)
 init_docker_center(app)
 init_operations_timeline(app)
+init_ssh_console(app)
