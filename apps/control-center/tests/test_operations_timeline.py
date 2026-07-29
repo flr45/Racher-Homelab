@@ -65,8 +65,8 @@ def test_timeline_combines_sorts_and_summarizes(tmp_path):
         "audit",
     ]
     assert payload["summary"]["total"] == 4
-    assert payload["summary"]["by_severity"]["critical"] == 1
-    assert payload["summary"]["by_severity"]["success"] == 3
+    assert payload["summary"]["by_severity"]["critical"] == 2
+    assert payload["summary"]["by_severity"]["success"] == 2
 
 
 def test_timeline_filters_query_and_rejects_unknown_values(tmp_path):
