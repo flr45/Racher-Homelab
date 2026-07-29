@@ -38,6 +38,8 @@ CONTROL_CENTER_CONTAINER="${CONTROL_CENTER_CONTAINER:-$(read_env_value CONTROL_C
 CONTROL_CENTER_CONTAINER="${CONTROL_CENTER_CONTAINER:-control-center}"
 CONTROL_CENTER_DATA_DIR="${CONTROL_CENTER_DATA_DIR:-$(read_env_value CONTROL_CENTER_DATA_DIR)}"
 CONTROL_CENTER_DATA_DIR="${CONTROL_CENTER_DATA_DIR:-$HOME/homelab/data}"
+CONTROL_CENTER_GID="${CONTROL_CENTER_GID:-$(read_env_value CONTROL_CENTER_GID)}"
+CONTROL_CENTER_GID="${CONTROL_CENTER_GID:-1001}"
 POSTGRES_USER="${POSTGRES_USER:-$(read_env_value POSTGRES_USER)}"
 POSTGRES_DB="${POSTGRES_DB:-$(read_env_value POSTGRES_DB)}"
 NPM_DB_USER="${NPM_DB_USER:-$(read_env_value NPM_DB_USER)}"
@@ -51,6 +53,7 @@ CONTROL_CENTER_STAGE=""
 : "${NPM_DB_USER:?NPM_DB_USER mangler i .env}"
 : "${NPM_DB_PASSWORD:?NPM_DB_PASSWORD mangler i .env}"
 : "${NPM_DB_NAME:?NPM_DB_NAME mangler i .env}"
+[[ "$CONTROL_CENTER_GID" =~ ^[0-9]+$ ]] || fail "CONTROL_CENTER_GID skal være et numerisk gruppe-ID."
 
 [[ -d "$CONTROL_CENTER_DATA_DIR" ]] || fail "Control Center-datamappen mangler: $CONTROL_CENTER_DATA_DIR"
 mkdir -p "$DEST"
@@ -94,6 +97,17 @@ backup_volume() {
     -v "$DEST:/backup" \
     alpine:3.20 \
     tar -czf "/backup/${filename}.tar.gz" -C /source .
+}
+
+normalize_backup_permissions() {
+  local host_uid
+  host_uid="$(id -u)"
+
+  log "Sikrer læseadgang til Control Center"
+  docker run --rm \
+    -v "$DEST:/backup" \
+    alpine:3.20 \
+    sh -eu -c "chown -R ${host_uid}:${CONTROL_CENTER_GID} /backup; find /backup -type d -exec chmod 0750 {} +; find /backup -type f -exec chmod 0640 {} +"
 }
 
 log "Starter backup til $DEST"
@@ -183,6 +197,7 @@ EOF
   sha256sum -c SHA256SUMS
 )
 
+normalize_backup_permissions
 ln -sfn "$DEST" "$BACKUP_ROOT/latest"
 
 if [[ -n "$BACKUP_MIRROR_DIR" ]]; then
