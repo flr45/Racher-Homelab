@@ -6,6 +6,8 @@ Backup indeholder:
 
 - konsistent PostgreSQL-dump i custom-format
 - konsistent MariaDB-dump til Nginx Proxy Manager
+- konsistent SQLite-backup af Control Center
+- øvrige Control Center-filer
 - Nginx Proxy Manager-data og certifikater
 - Portainer-data
 - Uptime Kuma-data
@@ -13,19 +15,25 @@ Backup indeholder:
 - en kopi af den lokale `.env`
 - SHA-256-kontrolsummer for alle filer
 
-PostgreSQL og MariaDB sikkerhedskopieres som logiske dumps i stedet for rå databasevolumener. Det gør backupen mere sikker, mens databaserne kører.
+PostgreSQL, MariaDB og SQLite sikkerhedskopieres konsistent, mens tjenesterne kører. Rå databasefiler kopieres ikke direkte.
 
 ## Konfiguration
 
 Tilpas disse værdier i den lokale `.env`:
 
 ```env
-BACKUP_ROOT=/home/pi/homelab/backups
+BACKUP_ROOT=/home/<brugernavn>/homelab/backups
 BACKUP_RETENTION_DAYS=14
 BACKUP_MIRROR_DIR=
 ```
 
-Brug den faktiske Linux-bruger i `BACKUP_ROOT`. `BACKUP_MIRROR_DIR` kan senere pege på en monteret USB-disk eller netværksmappe.
+Brug den faktiske Linux-bruger i `BACKUP_ROOT`. På standardinstallationen med brugeren `racher` er stien:
+
+```env
+BACKUP_ROOT=/home/racher/homelab/backups
+```
+
+`BACKUP_MIRROR_DIR` kan senere pege på en monteret USB-disk eller netværksmappe.
 
 Backup på samme NVMe-disk beskytter ikke mod diskfejl. En ekstern kopi bør derfor aktiveres, når en ekstra disk eller NAS er klar.
 
