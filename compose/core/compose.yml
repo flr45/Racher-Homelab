@@ -88,6 +88,12 @@ services:
       PORTAINER_URL: ${CONTROL_CENTER_PORTAINER_URL:-https://racher-pi.local:9443}
       UPTIME_KUMA_URL: ${CONTROL_CENTER_UPTIME_KUMA_URL:-#}
       NPM_URL: ${CONTROL_CENTER_NPM_URL:-http://racher-pi.local:81}
+      APP_ACTIONS_ENABLED: ${APP_ACTIONS_ENABLED:-false}
+      RBAC_ADMIN_EMAILS: ${RBAC_ADMIN_EMAILS:-}
+      RBAC_OPERATOR_EMAILS: ${RBAC_OPERATOR_EMAILS:-}
+      RBAC_VIEWER_EMAILS: ${RBAC_VIEWER_EMAILS:-}
+      RBAC_DEFAULT_ROLE: ${RBAC_DEFAULT_ROLE:-anonymous}
+      ALLOWED_ADMIN_EMAILS: ${ALLOWED_ADMIN_EMAILS:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOME}/homelab/data:/data
