@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from flask import Flask
 
 from rbac_extension import init_rbac
@@ -30,7 +28,7 @@ def test_setup_center_requires_read_permission(tmp_path):
     assert make_app(tmp_path).test_client().get("/api/setup").status_code == 403
 
 
-def test_setup_center_reports_bounded_read_only_progress(tmp_path, monkeypatch):
+def test_setup_center_returns_read_only_progress(tmp_path, monkeypatch):
     monkeypatch.setenv("RACHER_OS_SECRET_KEY", "a-permanent-secret-value")
     response = make_app(tmp_path).test_client().get("/api/setup", headers=VIEWER_HEADERS)
     assert response.status_code == 200
