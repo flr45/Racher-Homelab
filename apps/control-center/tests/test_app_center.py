@@ -8,6 +8,7 @@ from flask import Flask
 
 from app_center_extension import init_app_center
 from rbac_extension import init_rbac
+from services import module_registry_service
 from services.app_registry_service import build_app_center, load_app_registry
 
 VIEWER_HEADERS = {"Cf-Access-Authenticated-User-Email": "viewer@example.com"}
@@ -39,7 +40,7 @@ def make_app(tmp_path):
     registry_root.mkdir()
     write_manifest(registry_root)
 
-    app = Flask(__name__)
+    app = Flask(__name__, template_folder=str(Path(__file__).resolve().parents[1] / "templates"))
     app.config.update(
         TESTING=True,
         SECRET_KEY="test-secret",
@@ -147,3 +148,25 @@ def test_app_center_api_uses_registry_and_docker_discovery(tmp_path, monkeypatch
     assert report["summary"]["running"] == 1
     assert report["apps"][0]["name"] == "Minutregnskab"
     assert report["apps"][0]["health"] == "healthy"
+
+
+def test_app_center_page_renders_live_cards(tmp_path, monkeypatch):
+    app = make_app(tmp_path)
+    monkeypatch.setattr(
+        "app_center_extension.docker_status", lambda include_usage=True: ([], None)
+    )
+
+    response = app.test_client().get("/apps", headers=VIEWER_HEADERS)
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    assert b"App Center" in response.data
+    assert b"Minutregnskab" in response.data
+    assert b"Ikke installeret" in response.data
+
+
+def test_app_center_registers_control_navigation_once(tmp_path):
+    make_app(tmp_path)
+    ids = [item["id"] for item in module_registry_service.MODULES]
+
+    assert ids.count("app-center") == 1
