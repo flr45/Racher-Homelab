@@ -99,6 +99,15 @@ MODULES = (
         "status_endpoint": "/api/readiness",
     },
     {
+        "id": "hardware",
+        "name": "Node & Hardware Center",
+        "description": "Pi-model, kernel, storage, temperatur, throttling, netværk og Docker-host.",
+        "href": "/api/node-hardware",
+        "category": "platform",
+        "permission": "system.read",
+        "status_endpoint": "/api/node-hardware",
+    },
+    {
         "id": "configuration",
         "name": "Configuration Center",
         "description": "Secrets- og environment-inventory uden værdilæk.",
