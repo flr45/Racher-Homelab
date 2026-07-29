@@ -37,6 +37,8 @@ def test_operations_scripts_cover_control_center_and_safe_restore():
     assert "control-center-data.tar.gz" in backup_script
     assert "source.backup(target)" in backup_script
     assert "CONTROL_CENTER_DATA_DIR" in backup_script
+    assert "read_env_value" in backup_script
+    assert 'source "$ENV_FILE"' not in backup_script
     assert "control-center-data.tar.gz" in restore_script
     assert "--dry-run" in restore_script
     assert "--stage-control-center" in restore_script

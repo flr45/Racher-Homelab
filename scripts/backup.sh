@@ -14,18 +14,35 @@ fail() {
   exit 1
 }
 
+read_env_value() {
+  local key="$1"
+  local value
+
+  value="$(sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n 1 | tr -d '\r')"
+  if [[ "${#value}" -ge 2 ]]; then
+    case "$value" in
+      \"*\") value="${value:1:${#value}-2}" ;;
+      \'*\') value="${value:1:${#value}-2}" ;;
+    esac
+  fi
+  printf '%s' "$value"
+}
+
 command -v docker >/dev/null 2>&1 || fail "Docker blev ikke fundet."
 [[ -f "$ENV_FILE" ]] || fail "Miljøfilen mangler: $ENV_FILE"
 
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
-
+BACKUP_ROOT="${BACKUP_ROOT:-$(read_env_value BACKUP_ROOT)}"
 BACKUP_ROOT="${BACKUP_ROOT:-$HOME/homelab/backups}"
-BACKUP_MIRROR_DIR="${BACKUP_MIRROR_DIR:-}"
+BACKUP_MIRROR_DIR="${BACKUP_MIRROR_DIR:-$(read_env_value BACKUP_MIRROR_DIR)}"
+CONTROL_CENTER_CONTAINER="${CONTROL_CENTER_CONTAINER:-$(read_env_value CONTROL_CENTER_CONTAINER)}"
 CONTROL_CENTER_CONTAINER="${CONTROL_CENTER_CONTAINER:-control-center}"
+CONTROL_CENTER_DATA_DIR="${CONTROL_CENTER_DATA_DIR:-$(read_env_value CONTROL_CENTER_DATA_DIR)}"
 CONTROL_CENTER_DATA_DIR="${CONTROL_CENTER_DATA_DIR:-$HOME/homelab/data}"
+POSTGRES_USER="${POSTGRES_USER:-$(read_env_value POSTGRES_USER)}"
+POSTGRES_DB="${POSTGRES_DB:-$(read_env_value POSTGRES_DB)}"
+NPM_DB_USER="${NPM_DB_USER:-$(read_env_value NPM_DB_USER)}"
+NPM_DB_PASSWORD="${NPM_DB_PASSWORD:-$(read_env_value NPM_DB_PASSWORD)}"
+NPM_DB_NAME="${NPM_DB_NAME:-$(read_env_value NPM_DB_NAME)}"
 DEST="$BACKUP_ROOT/$STAMP"
 CONTROL_CENTER_STAGE=""
 
