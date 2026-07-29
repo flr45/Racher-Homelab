@@ -43,6 +43,7 @@ Racher-Homelab/
 │   └── SECURITY.md
 ├── scripts/
 │   ├── bootstrap.sh
+│   ├── install-racher-os.sh
 │   ├── backup.sh
 │   └── update-stacks.sh
 ├── .env.example
@@ -50,7 +51,9 @@ Racher-Homelab/
 └── README.md
 ```
 
-## Når Raspberry Pi'en ankommer
+## Installation på Raspberry Pi
+
+Brug 64-bit Raspberry Pi OS. Kør bootstrap som din normale bruger:
 
 ```bash
 git clone https://github.com/flr45/Racher-Homelab.git ~/homelab/Racher-Homelab
@@ -59,14 +62,14 @@ chmod +x scripts/*.sh
 ./scripts/bootstrap.sh
 ```
 
-Efter nyt login:
+Log ud og ind igen. Kør derefter install-scriptet:
 
 ```bash
-cp .env.example .env
-nano .env
-docker compose --env-file .env -f compose/core/compose.yml up -d
-docker compose --env-file .env -f compose/data/compose.yml up -d
+cd ~/homelab/Racher-Homelab
+./scripts/install-racher-os.sh
 ```
+
+Første kørsel opretter `.env` med filrettighed `0600` og stopper, indtil obligatoriske adgangskoder er udskiftet. Næste kørsel validerer Compose-filerne, henter images, starter data- og core-stacks og foretager healthcheck. Ved mislykket opstart stoppes de stacks, som install-scriptet selv har startet.
 
 Den fulde trin-for-trin-guide ligger i [docs/INSTALLATION.md](docs/INSTALLATION.md). Læs også [docs/SECURITY.md](docs/SECURITY.md), før tjenester gøres tilgængelige fra internettet.
 
@@ -91,6 +94,7 @@ Scriptet tager komprimerede kopier af de vigtigste Docker-volumener og beholder 
 - [x] Core Compose-stack forberedt
 - [x] PostgreSQL og Redis forberedt
 - [x] Backup- og opdateringsscripts forberedt
+- [x] Transaktionel Raspberry Pi-bootstrap og installer forberedt
 - [x] Minutregnskab deployment-skabelon forberedt
 - [ ] Hardware modtaget
 - [ ] Raspberry Pi OS installeret

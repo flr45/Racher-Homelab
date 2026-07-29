@@ -117,9 +117,10 @@ EOF
 
 (
   cd "$DEST"
-  find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
-    | sort \
-    | xargs -r sha256sum > SHA256SUMS
+  checksum_files="$(mktemp)"
+  trap 'rm -f "$checksum_files"' EXIT
+  find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort > "$checksum_files"
+  xargs -r sha256sum < "$checksum_files" > SHA256SUMS
   sha256sum -c SHA256SUMS
 )
 
