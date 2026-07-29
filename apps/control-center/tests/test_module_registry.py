@@ -35,6 +35,7 @@ def test_viewer_only_sees_readable_modules():
     assert "dashboard" in ids
     assert "docker" in ids
     assert "readiness" in ids
+    assert "hardware" in ids
     assert "ssh" not in ids
     assert "deployments" not in ids
 
@@ -46,8 +47,9 @@ def test_admin_sees_all_modules_and_group_order():
     assert "ssh" in ids
     assert "deployments" in ids
     assert "readiness" in ids
+    assert "hardware" in ids
     assert payload["groups"][0]["category"] == "overview"
-    assert len(payload["modules"]) == 13
+    assert len(payload["modules"]) == 14
 
 
 def test_control_center_renders_mobile_friendly_module_cards():
@@ -56,4 +58,5 @@ def test_control_center_renders_mobile_friendly_module_cards():
     assert response.status_code == 200
     assert "Unified Control Center" in text
     assert "SSH Console" in text
+    assert "Node &amp; Hardware Center" in text
     assert "@media(max-width:760px)" in text
