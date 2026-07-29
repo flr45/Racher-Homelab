@@ -69,6 +69,12 @@ def _csrf_token():
     return session["csrf_token"]
 
 
+def _valid_csrf_token():
+    provided = str(request.headers.get("X-CSRF-Token", ""))
+    expected = str(session.get("csrf_token", ""))
+    return bool(provided and expected) and secrets.compare_digest(provided, expected)
+
+
 def _find_registered_app(app_id):
     return next(
         (item for item in current_app.config.get("APP_LINKS", []) if item.get("id") == app_id),
@@ -181,7 +187,7 @@ def api_app_action(app_id, action):
                 }
             )
         ), 403
-    if request.headers.get("X-CSRF-Token") != session.get("csrf_token"):
+    if not _valid_csrf_token():
         return _no_store(jsonify({"error": "Ugyldig sikkerhedstoken."})), 403
 
     payload = request.get_json(silent=True) or {}
