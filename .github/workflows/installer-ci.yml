@@ -1,0 +1,42 @@
+name: Installer CI
+
+on:
+  pull_request:
+    paths:
+      - "scripts/**"
+      - "compose/**"
+      - ".env.example"
+      - ".github/workflows/installer-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "compose/**"
+      - ".env.example"
+      - ".github/workflows/installer-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Validate shell syntax
+        run: bash -n scripts/*.sh
+
+      - name: Lint shell scripts
+        run: shellcheck scripts/*.sh
+
+      - name: Validate Compose files
+        run: |
+          cp .env.example .env.ci
+          sed -i 's/CHANGE_ME_LONG_RANDOM_SECRET/ci-secret-0123456789abcdef/g; s/CHANGE_ME/ci-secret-0123456789abcdef/g' .env.ci
+          docker compose --env-file .env.ci -f compose/data/compose.yml config --quiet
+          docker compose --env-file .env.ci -f compose/core/compose.yml config --quiet
