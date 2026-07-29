@@ -6,7 +6,7 @@ if [[ "${EUID}" -eq 0 ]]; then
   exit 1
 fi
 
-ROOT="${HOMELAB_ROOT:-$HOME/homelab/Racher-Homelab}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_USER="$USER"
 SERVICE_GROUP="$(id -gn)"
 SERVICE_PATH="/etc/systemd/system/racher-homelab-backup.service"
@@ -29,7 +29,7 @@ Type=oneshot
 User=$SERVICE_USER
 Group=$SERVICE_GROUP
 WorkingDirectory=$ROOT
-Environment=HOMELAB_ROOT=$ROOT
+Environment=ENV_FILE=$ROOT/.env
 ExecStart=$ROOT/scripts/backup.sh
 Nice=10
 IOSchedulingClass=best-effort
