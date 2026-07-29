@@ -19,6 +19,7 @@ from rbac_extension import init_rbac
 from readiness_extension import init_readiness_center
 from restore_ui_extension import init_restore_ui
 from security_extension import init_security
+from service_health_extension import init_service_health_center
 from ssh_console_extension import init_ssh_console
 from storage_center_extension import init_storage_center
 
@@ -44,4 +45,5 @@ init_readiness_center(app)
 init_node_hardware_center(app)
 init_network_center(app)
 init_storage_center(app)
+init_service_health_center(app)
 init_module_registry(app)

@@ -126,6 +126,15 @@ MODULES = (
         "status_endpoint": "/api/storage",
     },
     {
+        "id": "services",
+        "name": "Service Health Center",
+        "description": "Read-only oversigt over fejlede systemd-services.",
+        "href": "/api/service-health",
+        "category": "operations",
+        "permission": "system.read",
+        "status_endpoint": "/api/service-health",
+    },
+    {
         "id": "configuration",
         "name": "Configuration Center",
         "description": "Secrets- og environment-inventory uden værdilæk.",
