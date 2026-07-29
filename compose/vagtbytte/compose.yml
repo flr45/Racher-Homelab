@@ -51,7 +51,7 @@ services:
       NOTIFICATIONS_DISABLE_PUSH: ${VAGTBYTTE_DISABLE_PUSH:-false}
     command: ["node", "scripts/notifications-worker.mjs"]
     healthcheck:
-      disable: true
+      test: ["NONE"]
     networks:
       - backend
 
