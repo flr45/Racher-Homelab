@@ -117,6 +117,15 @@ MODULES = (
         "status_endpoint": "/api/network",
     },
     {
+        "id": "storage",
+        "name": "Storage Center",
+        "description": "Mounts, filsystemer, kapacitet og read-only storage-advarsler.",
+        "href": "/api/storage",
+        "category": "platform",
+        "permission": "system.read",
+        "status_endpoint": "/api/storage",
+    },
+    {
         "id": "configuration",
         "name": "Configuration Center",
         "description": "Secrets- og environment-inventory uden værdilæk.",

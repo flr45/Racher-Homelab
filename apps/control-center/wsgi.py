@@ -20,6 +20,7 @@ from readiness_extension import init_readiness_center
 from restore_ui_extension import init_restore_ui
 from security_extension import init_security
 from ssh_console_extension import init_ssh_console
+from storage_center_extension import init_storage_center
 
 app = create_app()
 init_structured_logging(app)
@@ -42,4 +43,5 @@ init_ssh_console(app)
 init_readiness_center(app)
 init_node_hardware_center(app)
 init_network_center(app)
+init_storage_center(app)
 init_module_registry(app)
