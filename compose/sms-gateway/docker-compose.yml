@@ -13,6 +13,8 @@ services:
       DELETE_SMS_AFTER_IMPORT: ${SMS_DELETE_AFTER_IMPORT:-true}
       ALARM_SOURCE_WINDOW_MINUTES: ${SMS_ALARM_SOURCE_WINDOW_MINUTES:-10}
       SMS_DRY_RUN: ${SMS_DRY_RUN:-true}
+      VAGTBYTTE_ALARM_FEED_URL: ${VAGTBYTTE_ALARM_FEED_URL:-http://vagtbytte-web:3000/api/alarm-feed/ingest}
+      VAGTBYTTE_ALARM_FEED_TOKEN: ${VAGTBYTTE_ALARM_FEED_INGEST_TOKEN}
     devices:
       - ${SMS_MODEM_DEVICE:-/dev/ttyUSB1}:${SMS_MODEM_DEVICE:-/dev/ttyUSB1}
     group_add:
@@ -21,6 +23,8 @@ services:
       - sms_gateway_data:/data
     ports:
       - "127.0.0.1:${SMS_GATEWAY_PORT:-8090}:8080"
+    networks:
+      - backend
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
       interval: 30s
@@ -32,3 +36,7 @@ services:
 
 volumes:
   sms_gateway_data:
+
+networks:
+  backend:
+    external: true
