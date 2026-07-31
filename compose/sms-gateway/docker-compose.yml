@@ -15,6 +15,8 @@ services:
       SMS_DRY_RUN: ${SMS_DRY_RUN:-true}
     devices:
       - ${SMS_MODEM_DEVICE:-/dev/ttyUSB1}:${SMS_MODEM_DEVICE:-/dev/ttyUSB1}
+    group_add:
+      - "${DIALOUT_GID:-20}"
     volumes:
       - sms_gateway_data:/data
     ports:
