@@ -126,7 +126,13 @@ def send_sms(recipient: str, body: str):
 
     device = os.getenv("MODEM_DEVICE", "/dev/ttyUSB0")
     baudrate = int(os.getenv("MODEM_BAUDRATE", "115200"))
-    with modem_lock, serial.Serial(device, baudrate=baudrate, timeout=0.25) as port:
+    disable_dtr_toggle = os.getenv("MODEM_DISABLE_DTR_TOGGLE", "true").lower() == "true"
+    with modem_lock, serial.Serial(
+        device,
+        baudrate=baudrate,
+        timeout=0.25,
+        dsrdtr=disable_dtr_toggle,
+    ) as port:
         modem_command(port, "AT")
         modem_command(port, "AT+CMGF=1")
         modem_command(port, f'AT+CMGS="{recipient}"', expected=">")

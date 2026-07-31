@@ -15,6 +15,7 @@ import serial
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 MODEM_DEVICE = os.getenv("MODEM_DEVICE", "/dev/ttyUSB1")
 MODEM_BAUDRATE = int(os.getenv("MODEM_BAUDRATE", "115200"))
+MODEM_DISABLE_DTR_TOGGLE = os.getenv("MODEM_DISABLE_DTR_TOGGLE", "true").lower() == "true"
 POLL_SECONDS = float(os.getenv("MODEM_POLL_SECONDS", "2"))
 API_URL = os.getenv("INCOMING_API_URL", "http://127.0.0.1:8080/api/incoming")
 STATUS_FILE = Path(os.getenv("MODEM_STATUS_FILE", "/data/modem-status.json"))
@@ -172,7 +173,12 @@ def run():
     while running:
         try:
             write_status(state="connecting", last_error=None)
-            with serial.Serial(MODEM_DEVICE, MODEM_BAUDRATE, timeout=0.3) as port:
+            with serial.Serial(
+                MODEM_DEVICE,
+                MODEM_BAUDRATE,
+                timeout=0.3,
+                dsrdtr=MODEM_DISABLE_DTR_TOGGLE,
+            ) as port:
                 initialize(port)
                 retry_seconds = 2
                 log.info("Huawei-modem online på %s", MODEM_DEVICE)
