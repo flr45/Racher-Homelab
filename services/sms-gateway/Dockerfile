@@ -9,7 +9,7 @@ RUN useradd --create-home --uid 10001 appuser
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py modem_reader.py ./
+COPY app.py modem_reader.py sitecustomize.py ./
 RUN mkdir -p /data && chown -R appuser:appuser /app /data
 USER appuser
 
