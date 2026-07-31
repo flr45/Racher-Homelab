@@ -1,8 +1,11 @@
+import json
 import logging
 import os
 import re
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 
 import serial
@@ -91,6 +94,18 @@ def normalize_phone(value: str) -> str:
     return phone
 
 
+def parse_received_at(value):
+    if not value:
+        return utcnow()
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("Ugyldigt modtagelsestidspunkt") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def modem_command(port, command, expected="OK", timeout=8):
     port.reset_input_buffer()
     port.write((command + "\r").encode("ascii"))
@@ -154,19 +169,97 @@ def resolve_station(sender: str, body: str):
     return active.station_code if active else None
 
 
-def process_incoming(sender: str, body: str):
+def forward_to_vagtbytte(
+    sender: str,
+    body: str,
+    received_at: datetime,
+    source_message_id: str | None,
+):
+    url = os.getenv(
+        "VAGTBYTTE_ALARM_FEED_URL",
+        "http://vagtbytte-web:3000/api/alarm-feed/ingest",
+    ).strip()
+    token = os.getenv("VAGTBYTTE_ALARM_FEED_TOKEN", "").strip()
+
+    if not url:
+        raise RuntimeError("VAGTBYTTE_ALARM_FEED_URL mangler")
+    if not token:
+        raise RuntimeError("VAGTBYTTE_ALARM_FEED_TOKEN mangler")
+
+    payload = json.dumps(
+        {
+            "senderNumber": sender,
+            "rawMessage": body,
+            "receivedAt": received_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "sourceMessageId": source_message_id,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    outgoing = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(outgoing, timeout=10) as response:
+            response_body = response.read().decode("utf-8")
+            if response.status not in {200, 201}:
+                raise RuntimeError(f"Vagtbytte svarede HTTP {response.status}")
+    except urllib.error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"Vagtbytte svarede HTTP {exc.code}: {details[:500]}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Kunne ikke kontakte Vagtbytte: {exc.reason}") from exc
+
+    try:
+        return json.loads(response_body)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Vagtbytte returnerede ugyldigt JSON") from exc
+
+
+def process_incoming(
+    sender: str,
+    body: str,
+    received_at=None,
+    source_message_id: str | None = None,
+):
     sender = normalize_phone(sender)
     body = (body or "").strip()
     if not body:
         raise ValueError("SMS-teksten er tom")
 
+    received_at = parse_received_at(received_at)
     station_code = resolve_station(sender, body)
-    inbound = InboundMessage(sender=sender, body=body, station_code=station_code, received_at=utcnow())
+    inbound = InboundMessage(
+        sender=sender,
+        body=body,
+        station_code=station_code,
+        received_at=received_at,
+    )
     db.session.add(inbound)
-    db.session.commit()
+
+    try:
+        db.session.flush()
+        vagtbytte_result = forward_to_vagtbytte(
+            sender=sender,
+            body=body,
+            received_at=received_at,
+            source_message_id=source_message_id or f"sms-gateway:{inbound.id}",
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
 
     if not station_code:
-        return inbound, 0
+        return inbound, 0, vagtbytte_result
 
     recipients = (
         Firefighter.query.join(Firefighter.stations)
@@ -193,7 +286,7 @@ def process_incoming(sender: str, body: str):
             delivery.error = str(exc)[:1000]
         db.session.commit()
 
-    return inbound, len(unique)
+    return inbound, len(unique), vagtbytte_result
 
 
 @app.get("/health")
@@ -205,13 +298,24 @@ def health():
 def incoming():
     payload = request.get_json(force=True)
     try:
-        inbound, recipients = process_incoming(payload.get("sender", ""), payload.get("body", ""))
+        inbound, recipients, vagtbytte_result = process_incoming(
+            payload.get("sender", ""),
+            payload.get("body", ""),
+            payload.get("receivedAt"),
+            payload.get("sourceMessageId"),
+        )
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
+    except RuntimeError as exc:
+        log.exception("Videresendelse til Vagtbytte fejlede")
+        return jsonify(error=str(exc)), 502
     return jsonify(
         id=inbound.id,
         station=inbound.station_code,
         forwarded_immediately_to=recipients,
+        vagtbytte_created=bool(vagtbytte_result.get("created")),
+        vagtbytte_alarm_id=vagtbytte_result.get("alarmId"),
+        vagtbytte_sequence=vagtbytte_result.get("sequenceNumber"),
     ), 201
 
 
