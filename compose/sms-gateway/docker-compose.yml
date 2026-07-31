@@ -1,0 +1,29 @@
+services:
+  sms-gateway:
+    build:
+      context: ../../services/sms-gateway
+    container_name: racher-sms-gateway
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:////data/sms-gateway.db
+      MODEM_DEVICE: ${SMS_MODEM_DEVICE:-/dev/ttyUSB0}
+      MODEM_BAUDRATE: ${SMS_MODEM_BAUDRATE:-115200}
+      ALARM_SOURCE_WINDOW_MINUTES: ${SMS_ALARM_SOURCE_WINDOW_MINUTES:-10}
+      SMS_DRY_RUN: ${SMS_DRY_RUN:-true}
+    devices:
+      - ${SMS_MODEM_DEVICE:-/dev/ttyUSB0}:${SMS_MODEM_DEVICE:-/dev/ttyUSB0}
+    volumes:
+      - sms_gateway_data:/data
+    ports:
+      - "127.0.0.1:${SMS_GATEWAY_PORT:-8090}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  sms_gateway_data:
