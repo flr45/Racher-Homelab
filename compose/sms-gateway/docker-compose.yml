@@ -6,12 +6,15 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: sqlite:////data/sms-gateway.db
-      MODEM_DEVICE: ${SMS_MODEM_DEVICE:-/dev/ttyUSB0}
+      MODEM_DEVICE: ${SMS_MODEM_DEVICE:-/dev/ttyUSB1}
       MODEM_BAUDRATE: ${SMS_MODEM_BAUDRATE:-115200}
+      MODEM_POLL_SECONDS: ${SMS_MODEM_POLL_SECONDS:-2}
+      MODEM_STATUS_FILE: /data/modem-status.json
+      DELETE_SMS_AFTER_IMPORT: ${SMS_DELETE_AFTER_IMPORT:-true}
       ALARM_SOURCE_WINDOW_MINUTES: ${SMS_ALARM_SOURCE_WINDOW_MINUTES:-10}
       SMS_DRY_RUN: ${SMS_DRY_RUN:-true}
     devices:
-      - ${SMS_MODEM_DEVICE:-/dev/ttyUSB0}:${SMS_MODEM_DEVICE:-/dev/ttyUSB0}
+      - ${SMS_MODEM_DEVICE:-/dev/ttyUSB1}:${SMS_MODEM_DEVICE:-/dev/ttyUSB1}
     volumes:
       - sms_gateway_data:/data
     ports:
@@ -21,7 +24,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 20s
     security_opt:
       - no-new-privileges:true
 
