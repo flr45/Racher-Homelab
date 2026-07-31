@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import os
@@ -6,7 +7,7 @@ import signal
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import serial
@@ -26,10 +27,54 @@ running = True
 CMGL_HEADER = re.compile(
     r'^\+CMGL:\s*(?P<index>\d+),"(?P<status>[^"]*)","(?P<sender>[^"]*)"(?:,"[^"]*")?(?:,"(?P<timestamp>[^"]*)")?.*$'
 )
+MODEM_TIMESTAMP = re.compile(
+    r"^(?P<year>\d{2})/(?P<month>\d{2})/(?P<day>\d{2}),"
+    r"(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})"
+    r"(?P<sign>[+-])(?P<quarters>\d{2})$"
+)
 
 
 def utc_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+def api_utc_iso(value):
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def parse_modem_timestamp(value):
+    match = MODEM_TIMESTAMP.fullmatch((value or "").strip())
+    if not match:
+        return api_utc_iso(datetime.now(timezone.utc))
+
+    offset_minutes = int(match.group("quarters")) * 15
+    if match.group("sign") == "-":
+        offset_minutes *= -1
+    zone = timezone(timedelta(minutes=offset_minutes))
+    timestamp = datetime(
+        year=2000 + int(match.group("year")),
+        month=int(match.group("month")),
+        day=int(match.group("day")),
+        hour=int(match.group("hour")),
+        minute=int(match.group("minute")),
+        second=int(match.group("second")),
+        tzinfo=zone,
+    )
+    return api_utc_iso(timestamp)
+
+
+def source_message_id(message):
+    stable_value = "|".join(
+        [
+            MODEM_DEVICE,
+            str(message["index"]),
+            message.get("timestamp") or "",
+            message["sender"],
+            message["body"],
+        ]
+    )
+    digest = hashlib.sha256(stable_value.encode("utf-8")).hexdigest()
+    return f"huawei-sms:{digest}"
 
 
 def write_status(**values):
@@ -92,7 +137,12 @@ def parse_messages(response):
 
 def post_message(message):
     payload = json.dumps(
-        {"sender": message["sender"], "body": message["body"]},
+        {
+            "sender": message["sender"],
+            "body": message["body"],
+            "receivedAt": parse_modem_timestamp(message.get("timestamp")),
+            "sourceMessageId": source_message_id(message),
+        },
         ensure_ascii=False,
     ).encode("utf-8")
     request = urllib.request.Request(
@@ -101,7 +151,7 @@ def post_message(message):
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with urllib.request.urlopen(request, timeout=15) as response:
         if response.status not in {200, 201}:
             raise RuntimeError(f"Gateway API svarede HTTP {response.status}")
         return json.loads(response.read().decode("utf-8"))
@@ -134,11 +184,12 @@ def run():
                         try:
                             result = post_message(message)
                             log.info(
-                                "SMS %s fra %s importeret, station=%s, modtagere=%s",
+                                "SMS %s fra %s importeret, station=%s, modtagere=%s, vagtbytte=%s",
                                 message["index"],
                                 message["sender"],
                                 result.get("station"),
                                 result.get("forwarded_immediately_to"),
+                                "oprettet" if result.get("vagtbytte_created") else "dublet",
                             )
                             if DELETE_AFTER_IMPORT:
                                 delete_response = command(port, f'AT+CMGD={message["index"]}')
