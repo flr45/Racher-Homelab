@@ -45,8 +45,8 @@ class OutboundMessage(db.Model):
     completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
 
-_active_delivery_ids = contextvars.ContextVar(
-    "sms_active_delivery_ids",
+_active_outbound_messages = contextvars.ContextVar(
+    "sms_active_outbound_messages",
     default=None,
 )
 
@@ -73,28 +73,14 @@ def enqueue_sms(recipient: str, body: str, delivery_id: int | None = None):
     return message
 
 
-def _current_pending_delivery(recipient: str):
-    return (
-        base.Delivery.query.filter_by(recipient=recipient, status="pending")
-        .order_by(base.Delivery.id.desc())
-        .first()
-    )
-
-
 def send_sms(recipient: str, body: str):
     """Queue an SMS; inbound forwarding is asynchronous, CLI calls wait."""
-    delivery_ids = _active_delivery_ids.get()
+    queued_messages = _active_outbound_messages.get()
 
-    if delivery_ids is not None:
+    if queued_messages is not None:
         normalized = base.normalize_phone(recipient)
-        delivery = _current_pending_delivery(normalized)
-        message = enqueue_sms(
-            normalized,
-            body,
-            delivery_id=delivery.id if delivery else None,
-        )
-        if delivery:
-            delivery_ids.append(delivery.id)
+        message = enqueue_sms(normalized, body)
+        queued_messages.append((message.id, normalized))
         log.info("SMS %s sat i kø til %s", message.id, normalized)
         return
 
@@ -200,22 +186,32 @@ _original_process_incoming = base.process_incoming
 
 
 def process_incoming(*args, **kwargs):
-    delivery_ids: list[int] = []
-    token = _active_delivery_ids.set(delivery_ids)
+    queued_messages: list[tuple[int, str]] = []
+    token = _active_outbound_messages.set(queued_messages)
     try:
         result = _original_process_incoming(*args, **kwargs)
     finally:
-        _active_delivery_ids.reset(token)
+        _active_outbound_messages.reset(token)
 
     # base_app marks a successful direct call as "sent". At runtime the call
-    # only queued the SMS, so correct the delivery state until the modem worker
-    # records the final result.
-    for delivery_id in delivery_ids:
-        delivery = db.session.get(base.Delivery, delivery_id)
-        if delivery:
+    # only queued the SMS, so connect each queue row to the exact inbound
+    # delivery and correct its state until the modem worker records the result.
+    inbound = result[0]
+    for message_id, recipient in queued_messages:
+        delivery = (
+            base.Delivery.query.filter_by(
+                inbound_id=inbound.id,
+                recipient=recipient,
+            )
+            .order_by(base.Delivery.id.desc())
+            .first()
+        )
+        message = db.session.get(OutboundMessage, message_id)
+        if delivery and message:
+            message.delivery_id = delivery.id
             delivery.status = "queued"
             delivery.error = None
-    if delivery_ids:
+    if queued_messages:
         db.session.commit()
     return result
 
