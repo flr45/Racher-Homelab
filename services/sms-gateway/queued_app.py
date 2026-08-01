@@ -6,9 +6,12 @@ Only ``modem_reader.py`` is allowed to own the modem device.
 """
 
 import contextvars
+import json
 import logging
 import os
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 
 import base_app as base
@@ -85,21 +88,54 @@ def send_sms(recipient: str, body: str):
         return
 
     wait_seconds = max(5, int(os.getenv("SMS_SEND_WAIT_SECONDS", "40")))
-    with app.app_context():
-        message = enqueue_sms(recipient, body)
-        message_id = message.id
+    api_base = os.getenv(
+        "GATEWAY_API_BASE_URL",
+        "http://127.0.0.1:8080",
+    ).rstrip("/")
+    payload = json.dumps(
+        {"recipient": recipient, "body": body},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    outgoing = urllib.request.Request(
+        f"{api_base}/api/outgoing",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(outgoing, timeout=10) as response:
+            queued = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"SMS-køen svarede HTTP {exc.code}: {details[:500]}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Kunne ikke kontakte SMS-køen: {exc.reason}") from exc
 
+    message_id = queued["id"]
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
-        with app.app_context():
-            db.session.remove()
-            current = db.session.get(OutboundMessage, message_id)
-            if current is None:
-                raise RuntimeError("SMS-køelementet forsvandt")
-            if current.status == "sent":
-                return
-            if current.status == "failed":
-                raise RuntimeError(current.error or "SMS-afsendelsen fejlede")
+        try:
+            with urllib.request.urlopen(
+                f"{api_base}/api/outgoing/{message_id}",
+                timeout=8,
+            ) as response:
+                current = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            details = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"SMS-status svarede HTTP {exc.code}: {details[:500]}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Kunne ikke kontakte SMS-status: {exc.reason}"
+            ) from exc
+
+        if current["status"] == "sent":
+            return
+        if current["status"] == "failed":
+            raise RuntimeError(current.get("error") or "SMS-afsendelsen fejlede")
         time.sleep(0.5)
 
     raise TimeoutError("SMS-afsendelsen blev ikke færdig inden timeout")
