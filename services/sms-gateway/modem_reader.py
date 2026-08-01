@@ -133,6 +133,7 @@ def run():
                 while running:
                     response = command(port, "AT+CMGL=0", timeout=15)
                     messages = parse_cmgl_response(response)
+                    write_status(state="online", last_error=None)
                     for message in messages:
                         try:
                             result = post_message(message)
