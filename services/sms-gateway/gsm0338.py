@@ -31,6 +31,46 @@ _DEFAULT_REVERSE = {
 _EXTENSION_REVERSE = {character: index for index, character in _EXTENSION_ALPHABET.items()}
 
 
+def decode_septets(values) -> str:
+    """Decode unpacked GSM 03.38 septets."""
+
+    output: list[str] = []
+    index = 0
+    values = list(values)
+    while index < len(values):
+        value = values[index]
+        if value == 0x1B:
+            index += 1
+            if index >= len(values):
+                output.append("\ufffd")
+                break
+            output.append(_EXTENSION_ALPHABET.get(values[index], "\ufffd"))
+        elif 0 <= value < len(_DEFAULT_ALPHABET):
+            output.append(_DEFAULT_ALPHABET[value])
+        else:
+            output.append("\ufffd")
+        index += 1
+    return "".join(output)
+
+
+def unpack_septets(data: bytes, count: int, bit_offset: int = 0) -> list[int]:
+    """Unpack GSM septets from packed user data."""
+
+    output: list[int] = []
+    for index in range(count):
+        bit_position = bit_offset + index * 7
+        byte_position = bit_position // 8
+        shift = bit_position % 8
+        if byte_position >= len(data):
+            break
+
+        value = (data[byte_position] >> shift) & 0x7F
+        if shift > 1 and byte_position + 1 < len(data):
+            value |= (data[byte_position + 1] << (8 - shift)) & 0x7F
+        output.append(value)
+    return output
+
+
 def decode_modem_bytes(data: bytes) -> str:
     """Decode Huawei text-mode output, including Danish GSM characters."""
 
@@ -40,20 +80,7 @@ def decode_modem_bytes(data: bytes) -> str:
         except UnicodeDecodeError:
             return data.decode("latin-1", errors="replace")
 
-    output: list[str] = []
-    index = 0
-    while index < len(data):
-        byte = data[index]
-        if byte == 0x1B:
-            index += 1
-            if index >= len(data):
-                output.append("\ufffd")
-                break
-            output.append(_EXTENSION_ALPHABET.get(data[index], "\ufffd"))
-        else:
-            output.append(_DEFAULT_ALPHABET[byte])
-        index += 1
-    return "".join(output)
+    return decode_septets(data)
 
 
 def encode_gsm0338(value: str) -> bytes:
