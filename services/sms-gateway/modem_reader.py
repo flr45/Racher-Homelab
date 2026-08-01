@@ -12,6 +12,8 @@ from pathlib import Path
 
 import serial
 
+from gsm0338 import decode_modem_bytes
+
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 MODEM_DEVICE = os.getenv("MODEM_DEVICE", "/dev/ttyUSB1")
 MODEM_BAUDRATE = int(os.getenv("MODEM_BAUDRATE", "115200"))
@@ -105,7 +107,7 @@ def command(port, value, timeout=8):
         chunk = port.read(port.in_waiting or 1)
         if chunk:
             response.extend(chunk)
-            text = response.decode("utf-8", errors="replace")
+            text = decode_modem_bytes(bytes(response))
             if "\r\nOK\r\n" in text or "\r\nERROR\r\n" in text or "+CME ERROR:" in text:
                 return text
     raise TimeoutError(f"Modemmet svarede ikke på {value}")
@@ -159,7 +161,13 @@ def post_message(message):
 
 
 def initialize(port):
-    for value in ("AT", "ATE0", "AT+CMGF=1", 'AT+CPMS="SM","SM","SM"'):
+    for value in (
+        "AT",
+        "ATE0",
+        'AT+CSCS="GSM"',
+        "AT+CMGF=1",
+        'AT+CPMS="SM","SM","SM"',
+    ):
         response = command(port, value)
         if "ERROR" in response:
             raise RuntimeError(f"Modemmet afviste {value}: {response.strip()}")
