@@ -102,7 +102,7 @@ volumes:
 
 secrets:
   vagtbytte_backup_encryption_key:
-    file: ${VAGTBYTTE_BACKUP_ENCRYPTION_KEY_FILE:-./secrets/vagtbytte-backup.key}
+    file: ${VAGTBYTTE_BACKUP_ENCRYPTION_KEY_FILE:-../../secrets/vagtbytte-backup.key}
 
 networks:
   proxy:
