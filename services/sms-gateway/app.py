@@ -12,6 +12,8 @@ import serial
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 
+from gsm0338 import decode_modem_bytes, encode_gsm0338
+
 STATION_CODES = {
     "A": "Slagelse",
     "S": "Sorø",
@@ -110,10 +112,10 @@ def modem_command(port, command, expected="OK", timeout=8):
     port.reset_input_buffer()
     port.write((command + "\r").encode("ascii"))
     deadline = time.monotonic() + timeout
-    response = b""
+    response = bytearray()
     while time.monotonic() < deadline:
-        response += port.read(port.in_waiting or 1)
-        text = response.decode(errors="replace")
+        response.extend(port.read(port.in_waiting or 1))
+        text = decode_modem_bytes(bytes(response))
         if expected in text or "ERROR" in text:
             return text
     raise TimeoutError(f"Modem svarede ikke på {command}")
@@ -134,14 +136,15 @@ def send_sms(recipient: str, body: str):
         dsrdtr=disable_dtr_toggle,
     ) as port:
         modem_command(port, "AT")
+        modem_command(port, 'AT+CSCS="GSM"')
         modem_command(port, "AT+CMGF=1")
         modem_command(port, f'AT+CMGS="{recipient}"', expected=">")
-        port.write(body.encode("utf-8") + b"\x1a")
+        port.write(encode_gsm0338(body) + b"\x1a")
         deadline = time.monotonic() + 25
-        response = b""
+        response = bytearray()
         while time.monotonic() < deadline:
-            response += port.read(port.in_waiting or 1)
-            text = response.decode(errors="replace")
+            response.extend(port.read(port.in_waiting or 1))
+            text = decode_modem_bytes(bytes(response))
             if "+CMGS:" in text and "OK" in text:
                 return
             if "ERROR" in text:
