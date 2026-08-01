@@ -30,7 +30,7 @@ services:
         condition: service_healthy
     ports:
       - "80:80"
-      - "81:81"
+      - "127.0.0.1:81:81"
       - "443:443"
     environment:
       TZ: ${TZ:-Europe/Copenhagen}
@@ -52,7 +52,7 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      - "9443:9443"
+      - "127.0.0.1:9443:9443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
@@ -77,7 +77,7 @@ services:
     group_add:
       - "${DOCKER_GID:-999}"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       TZ: ${TZ:-Europe/Copenhagen}
       RACHER_OS_DATA: /data
