@@ -88,6 +88,10 @@ services:
       PORTAINER_URL: ${CONTROL_CENTER_PORTAINER_URL:-https://racher-pi.local:9443}
       UPTIME_KUMA_URL: ${CONTROL_CENTER_UPTIME_KUMA_URL:-#}
       NPM_URL: ${CONTROL_CENTER_NPM_URL:-http://racher-pi.local:81}
+      SMS_GATEWAY_HEALTH_URL: ${CONTROL_CENTER_SMS_GATEWAY_HEALTH_URL:-http://sms-gateway:8080/health}
+      VAGTBYTTE_HEALTH_URL: ${CONTROL_CENTER_VAGTBYTTE_HEALTH_URL:-http://vagtbytte-web:3000/api/health}
+      OPERATIONS_STATUS_CONTAINERS: ${RACHER_MONITOR_CONTAINERS:-nginx-proxy-manager,control-center,portainer,uptime-kuma,npm-db,postgres,redis,vagtbytte-web,vagtbytte-worker,racher-sms-gateway,minutregnskab,cloudflared}
+      VAGTBYTTE_BACKUP_MAX_AGE_HOURS: ${RACHER_MONITOR_BACKUP_MAX_HOURS:-30}
       APP_ACTIONS_ENABLED: ${APP_ACTIONS_ENABLED:-false}
       RBAC_ADMIN_EMAILS: ${RBAC_ADMIN_EMAILS:-}
       RBAC_OPERATOR_EMAILS: ${RBAC_OPERATOR_EMAILS:-}
@@ -100,6 +104,7 @@ services:
       - ${HOME}/homelab/backups:/backups
     networks:
       - proxy
+      - backend
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
       interval: 15s
@@ -110,6 +115,8 @@ services:
 networks:
   proxy:
     name: proxy
+  backend:
+    external: true
 
 volumes:
   npm_db_data:

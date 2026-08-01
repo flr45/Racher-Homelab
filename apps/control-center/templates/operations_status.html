@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Driftsstatus · Racher OS</title>
+  <style>
+    :root{color-scheme:dark;--bg:#071019;--panel:#102030;--panel2:#0b1722;--line:rgba(255,255,255,.09);--text:#f5f7fb;--muted:#91a4b7;--accent:#62a8ff;--green:#31d17c;--yellow:#ffc857;--red:#ff6b7d}*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:radial-gradient(circle at 82% 0,#123558 0,transparent 34%),var(--bg);color:var(--text)}a{color:inherit}.shell{max-width:1500px;margin:auto;padding:28px}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:22px}.eyebrow{color:var(--accent);font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;font-weight:900}h1{font-size:clamp(2rem,5vw,3.6rem);letter-spacing:-.055em;margin:5px 0 8px}.muted{color:var(--muted)}.actions{display:flex;gap:9px;flex-wrap:wrap}.btn{border:1px solid var(--line);background:rgba(255,255,255,.045);color:var(--text);padding:10px 13px;border-radius:11px;text-decoration:none;cursor:pointer;font:inherit;font-weight:750}.btn:hover{background:rgba(98,168,255,.15);border-color:rgba(98,168,255,.4)}.hero{display:grid;grid-template-columns:1.4fr repeat(3,minmax(0,.55fr));gap:12px;margin-bottom:18px}.hero-card,.card,.table-wrap{background:linear-gradient(145deg,rgba(20,36,52,.97),rgba(12,24,36,.97));border:1px solid var(--line);box-shadow:0 18px 45px rgba(0,0,0,.17)}.hero-card{padding:18px;border-radius:18px}.hero-card span{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;font-weight:850}.hero-card strong{display:block;font-size:1.75rem;margin-top:7px}.overall{display:flex;gap:13px;align-items:center}.lamp{width:17px;height:17px;border-radius:50%;box-shadow:0 0 22px currentColor}.healthy{color:var(--green)}.warning{color:var(--yellow)}.critical{color:var(--red)}.unknown{color:var(--yellow)}.lamp.healthy,.dot.healthy{background:var(--green)}.lamp.warning,.dot.warning,.lamp.unknown,.dot.unknown{background:var(--yellow)}.lamp.critical,.dot.critical{background:var(--red)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{padding:19px;border-radius:20px;min-width:0}.card-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.card h2{font-size:1.1rem;margin:0}.description{color:var(--muted);font-size:.84rem;line-height:1.45;margin-top:5px}.state{display:flex;align-items:center;gap:7px;white-space:nowrap;font-size:.78rem;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.dot{width:9px;height:9px;border-radius:50%;flex:none}.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:16px}.metric{padding:11px;border-radius:13px;background:rgba(255,255,255,.035);min-width:0}.metric span{display:block;color:var(--muted);font-size:.67rem;letter-spacing:.08em;text-transform:uppercase;font-weight:850}.metric strong{display:block;margin-top:5px;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.details{display:grid;gap:7px;margin-top:13px}.detail{padding:10px 11px;border:1px solid rgba(255,200,87,.2);background:rgba(255,200,87,.05);border-radius:11px;color:var(--muted);font-size:.78rem;overflow-wrap:anywhere}.section{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin:24px 0 12px}.section h2{margin:0}.table-wrap{border-radius:18px;overflow:auto}table{width:100%;border-collapse:collapse;min-width:680px}th,td{text-align:left;padding:13px 15px;border-bottom:1px solid var(--line)}th{font-size:.69rem;color:var(--muted);letter-spacing:.09em;text-transform:uppercase}td{font-size:.86rem}.container-state{display:flex;align-items:center;gap:8px;font-weight:800}.footer{text-align:center;color:var(--muted);font-size:.8rem;margin-top:22px}@media(max-width:950px){.hero{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}}@media(max-width:620px){.shell{padding:18px 12px}.top{flex-direction:column}.hero{grid-template-columns:1fr 1fr}.hero-card:first-child{grid-column:1/-1}.metrics{grid-template-columns:1fr 1fr}.card-head{gap:10px}.state{font-size:.68rem}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header class="top">
+    <div>
+      <div class="eyebrow">Racher OS · Live drift</div>
+      <h1>Driftsstatus</h1>
+      <div class="muted">Modem, SMS-kø, Vagtbytte, backups, Cloudflare og centrale containere · {{ actor }}</div>
+    </div>
+    <div class="actions">
+      <a class="btn" href="/">Dashboard</a>
+      <a class="btn" href="/apps">App Center</a>
+      <a class="btn" href="/control">Control Center</a>
+      <a class="btn" href="/api/operations-status">JSON API</a>
+      <button class="btn" type="button" onclick="location.reload()">Opdatér</button>
+    </div>
+  </header>
+
+  <section class="hero">
+    <article class="hero-card">
+      <span>Samlet status</span>
+      <div class="overall"><i class="lamp {{ report.summary.state }}"></i><strong class="{{ report.summary.state }}">{{ {'healthy':'Alt fungerer','warning':'Kræver opmærksomhed','critical':'Driftsfejl'}.get(report.summary.state,'Ukendt') }}</strong></div>
+    </article>
+    <article class="hero-card"><span>Grønne</span><strong class="healthy">{{ report.summary.healthy }}</strong></article>
+    <article class="hero-card"><span>Advarsler</span><strong class="warning">{{ report.summary.warning }}</strong></article>
+    <article class="hero-card"><span>Fejl</span><strong class="critical">{{ report.summary.critical }}</strong></article>
+  </section>
+
+  <section class="grid">
+    {% for card in report.cards %}
+    <article class="card">
+      <div class="card-head">
+        <div><h2>{{ card.title }}</h2><div class="description">{{ card.description }}</div></div>
+        <div class="state {{ card.state }}"><i class="dot {{ card.state }}"></i>{{ {'healthy':'OK','warning':'Advarsel','critical':'Fejl','unknown':'Ukendt'}.get(card.state,card.state) }}</div>
+      </div>
+      <div class="metrics">
+        {% for metric in card.metrics %}
+        <div class="metric"><span>{{ metric.label }}</span><strong>{{ metric.value }}</strong></div>
+        {% endfor %}
+      </div>
+      {% if card.details %}<div class="details">{% for detail in card.details %}<div class="detail">{{ detail }}</div>{% endfor %}</div>{% endif %}
+    </article>
+    {% endfor %}
+  </section>
+
+  <div class="section"><div><h2>Centrale containere</h2><div class="muted">Navne, runtime-status og Docker-health.</div></div><div class="muted">Senest opdateret {{ report.updated_at }}</div></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Container</th><th>Status</th><th>Health</th><th>Vurdering</th></tr></thead>
+      <tbody>
+        {% for container in report.containers %}
+        <tr><td><strong>{{ container.name }}</strong></td><td>{{ container.status }}</td><td>{{ container.health }}</td><td><div class="container-state {{ container.state }}"><i class="dot {{ container.state }}"></i>{{ {'healthy':'OK','warning':'Advarsel','critical':'Fejl'}.get(container.state,container.state) }}</div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="footer">Read-only driftsoversigt · siden genindlæses automatisk hvert 30. sekund</div>
+</main>
+<script>setTimeout(()=>location.reload(),30000);</script>
+</body>
+</html>
