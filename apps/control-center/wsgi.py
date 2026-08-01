@@ -18,6 +18,7 @@ from network_center_extension import init_network_center
 from node_hardware_extension import init_node_hardware_center
 from observability_extension import init_observability
 from operations_runbook_extension import init_operations_runbook_center
+from operations_status_extension import init_operations_status_center
 from operations_timeline_extension import init_operations_timeline
 from plugin_extension import init_plugin_center
 from rbac_extension import init_rbac
@@ -52,6 +53,7 @@ init_backup_verification_center(app)
 init_audit_export_center(app)
 init_docker_center(app)
 init_app_center(app)
+init_operations_status_center(app)
 init_operations_timeline(app)
 init_operations_runbook_center(app)
 init_ssh_console(app)
