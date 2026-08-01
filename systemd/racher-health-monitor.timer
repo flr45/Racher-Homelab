@@ -1,0 +1,12 @@
+[Unit]
+Description=Kontrollér Racher OS hvert femte minut
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30
+Persistent=true
+Unit=racher-health-monitor.service
+
+[Install]
+WantedBy=timers.target
