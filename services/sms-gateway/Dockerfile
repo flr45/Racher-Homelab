@@ -10,7 +10,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY sitecustomize.py /usr/local/lib/python3.12/site-packages/sitecustomize.py
-COPY app.py modem_reader.py ./
+COPY app.py modem_reader.py gsm0338.py ./
+RUN python -c 'from gsm0338 import decode_modem_bytes, encode_gsm0338; text="p\u00e5 f\u00e6rdigt h\u00f8stet \u00c6\u00d8\u00c5"; assert decode_modem_bytes(encode_gsm0338(text)) == text'
 RUN mkdir -p /data && chown -R appuser:appuser /app /data
 USER appuser
 
