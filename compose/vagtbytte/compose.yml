@@ -23,6 +23,7 @@ services:
       BACKUP_DIRECTORY: /data/backups
       BACKUP_AUTO_HOUR: ${VAGTBYTTE_BACKUP_AUTO_HOUR:-3}
       BACKUP_RETENTION_COUNT: ${VAGTBYTTE_BACKUP_RETENTION_COUNT:-30}
+      BACKUP_ENCRYPTION_KEY_FILE: /run/secrets/vagtbytte_backup_encryption_key
       SMTP_HOST: ${VAGTBYTTE_SMTP_HOST:-}
       SMTP_PORT: ${VAGTBYTTE_SMTP_PORT:-587}
       SMTP_SECURE: ${VAGTBYTTE_SMTP_SECURE:-false}
@@ -42,6 +43,8 @@ services:
       - "3000"
     volumes:
       - vagtbytte_backups:/data/backups
+    secrets:
+      - vagtbytte_backup_encryption_key
     networks:
       - proxy
       - backend
@@ -72,6 +75,7 @@ services:
       BACKUP_AUTO_HOUR: ${VAGTBYTTE_BACKUP_AUTO_HOUR:-3}
       BACKUP_RETENTION_COUNT: ${VAGTBYTTE_BACKUP_RETENTION_COUNT:-30}
       BACKUP_MONITOR_INTERVAL_MS: ${VAGTBYTTE_BACKUP_MONITOR_INTERVAL_MS:-300000}
+      BACKUP_ENCRYPTION_KEY_FILE: /run/secrets/vagtbytte_backup_encryption_key
       EMAIL_REPORT_MONITOR_INTERVAL_MS: ${VAGTBYTTE_EMAIL_REPORT_MONITOR_INTERVAL_MS:-60000}
       SMTP_HOST: ${VAGTBYTTE_SMTP_HOST:-}
       SMTP_PORT: ${VAGTBYTTE_SMTP_PORT:-587}
@@ -86,6 +90,8 @@ services:
     command: ["node", "scripts/notifications-worker.mjs"]
     volumes:
       - vagtbytte_backups:/data/backups
+    secrets:
+      - vagtbytte_backup_encryption_key
     healthcheck:
       test: ["NONE"]
     networks:
@@ -93,6 +99,10 @@ services:
 
 volumes:
   vagtbytte_backups:
+
+secrets:
+  vagtbytte_backup_encryption_key:
+    file: ${VAGTBYTTE_BACKUP_ENCRYPTION_KEY_FILE:-../../secrets/vagtbytte-backup.key}
 
 networks:
   proxy:
