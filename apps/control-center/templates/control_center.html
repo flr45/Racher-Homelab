@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Racher OS · Control Center</title>
   <style>
-    :root{color-scheme:dark;--bg:#071019;--panel:#102030;--line:rgba(255,255,255,.09);--text:#f5f7fb;--muted:#91a4b7;--accent:#62a8ff;--green:#31d17c}*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:radial-gradient(circle at 80% 0,#123558 0,transparent 34%),var(--bg);color:var(--text)}a{color:inherit}.shell{min-height:100vh;display:grid;grid-template-columns:260px 1fr}.sidebar{border-right:1px solid var(--line);padding:24px 18px;background:rgba(7,16,25,.9);position:sticky;top:0;height:100vh}.brand{display:flex;gap:12px;align-items:center;margin-bottom:28px}.logo{width:44px;height:44px;border-radius:14px;background:linear-gradient(145deg,var(--accent),#7b63ff);display:grid;place-items:center;font-weight:900}.muted,small{color:var(--muted)}.identity{padding:14px;border:1px solid var(--line);border-radius:15px;background:rgba(255,255,255,.035)}.identity strong{display:block;margin-bottom:5px}.nav{display:grid;gap:7px;margin-top:20px}.nav a{padding:11px 13px;text-decoration:none;border-radius:11px;color:var(--muted);font-weight:700}.nav a:hover{background:rgba(98,168,255,.12);color:var(--text)}main{padding:32px;min-width:0}.eyebrow{color:var(--accent);font-size:.75rem;text-transform:uppercase;letter-spacing:.16em;font-weight:900}h1{margin:6px 0 8px;font-size:clamp(2rem,5vw,3.7rem);letter-spacing:-.05em}.summary{display:flex;gap:10px;flex-wrap:wrap;margin:22px 0 30px}.pill{border:1px solid var(--line);border-radius:999px;padding:9px 13px;font-weight:800;background:rgba(255,255,255,.035)}.group{margin-bottom:30px}.group h2{text-transform:capitalize;font-size:1rem;color:var(--muted);letter-spacing:.08em;margin:0 0 12px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.card{display:flex;flex-direction:column;min-height:180px;padding:18px;border:1px solid var(--line);border-radius:19px;text-decoration:none;background:linear-gradient(145deg,rgba(20,36,52,.97),rgba(12,24,36,.97));transition:.18s ease}.card:hover{transform:translateY(-2px);border-color:rgba(98,168,255,.4);box-shadow:0 18px 44px rgba(0,0,0,.2)}.card-top{display:flex;justify-content:space-between;gap:10px}.card h3{margin:0;font-size:1.05rem}.status{font-size:.72rem;color:var(--green);font-weight:900;text-transform:uppercase;letter-spacing:.08em}.card p{color:var(--muted);line-height:1.5;margin:14px 0;flex:1}.open{color:var(--accent);font-weight:800;font-size:.86rem}.footer{text-align:center;color:var(--muted);font-size:.8rem;padding-top:12px}@media(max-width:1050px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.shell{display:block}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.nav{display:flex;overflow:auto}.nav a{white-space:nowrap}main{padding:22px 14px}.grid{grid-template-columns:1fr}.card{min-height:150px}}
+    :root{color-scheme:dark;--bg:#071019;--panel:#102030;--panel2:#0b1722;--line:rgba(255,255,255,.09);--text:#f5f7fb;--muted:#91a4b7;--accent:#62a8ff;--green:#31d17c;--yellow:#ffc857;--red:#ff6b7d}*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:radial-gradient(circle at 80% 0,#123558 0,transparent 34%),var(--bg);color:var(--text)}a{color:inherit}.shell{min-height:100vh;display:grid;grid-template-columns:270px 1fr}.sidebar{border-right:1px solid var(--line);padding:24px 18px;background:rgba(7,16,25,.92);position:sticky;top:0;height:100vh;overflow:auto}.brand{display:flex;gap:12px;align-items:center;margin-bottom:24px}.logo{width:44px;height:44px;border-radius:14px;background:linear-gradient(145deg,var(--accent),#7b63ff);display:grid;place-items:center;font-weight:900}.muted,small{color:var(--muted)}.identity{padding:14px;border:1px solid var(--line);border-radius:15px;background:rgba(255,255,255,.035)}.identity strong{display:block;margin-bottom:5px;overflow:hidden;text-overflow:ellipsis}.nav-title{margin:22px 10px 8px;color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.13em;font-weight:900}.nav{display:grid;gap:6px}.nav a{padding:11px 13px;text-decoration:none;border-radius:11px;color:var(--muted);font-weight:750}.nav a:hover,.nav a.active{background:rgba(98,168,255,.13);color:var(--text)}main{padding:32px;min-width:0}.eyebrow{color:var(--accent);font-size:.75rem;text-transform:uppercase;letter-spacing:.16em;font-weight:900}h1{margin:6px 0 8px;font-size:clamp(2rem,5vw,3.7rem);letter-spacing:-.05em}.summary{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 24px}.pill{border:1px solid var(--line);border-radius:999px;padding:9px 13px;font-weight:800;background:rgba(255,255,255,.035)}.core-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:30px}.core-card,.card{border:1px solid var(--line);border-radius:20px;text-decoration:none;background:linear-gradient(145deg,rgba(20,36,52,.97),rgba(12,24,36,.97));transition:.18s ease}.core-card{padding:20px;min-height:210px;display:flex;flex-direction:column}.core-card:hover,.card:hover{transform:translateY(-2px);border-color:rgba(98,168,255,.4);box-shadow:0 18px 44px rgba(0,0,0,.2)}.core-top,.card-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.core-icon{width:48px;height:48px;border-radius:15px;background:rgba(98,168,255,.12);display:grid;place-items:center;font-size:1.35rem}.state{display:flex;align-items:center;gap:7px;font-size:.72rem;font-weight:900;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}.dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}.state.healthy{color:var(--green)}.state.warning{color:var(--yellow)}.state.critical{color:var(--red)}.state.healthy .dot{background:var(--green)}.state.warning .dot{background:var(--yellow)}.state.critical .dot{background:var(--red)}.core-card h2{margin:16px 0 6px;font-size:1.2rem}.core-card p{margin:0;color:var(--muted);line-height:1.5;flex:1}.core-meta{margin-top:18px;padding-top:14px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:.82rem}.open{color:var(--accent);font-weight:850}.group{margin-bottom:30px}.group h2{text-transform:capitalize;font-size:1rem;color:var(--muted);letter-spacing:.08em;margin:0 0 12px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.card{display:flex;flex-direction:column;min-height:170px;padding:18px}.card h3{margin:0;font-size:1.02rem}.status{font-size:.7rem;color:var(--green);font-weight:900;text-transform:uppercase;letter-spacing:.08em}.card p{color:var(--muted);line-height:1.5;margin:14px 0;flex:1}.footer{text-align:center;color:var(--muted);font-size:.8rem;padding-top:12px}@media(max-width:1120px){.core-grid,.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:780px){.shell{display:block}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.nav{display:flex;overflow:auto}.nav a{white-space:nowrap}.nav-title{display:none}main{padding:22px 14px}.core-grid,.grid{grid-template-columns:1fr}.core-card{min-height:180px}}
   </style>
 </head>
 <body>
@@ -13,31 +13,77 @@
   <aside class="sidebar">
     <div class="brand"><div class="logo">R</div><div><strong>Racher OS</strong><small>Unified Control Center</small></div></div>
     <div class="identity"><strong>{{ identity.email or 'Ukendt bruger' }}</strong><small>Rolle: {{ identity.role }}</small></div>
-    <nav class="nav"><a href="/">Dashboard</a><a href="/control">Alle moduler</a><a href="/api/modules">Modul-API</a></nav>
+    <div class="nav-title">Primær navigation</div>
+    <nav class="nav">
+      <a class="active" href="/control">Overblik</a>
+      <a href="/deployment-inventory">Deployment Inventory</a>
+      <a href="/operations-status">Driftsstatus</a>
+      <a href="/apps">App Center</a>
+    </nav>
+    <div class="nav-title">System</div>
+    <nav class="nav">
+      <a href="/api/docker-center">Docker Center</a>
+      <a href="/api/backup-verification">Backup Center</a>
+      <a href="/api/cloudflare">Cloudflare</a>
+      <a href="/api/modules">Modul-API</a>
+    </nav>
   </aside>
   <main>
-    <div class="eyebrow">Racher OS v1.0 · moduloverblik</div>
+    <div class="eyebrow">Racher OS v1.0 · samlet administration</div>
     <h1>Control Center</h1>
-    <div class="muted">Én samlet indgang til de moduler, din rolle har adgang til.</div>
-    <div class="summary"><span class="pill">{{ module_count }} moduler</span><span class="pill">Rolle: {{ identity.role }}</span><span class="pill">Read-only navigation</span></div>
+    <div class="muted">Deployment Inventory, Driftsstatus, App Center og alle driftsmoduler samlet ét sted.</div>
+    <div class="summary"><span class="pill">{{ module_count }} moduler</span><span class="pill">Rolle: {{ identity.role }}</span><span class="pill">Live status</span></div>
+
+    <section class="core-grid" aria-label="Kerneområder">
+      <a class="core-card" href="/deployment-inventory">
+        <div class="core-top"><div class="core-icon">⇧</div><div class="state" id="deployment-state"><i class="dot"></i><span>Indlæser</span></div></div>
+        <h2>Deployment Inventory</h2>
+        <p>Live systemdata, containere, deploymenthistorik, hændelser, notifikationer og Docker-handlinger.</p>
+        <div class="core-meta"><span id="deployment-meta">Henter inventory…</span><span class="open">Åbn →</span></div>
+      </a>
+      <a class="core-card" href="/operations-status">
+        <div class="core-top"><div class="core-icon">●</div><div class="state" id="operations-state"><i class="dot"></i><span>Indlæser</span></div></div>
+        <h2>Driftsstatus</h2>
+        <p>Samlet grøn, gul eller rød status for modem, SMS-kø, Vagtbytte, backups, Cloudflare og containere.</p>
+        <div class="core-meta"><span id="operations-meta">Henter driftsstatus…</span><span class="open">Åbn →</span></div>
+      </a>
+      <a class="core-card" href="/apps">
+        <div class="core-top"><div class="core-icon">▦</div><div class="state" id="apps-state"><i class="dot"></i><span>Indlæser</span></div></div>
+        <h2>App Center</h2>
+        <p>Alle egne apps og infrastrukturtjenester med installation, health, version, CPU, RAM og handlinger.</p>
+        <div class="core-meta"><span id="apps-meta">Henter apps…</span><span class="open">Åbn →</span></div>
+      </a>
+    </section>
+
     {% for group in groups %}
       <section class="group">
         <h2>{{ group.category }}</h2>
         <div class="grid">
           {% for module in group.modules %}
+            {% if module.id not in ['dashboard', 'operations-status', 'app-center'] %}
             <a class="card" href="{{ module.href }}">
               <div class="card-top"><h3>{{ module.name }}</h3><span class="status">Tilgængelig</span></div>
               <p>{{ module.description }}</p>
               <span class="open">Åbn modul →</span>
             </a>
+            {% endif %}
           {% endfor %}
         </div>
       </section>
     {% else %}
       <div class="muted">Din rolle har endnu ikke adgang til nogen moduler.</div>
     {% endfor %}
-    <div class="footer">Racher OS · rollebaseret navigation · ingen data ændres fra denne side</div>
+    <div class="footer">Racher OS · fælles rollebaseret navigation · live data opdateres automatisk</div>
   </main>
 </div>
+<script>
+function setState(id,state,label){const node=document.getElementById(id);node.className=`state ${state}`;node.querySelector('span').textContent=label}
+async function loadCoreStatus(){
+  try{const response=await fetch('/api/deployments',{cache:'no-store'});const data=await response.json();const d=data.deployment_center||{};const bad=(d.missing||0)+(d.unhealthy||0);setState('deployment-state',bad?'warning':'healthy',bad?'Opmærksomhed':'OK');document.getElementById('deployment-meta').textContent=`${d.running||0}/${d.present||0} kører · ${d.missing||0} mangler`;}catch(error){setState('deployment-state','critical','Utilgængelig');document.getElementById('deployment-meta').textContent='Kunne ikke hente inventory';}
+  try{const response=await fetch('/api/operations-status',{cache:'no-store'});const data=await response.json();const state=data.summary?.state||'warning';setState('operations-state',state,state==='healthy'?'Alt fungerer':state==='critical'?'Driftsfejl':'Opmærksomhed');document.getElementById('operations-meta').textContent=`${data.summary?.healthy||0} grønne · ${data.summary?.warning||0} advarsler · ${data.summary?.critical||0} fejl`;}catch(error){setState('operations-state','critical','Utilgængelig');document.getElementById('operations-meta').textContent='Kunne ikke hente driftsstatus';}
+  try{const response=await fetch('/api/app-center',{cache:'no-store'});const data=await response.json();const s=data.app_center?.summary||{};const bad=(s.missing||0)+(s.unhealthy||0);setState('apps-state',bad?'warning':'healthy',bad?'Opmærksomhed':'OK');document.getElementById('apps-meta').textContent=`${s.running||0}/${s.registered||0} kører · ${s.unhealthy||0} unhealthy`;}catch(error){setState('apps-state','critical','Utilgængelig');document.getElementById('apps-meta').textContent='Kunne ikke hente apps';}
+}
+loadCoreStatus();setInterval(loadCoreStatus,30000);
+</script>
 </body>
 </html>
