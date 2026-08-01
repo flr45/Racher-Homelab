@@ -7,10 +7,12 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import serial
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
 
 from gsm0338 import decode_modem_bytes, encode_gsm0338
 
@@ -20,9 +22,13 @@ STATION_CODES = {
     "K": "Korsør",
     "L": "Skælskør",
     "R": "Ruds Vedby",
+    "ISL": "ISL",
 }
-START_PATTERN = re.compile(r"\(([ASKLR])\)", re.IGNORECASE)
+PARENTHESIZED_START_PATTERN = re.compile(r"\((ISL|[ASKLR])\)", re.IGNORECASE)
+STANDALONE_ISL_PATTERN = re.compile(r"(^|[^A-Z0-9])ISL(?=$|[^A-Z0-9])", re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"^\+?[1-9]\d{6,14}$")
+MODEM_STATUS_FILE = Path(os.getenv("MODEM_STATUS_FILE", "/data/modem-status.json"))
+GATEWAY_STATUS_FILE = Path(os.getenv("GATEWAY_STATUS_FILE", "/data/gateway-status.json"))
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:////data/sms-gateway.db")
@@ -41,7 +47,7 @@ firefighter_stations = db.Table(
 
 class Station(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    code = db.Column(db.String(1), unique=True, nullable=False)
+    code = db.Column(db.String(3), unique=True, nullable=False)
     name = db.Column(db.String(80), nullable=False)
 
 
@@ -56,7 +62,7 @@ class Firefighter(db.Model):
 class ActiveAlarm(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     sender = db.Column(db.String(20), index=True, nullable=False)
-    station_code = db.Column(db.String(1), nullable=False)
+    station_code = db.Column(db.String(3), nullable=False)
     opened_at = db.Column(db.DateTime(timezone=True), nullable=False)
     expires_at = db.Column(db.DateTime(timezone=True), index=True, nullable=False)
 
@@ -65,7 +71,7 @@ class InboundMessage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     sender = db.Column(db.String(20), nullable=False)
     body = db.Column(db.Text, nullable=False)
-    station_code = db.Column(db.String(1))
+    station_code = db.Column(db.String(3))
     received_at = db.Column(db.DateTime(timezone=True), nullable=False)
 
 
@@ -79,10 +85,15 @@ class Delivery(db.Model):
 
 
 modem_lock = threading.Lock()
+status_lock = threading.Lock()
 
 
 def utcnow():
     return datetime.now(timezone.utc)
+
+
+def utc_iso():
+    return utcnow().isoformat()
 
 
 def normalize_phone(value: str) -> str:
@@ -108,6 +119,24 @@ def parse_received_at(value):
     return parsed.astimezone(timezone.utc)
 
 
+def read_status_file(path: Path):
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def write_gateway_status(**values):
+    with status_lock:
+        current = read_status_file(GATEWAY_STATUS_FILE)
+        current.update(values, updated_at=utc_iso())
+        GATEWAY_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = GATEWAY_STATUS_FILE.with_suffix(".tmp")
+        temporary.write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(GATEWAY_STATUS_FILE)
+
+
 def modem_command(port, command, expected="OK", timeout=8):
     port.reset_input_buffer()
     port.write((command + "\r").encode("ascii"))
@@ -115,9 +144,9 @@ def modem_command(port, command, expected="OK", timeout=8):
     response = bytearray()
     while time.monotonic() < deadline:
         response.extend(port.read(port.in_waiting or 1))
-        text = decode_modem_bytes(bytes(response))
-        if expected in text or "ERROR" in text:
-            return text
+        response_text = decode_modem_bytes(bytes(response))
+        if expected in response_text or "ERROR" in response_text:
+            return response_text
     raise TimeoutError(f"Modem svarede ikke på {command}")
 
 
@@ -144,19 +173,27 @@ def send_sms(recipient: str, body: str):
         response = bytearray()
         while time.monotonic() < deadline:
             response.extend(port.read(port.in_waiting or 1))
-            text = decode_modem_bytes(bytes(response))
-            if "+CMGS:" in text and "OK" in text:
+            response_text = decode_modem_bytes(bytes(response))
+            if "+CMGS:" in response_text and "OK" in response_text:
                 return
-            if "ERROR" in text:
-                raise RuntimeError(text.strip())
+            if "ERROR" in response_text:
+                raise RuntimeError(response_text.strip())
         raise TimeoutError("SMS-afsendelse fik ikke kvittering fra modem")
+
+
+def detect_station_code(body: str):
+    parenthesized = PARENTHESIZED_START_PATTERN.search(body)
+    if parenthesized:
+        return parenthesized.group(1).upper()
+    if STANDALONE_ISL_PATTERN.search(body):
+        return "ISL"
+    return None
 
 
 def resolve_station(sender: str, body: str):
     now = utcnow()
-    match = START_PATTERN.search(body)
-    if match:
-        code = match.group(1).upper()
+    code = detect_station_code(body)
+    if code:
         minutes = int(os.getenv("ALARM_SOURCE_WINDOW_MINUTES", "10"))
         ActiveAlarm.query.filter_by(sender=sender).delete()
         db.session.add(
@@ -253,6 +290,12 @@ def process_incoming(
         received_at=received_at,
     )
     db.session.add(inbound)
+    write_gateway_status(
+        state="processing",
+        database="online",
+        last_received_sms_at=received_at.isoformat(),
+        last_error=None,
+    )
 
     try:
         db.session.flush()
@@ -263,8 +306,25 @@ def process_incoming(
             source_message_id=source_message_id or f"sms-gateway:{inbound.id}",
         )
         db.session.commit()
-    except Exception:
+        write_gateway_status(
+            state="online",
+            database="online",
+            last_received_sms_at=received_at.isoformat(),
+            last_vagtbytte_success_at=utc_iso(),
+            last_vagtbytte_error=None,
+            last_vagtbytte_error_at=None,
+            last_error=None,
+        )
+    except Exception as exc:
         db.session.rollback()
+        write_gateway_status(
+            state="degraded",
+            database="online",
+            last_received_sms_at=received_at.isoformat(),
+            last_vagtbytte_error=str(exc)[:1000],
+            last_vagtbytte_error_at=utc_iso(),
+            last_error=str(exc)[:1000],
+        )
         raise
 
     if not station_code:
@@ -300,7 +360,54 @@ def process_incoming(
 
 @app.get("/health")
 def health():
-    return jsonify(status="ok", modem_device=os.getenv("MODEM_DEVICE", "/dev/ttyUSB0"))
+    database_status = "online"
+    database_error = None
+    latest_message_at = None
+
+    try:
+        db.session.execute(text("SELECT 1"))
+        latest_message = InboundMessage.query.order_by(InboundMessage.received_at.desc()).first()
+        if latest_message:
+            latest_message_at = latest_message.received_at.isoformat()
+    except Exception as exc:
+        database_status = "offline"
+        database_error = str(exc)[:1000]
+        db.session.rollback()
+
+    modem_status = read_status_file(MODEM_STATUS_FILE)
+    gateway_status = read_status_file(GATEWAY_STATUS_FILE)
+    gateway_last_received = gateway_status.get("last_received_sms_at") or latest_message_at
+    modem_state = str(modem_status.get("state") or "unknown").lower()
+    overall_status = (
+        "ok"
+        if database_status == "online" and modem_state == "online"
+        else "degraded"
+    )
+
+    return jsonify(
+        status=overall_status,
+        checked_at=utc_iso(),
+        modem={
+            "state": modem_state,
+            "device": modem_status.get("device") or os.getenv("MODEM_DEVICE", "/dev/ttyUSB0"),
+            "updated_at": modem_status.get("updated_at"),
+            "last_message_at": modem_status.get("last_message_at"),
+            "last_error": modem_status.get("last_error"),
+            "network": modem_status.get("network"),
+            "signal": modem_status.get("signal"),
+        },
+        gateway={
+            "state": gateway_status.get("state", "unknown"),
+            "database": database_status,
+            "database_error": database_error,
+            "updated_at": gateway_status.get("updated_at"),
+            "last_received_sms_at": gateway_last_received,
+            "last_vagtbytte_success_at": gateway_status.get("last_vagtbytte_success_at"),
+            "last_vagtbytte_error_at": gateway_status.get("last_vagtbytte_error_at"),
+            "last_vagtbytte_error": gateway_status.get("last_vagtbytte_error"),
+            "last_error": gateway_status.get("last_error"),
+        },
+    )
 
 
 @app.post("/api/incoming")
@@ -330,7 +437,7 @@ def incoming():
 
 @app.get("/api/stations")
 def stations():
-    return jsonify([{"code": s.code, "name": s.name} for s in Station.query.order_by(Station.name)])
+    return jsonify([{"code": station.code, "name": station.name} for station in Station.query.order_by(Station.name)])
 
 
 @app.get("/api/firefighters")
@@ -338,13 +445,13 @@ def firefighters():
     people = Firefighter.query.order_by(Firefighter.name).all()
     return jsonify([
         {
-            "id": p.id,
-            "name": p.name,
-            "phone": p.phone,
-            "active": p.active,
-            "stations": [s.code for s in p.stations],
+            "id": person.id,
+            "name": person.name,
+            "phone": person.phone,
+            "active": person.active,
+            "stations": [station.code for station in person.stations],
         }
-        for p in people
+        for person in people
     ])
 
 
@@ -356,14 +463,14 @@ def create_firefighter():
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
     codes = {str(code).upper() for code in payload.get("stations", [])}
-    stations = Station.query.filter(Station.code.in_(codes)).all() if codes else []
-    if codes != {s.code for s in stations}:
+    selected_stations = Station.query.filter(Station.code.in_(codes)).all() if codes else []
+    if codes != {station.code for station in selected_stations}:
         return jsonify(error="En eller flere stationskoder findes ikke"), 400
     person = Firefighter(
         name=(payload.get("name") or "").strip(),
         phone=phone,
         active=bool(payload.get("active", True)),
-        stations=stations,
+        stations=selected_stations,
     )
     if not person.name:
         return jsonify(error="Navn mangler"), 400
@@ -387,10 +494,10 @@ def update_firefighter(person_id):
         person.active = bool(payload["active"])
     if "stations" in payload:
         codes = {str(code).upper() for code in payload["stations"]}
-        stations = Station.query.filter(Station.code.in_(codes)).all() if codes else []
-        if codes != {s.code for s in stations}:
+        selected_stations = Station.query.filter(Station.code.in_(codes)).all() if codes else []
+        if codes != {station.code for station in selected_stations}:
             return jsonify(error="En eller flere stationskoder findes ikke"), 400
-        person.stations = stations
+        person.stations = selected_stations
     db.session.commit()
     return jsonify(status="updated")
 
@@ -416,3 +523,4 @@ with app.app_context():
         if not Station.query.filter_by(code=code).first():
             db.session.add(Station(code=code, name=name))
     db.session.commit()
+    write_gateway_status(state="online", database="online", last_error=None)
