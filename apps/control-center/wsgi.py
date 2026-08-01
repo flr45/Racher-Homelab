@@ -31,6 +31,7 @@ from setup_extension import init_setup_center
 from ssh_console_extension import init_ssh_console
 from storage_center_extension import init_storage_center
 from support_bundle_extension import init_support_bundle_center
+from unified_ui_extension import init_unified_ui
 from update_center_extension import init_update_center
 
 app = create_app()
@@ -66,4 +67,5 @@ init_update_center(app)
 init_support_bundle_center(app)
 init_release_center(app)
 init_setup_center(app)
+init_unified_ui(app)
 init_module_registry(app)
