@@ -178,7 +178,14 @@ def assemble_parts(parts: list[DecodedSmsPart]) -> list[dict]:
         ordered = [by_sequence[sequence] for sequence in range(1, total + 1)]
         messages.append(_message_from_parts(ordered))
 
-    return sorted(messages, key=lambda message: message["indices"][0])
+    # SIM-kortet genbruger ledige hukommelsesindeks. Indeksrækkefølgen er derfor
+    # ikke nødvendigvis den rækkefølge, SMS'erne blev modtaget i. Behandl altid
+    # en samlet modem-batch efter SMSC-tidspunktet, så førstesendingen kommer før
+    # umarkerede opfølgende sendinger.
+    return sorted(
+        messages,
+        key=lambda message: (message["timestamp"], message["indices"][0]),
+    )
 
 
 def _message_from_parts(parts: list[DecodedSmsPart]) -> dict:
