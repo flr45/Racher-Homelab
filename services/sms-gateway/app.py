@@ -18,13 +18,14 @@ from gsm0338 import decode_modem_bytes, encode_gsm0338
 
 STATION_CODES = {
     "A": "Slagelse",
+    "B": "Storebælt",
     "S": "Sorø",
     "K": "Korsør",
     "L": "Skælskør",
     "R": "Ruds Vedby",
     "ISL": "ISL",
 }
-PARENTHESIZED_START_PATTERN = re.compile(r"\((ISL|[ASKLR])\)", re.IGNORECASE)
+PARENTHESIZED_START_PATTERN = re.compile(r"\((ISL|[ABSKLR])\)", re.IGNORECASE)
 STANDALONE_ISL_PATTERN = re.compile(r"(^|[^A-Z0-9])ISL(?=$|[^A-Z0-9])", re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"^\+?[1-9]\d{6,14}$")
 MODEM_STATUS_FILE = Path(os.getenv("MODEM_STATUS_FILE", "/data/modem-status.json"))
