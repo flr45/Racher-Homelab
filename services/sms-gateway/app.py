@@ -213,7 +213,44 @@ def resolve_station(sender: str, body: str):
         .order_by(ActiveAlarm.opened_at.desc())
         .first()
     )
-    return active.station_code if active else None
+    if active:
+        return active.station_code
+
+    candidates = (
+        ActiveAlarm.query.filter(ActiveAlarm.expires_at >= now)
+        .order_by(ActiveAlarm.opened_at.desc())
+        .limit(2)
+        .all()
+    )
+    if len(candidates) == 1:
+        candidate = candidates[0]
+        db.session.add(
+            ActiveAlarm(
+                sender=sender,
+                station_code=candidate.station_code,
+                opened_at=candidate.opened_at,
+                expires_at=candidate.expires_at,
+            )
+        )
+        return candidate.station_code
+
+    return None
+
+
+def build_vagtbytte_payload(
+    sender: str,
+    body: str,
+    received_at: datetime,
+    source_message_id: str | None,
+    station_code: str | None,
+):
+    return {
+        "senderNumber": sender,
+        "rawMessage": body,
+        "receivedAt": received_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "sourceMessageId": source_message_id,
+        "stationCode": station_code,
+    }
 
 
 def forward_to_vagtbytte(
@@ -221,6 +258,7 @@ def forward_to_vagtbytte(
     body: str,
     received_at: datetime,
     source_message_id: str | None,
+    station_code: str | None,
 ):
     url = os.getenv(
         "VAGTBYTTE_ALARM_FEED_URL",
@@ -234,12 +272,13 @@ def forward_to_vagtbytte(
         raise RuntimeError("VAGTBYTTE_ALARM_FEED_TOKEN mangler")
 
     payload = json.dumps(
-        {
-            "senderNumber": sender,
-            "rawMessage": body,
-            "receivedAt": received_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "sourceMessageId": source_message_id,
-        },
+        build_vagtbytte_payload(
+            sender,
+            body,
+            received_at,
+            source_message_id,
+            station_code,
+        ),
         ensure_ascii=False,
     ).encode("utf-8")
     outgoing = urllib.request.Request(
@@ -305,6 +344,7 @@ def process_incoming(
             body=body,
             received_at=received_at,
             source_message_id=source_message_id or f"sms-gateway:{inbound.id}",
+            station_code=station_code,
         )
         db.session.commit()
         write_gateway_status(
