@@ -25,6 +25,7 @@ services:
       BACKUP_AUTO_HOUR: ${VAGTBYTTE_BACKUP_AUTO_HOUR:-3}
       BACKUP_RETENTION_COUNT: ${VAGTBYTTE_BACKUP_RETENTION_COUNT:-30}
       BACKUP_ENCRYPTION_KEY_FILE: /run/secrets/vagtbytte_backup_encryption_key
+      OPERATIV_PORTAL_DATA_DIRECTORY: /data/operativ-portal
       SMTP_HOST: ${VAGTBYTTE_SMTP_HOST:-}
       SMTP_PORT: ${VAGTBYTTE_SMTP_PORT:-587}
       SMTP_SECURE: ${VAGTBYTTE_SMTP_SECURE:-false}
@@ -44,6 +45,7 @@ services:
       - "3000"
     volumes:
       - vagtbytte_backups:/data/backups
+      - vagtbytte_operativ_portal:/data/operativ-portal
     secrets:
       - vagtbytte_backup_encryption_key
     networks:
@@ -100,6 +102,7 @@ services:
 
 volumes:
   vagtbytte_backups:
+  vagtbytte_operativ_portal:
 
 secrets:
   vagtbytte_backup_encryption_key:
