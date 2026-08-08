@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT="${HOMELAB_ROOT:-$HOME/homelab/Racher-Homelab}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="${HOMELAB_ROOT:-$REPO_ROOT}"
 ENV_FILE="${ENV_FILE:-$ROOT/.env}"
 cd "$ROOT"
 
@@ -9,13 +10,19 @@ cd "$ROOT"
 
 git pull --ff-only
 
-for stack in compose/core compose/data compose/minutregnskab compose/control-center; do
+for stack in compose/core compose/data compose/minutregnskab compose/control-center compose/vagtbytte; do
+  compose_file="$stack/compose.yml"
+  if [[ ! -f "$compose_file" ]]; then
+    echo "Springer over $stack: $compose_file findes ikke"
+    continue
+  fi
+
   echo "Validerer $stack"
-  docker compose --env-file "$ENV_FILE" -f "$stack/compose.yml" config --quiet
+  docker compose --env-file "$ENV_FILE" -f "$compose_file" config --quiet
   echo "Opdaterer $stack"
-  docker compose --env-file "$ENV_FILE" -f "$stack/compose.yml" pull
-  docker compose --env-file "$ENV_FILE" -f "$stack/compose.yml" up -d --remove-orphans
-  docker compose --env-file "$ENV_FILE" -f "$stack/compose.yml" ps
- done
+  docker compose --env-file "$ENV_FILE" -f "$compose_file" pull
+  docker compose --env-file "$ENV_FILE" -f "$compose_file" up -d --remove-orphans
+  docker compose --env-file "$ENV_FILE" -f "$compose_file" ps
+done
 
 docker image prune -f
