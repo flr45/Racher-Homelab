@@ -172,6 +172,8 @@ backup_volume racher-homelab-core_npm_letsencrypt npm-letsencrypt
 backup_volume racher-homelab-core_portainer_data portainer
 backup_volume racher-homelab-core_uptime_kuma_data uptime-kuma
 backup_volume racher-homelab-data_redis_data redis
+backup_volume vagtbytte_vagtbytte_backups vagtbytte-backups
+backup_volume vagtbytte_vagtbytte_operativ_portal vagtbytte-operativ-portal
 
 cp "$ENV_FILE" "$DEST/env.backup"
 chmod 600 "$DEST/env.backup"

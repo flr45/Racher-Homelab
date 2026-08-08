@@ -1,0 +1,34 @@
+name: Validate Homelab
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' script; do
+            echo "Checking $script"
+            bash -n "$script"
+          done < <(find scripts -type f -name '*.sh' -print0)
+
+      - name: Validate Docker Compose files
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' compose_file; do
+            echo "Checking $compose_file"
+            docker compose --env-file .env.example -f "$compose_file" config --quiet
+          done < <(find compose -type f -name 'compose.yml' -print0)
