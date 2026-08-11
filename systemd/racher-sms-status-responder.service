@@ -1,0 +1,19 @@
+[Unit]
+Description=Besvar SMS-statuskommandoer for Racher-servere
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=racher
+Group=racher
+WorkingDirectory=/home/racher/Racher-Homelab
+Environment=ENV_FILE=/home/racher/Racher-Homelab/.env
+ExecStart=/usr/bin/python3 /home/racher/Racher-Homelab/scripts/sms-status-responder.py
+Restart=always
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
