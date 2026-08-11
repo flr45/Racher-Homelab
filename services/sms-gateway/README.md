@@ -12,6 +12,12 @@ USB-modem-baseret SMS-tjeneste til Racher OS. Første melding videresendes strak
 | `(L)` | Skælskør |
 | `(R)` | Ruds Vedby |
 
+## SMS-kommandoer
+
+Godkendte afsendere kan sende `status` til modemnummeret. Kommandoen bliver lagt i en separat kommandokø og bliver ikke sendt videre til Vagtbytte. `scripts/sms-status-responder.py` henter kommandoen og svarer med én status-SMS for Raspberry Pi'en og én for mini-PC'en med bl.a. temperatur, disk, RAM, load, Docker-status og uptime.
+
+`RACHER_MONITOR_SMS_TO` er automatisk godkendt som kommandonummer, når variablen gives videre til containeren. Yderligere numre kan angives kommasepareret i `SMS_COMMAND_ALLOWED_NUMBERS`.
+
 ## Første test uden modem
 
 Start med `SMS_DRY_RUN=true`, så SMS'er logges uden at blive sendt.
@@ -74,6 +80,10 @@ Tjenesten sender i SMS-teksttilstand med `AT+CMGF=1` og `AT+CMGS`.
 - `PUT /api/firefighters/<id>`
 - `POST /api/incoming`
 - `GET /api/messages`
+- `POST /api/outgoing`
+- `POST /api/outgoing/claim`
+- `POST /api/commands/claim`
+- `POST /api/commands/<id>/complete`
 
 ## Næste hardwaretrin
 
