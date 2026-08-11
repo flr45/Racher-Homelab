@@ -1,0 +1,19 @@
+[Unit]
+Description=Overvåg Racherserver mini-PC
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=racher
+Group=racher
+WorkingDirectory=/home/racher/Racher-Homelab
+Environment=ENV_FILE=/home/racher/Racher-Homelab/.env
+ExecStart=/usr/bin/python3 /home/racher/Racher-Homelab/scripts/remote-host-monitor.py
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target
