@@ -1,0 +1,12 @@
+[Unit]
+Description=Kontrollér Racherserver hvert minut
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+RandomizedDelaySec=5
+Persistent=true
+Unit=racher-remote-host-monitor.service
+
+[Install]
+WantedBy=timers.target
