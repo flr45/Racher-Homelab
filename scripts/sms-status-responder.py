@@ -95,17 +95,27 @@ def status_sms(label: str, value: dict) -> str:
     temp = value.get("temperature_c")
     temp_text = f"{temp:.0f}C" if isinstance(temp, (int, float)) else "?C"
     docker = value.get("docker") or {}
-    base = (
-        f"{label} {state} | temp {temp_text} | disk {value.get('disk_percent', '?')}% | "
-        f"RAM {value.get('memory_percent', '?')}% | load {value.get('load1', '?')} | "
-        f"Docker {docker.get('running', '?')}/{docker.get('total', '?')} | "
-        f"up {human_uptime(value.get('uptime_seconds'))}"
+    # Huawei E180 has proven unreliable when sending GSM 03.38 extension
+    # characters such as the pipe symbol. Keep status replies on the default
+    # GSM alphabet by using a plain hyphen separator.
+    separator = " - "
+    base = separator.join(
+        [
+            f"{label} {state}",
+            f"temp {temp_text}",
+            f"disk {value.get('disk_percent', '?')}%",
+            f"RAM {value.get('memory_percent', '?')}%",
+            f"load {value.get('load1', '?')}",
+            f"Docker {docker.get('running', '?')}/{docker.get('total', '?')}",
+            f"up {human_uptime(value.get('uptime_seconds'))}",
+        ]
     )
     issues = value.get("issues") or []
     if issues:
-        room = 155 - len(base) - 3
+        room = 155 - len(base) - len(separator)
         if room > 8:
-            base += " | " + str(issues[0])[:room]
+            issue = str(issues[0]).replace("|", "-")
+            base += separator + issue[:room]
     return " ".join(base.split())[:155]
 
 
