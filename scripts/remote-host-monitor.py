@@ -219,7 +219,8 @@ def main() -> int:
         }
     )
     print(f"Racherserver: FEJL {failures}/{threshold} - {(issues or ['ukendt fejl'])[0]}")
-    return 1
+    # En fjernfejl er et monitorresultat, ikke en fejl i selve systemd-jobbet.
+    return 0
 
 
 if __name__ == "__main__":
