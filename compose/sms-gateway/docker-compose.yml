@@ -16,6 +16,8 @@ services:
       SMS_DRY_RUN: ${SMS_DRY_RUN:-true}
       VAGTBYTTE_ALARM_FEED_URL: ${VAGTBYTTE_ALARM_FEED_URL:-http://vagtbytte-web:3000/api/alarm-feed/ingest}
       VAGTBYTTE_ALARM_FEED_TOKEN: ${VAGTBYTTE_ALARM_FEED_INGEST_TOKEN}
+      RACHER_MONITOR_SMS_TO: ${RACHER_MONITOR_SMS_TO:-}
+      SMS_COMMAND_ALLOWED_NUMBERS: ${SMS_COMMAND_ALLOWED_NUMBERS:-}
     devices:
       - ${SMS_MODEM_DEVICE:-/dev/ttyUSB1}:${SMS_MODEM_DEVICE:-/dev/ttyUSB1}
     group_add:
