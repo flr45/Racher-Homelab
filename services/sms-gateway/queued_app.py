@@ -1,8 +1,9 @@
 """Runtime wrapper for the SMS gateway.
 
 The original web application remains in ``base_app.py``. This wrapper adds a
-persistent outgoing queue and replaces direct serial access in the web process.
-Only ``modem_reader.py`` is allowed to own the modem device.
+persistent outgoing queue, an authenticated SMS command queue and replaces
+direct serial access in the web process. Only ``modem_reader.py`` is allowed
+to own the modem device.
 """
 
 import contextvars
@@ -39,6 +40,22 @@ class OutboundMessage(db.Model):
         nullable=True,
         index=True,
     )
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    claimed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+
+class CommandRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    sender = db.Column(db.String(20), nullable=False, index=True)
+    command = db.Column(db.String(40), nullable=False, index=True)
+    status = db.Column(db.String(20), nullable=False, default="pending", index=True)
+    error = db.Column(db.Text)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
@@ -218,10 +235,156 @@ def complete_outbound_message(
     return should_retry
 
 
+def command_name(body: str) -> str | None:
+    normalized = " ".join((body or "").strip().casefold().split())
+    aliases = {
+        "status": "status",
+        "server status": "status",
+        "serverstatus": "status",
+    }
+    return aliases.get(normalized)
+
+
+def allowed_command_senders() -> set[str]:
+    values = []
+    for key in ("SMS_COMMAND_ALLOWED_NUMBERS", "RACHER_MONITOR_SMS_TO"):
+        values.extend(os.getenv(key, "").split(","))
+
+    result: set[str] = set()
+    for raw_value in values:
+        value = raw_value.strip()
+        if not value:
+            continue
+        try:
+            result.add(base.normalize_phone(value))
+        except ValueError:
+            log.warning("Ignorerer ugyldigt SMS-kommandonummer fra miljøvariabel")
+    return result
+
+
+def enqueue_command(sender: str, command: str):
+    request_row = CommandRequest(
+        sender=base.normalize_phone(sender),
+        command=command,
+        status="pending",
+        created_at=utcnow(),
+    )
+    db.session.add(request_row)
+    db.session.commit()
+    return request_row
+
+
+def cleanup_commands():
+    retention_days = max(1, int(os.getenv("SMS_COMMAND_RETENTION_DAYS", "7")))
+    cutoff = utcnow() - timedelta(days=retention_days)
+    deleted = CommandRequest.query.filter(
+        CommandRequest.status.in_({"done", "failed"}),
+        CommandRequest.completed_at.is_not(None),
+        CommandRequest.completed_at < cutoff,
+    ).delete(synchronize_session=False)
+    if deleted:
+        db.session.commit()
+
+
+def claim_command_request():
+    cleanup_commands()
+    stale_seconds = max(30, int(os.getenv("SMS_COMMAND_STALE_SECONDS", "120")))
+    stale_before = utcnow() - timedelta(seconds=stale_seconds)
+
+    message = (
+        CommandRequest.query.filter_by(status="pending")
+        .order_by(CommandRequest.created_at.asc(), CommandRequest.id.asc())
+        .first()
+    )
+    if message is None:
+        message = (
+            CommandRequest.query.filter(
+                CommandRequest.status == "processing",
+                CommandRequest.claimed_at.is_not(None),
+                CommandRequest.claimed_at < stale_before,
+            )
+            .order_by(CommandRequest.claimed_at.asc())
+            .first()
+        )
+    if message is None:
+        return None
+
+    message.status = "processing"
+    message.claimed_at = utcnow()
+    message.completed_at = None
+    message.error = None
+    message.attempts = int(message.attempts or 0) + 1
+    db.session.commit()
+    return message
+
+
+def complete_command_request(
+    message: CommandRequest,
+    status: str,
+    error: str | None = None,
+    retry: bool = False,
+):
+    max_attempts = max(1, int(os.getenv("SMS_COMMAND_MAX_ATTEMPTS", "3")))
+    should_retry = retry and int(message.attempts or 0) < max_attempts
+    if should_retry:
+        message.status = "pending"
+        message.claimed_at = None
+        message.completed_at = None
+        message.error = (error or "SMS-kommandoen fejlede")[:1000]
+    else:
+        message.status = status
+        message.completed_at = utcnow()
+        message.error = (error or "")[:1000] or None
+    db.session.commit()
+    return should_retry
+
+
 _original_process_incoming = base.process_incoming
 
 
 def process_incoming(*args, **kwargs):
+    sender = kwargs.get("sender", args[0] if len(args) >= 1 else "")
+    body = kwargs.get("body", args[1] if len(args) >= 2 else "")
+    received_at = kwargs.get("received_at", args[2] if len(args) >= 3 else None)
+
+    normalized_sender = base.normalize_phone(sender)
+    detected_command = command_name(body)
+    if detected_command and normalized_sender in allowed_command_senders():
+        parsed_received_at = base.parse_received_at(received_at)
+        inbound = base.InboundMessage(
+            sender=normalized_sender,
+            body=(body or "").strip(),
+            station_code=None,
+            received_at=parsed_received_at,
+        )
+        db.session.add(inbound)
+        db.session.flush()
+        command = CommandRequest(
+            sender=normalized_sender,
+            command=detected_command,
+            status="pending",
+            created_at=utcnow(),
+        )
+        db.session.add(command)
+        db.session.commit()
+        base.write_gateway_status(
+            state="online",
+            database="online",
+            last_received_sms_at=parsed_received_at.isoformat(),
+            last_error=None,
+        )
+        log.info(
+            "SMS-kommando %s fra %s sat i kø som %s",
+            detected_command,
+            normalized_sender,
+            command.id,
+        )
+        return inbound, 0, {
+            "created": False,
+            "alarmId": None,
+            "sequenceNumber": None,
+        }
+
     queued_messages: list[tuple[int, str]] = []
     token = _active_outbound_messages.set(queued_messages)
     try:
@@ -323,6 +486,42 @@ def outgoing_complete(message_id):
     )
 
 
+@app.post("/api/commands/claim")
+def claim_command():
+    command = claim_command_request()
+    if command is None:
+        return "", 204
+    return jsonify(
+        id=command.id,
+        sender=command.sender,
+        command=command.command,
+        status=command.status,
+        attempts=command.attempts,
+    )
+
+
+@app.post("/api/commands/<int:command_id>/complete")
+def command_complete(command_id):
+    command = db.get_or_404(CommandRequest, command_id)
+    payload = request.get_json(force=True)
+    status = str(payload.get("status", "")).lower()
+    if status not in {"done", "failed"}:
+        return jsonify(error="Status skal være done eller failed"), 400
+
+    retried = complete_command_request(
+        command,
+        status=status,
+        error=payload.get("error"),
+        retry=bool(payload.get("retry", False)),
+    )
+    return jsonify(
+        id=command.id,
+        status=command.status,
+        attempts=command.attempts,
+        retried=retried,
+    )
+
+
 _original_health = app.view_functions["health"]
 
 
@@ -335,6 +534,12 @@ def health_with_outbox():
         ).count()
         payload["gateway"]["outbox_failed"] = (
             OutboundMessage.query.filter_by(status="failed").count()
+        )
+        payload["gateway"]["commands_pending"] = CommandRequest.query.filter(
+            CommandRequest.status.in_({"pending", "processing"})
+        ).count()
+        payload["gateway"]["commands_failed"] = (
+            CommandRequest.query.filter_by(status="failed").count()
         )
     except Exception as exc:  # noqa: BLE001
         db.session.rollback()
