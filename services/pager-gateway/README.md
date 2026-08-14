@@ -19,6 +19,7 @@ Scanner -> USB-lydkort -> PDL 3.2.0 headless -> /var/lib/racher-pager/pdl.log
                                    SQLite   PWA    Web Push  Pushover
                                       |
                                       +-- admin system command queue
+                                      +-- runtime health/status
                                                    |
                                                    v
                                          root-ejet host-agent
@@ -37,7 +38,7 @@ Der findes to roller:
 
 Når databasen er tom, sender `/login` automatisk videre til `/setup`. Her oprettes den **første administrator**. Når første konto eksisterer, lukker setup-flowet, og nye brugere kan kun oprettes fra en admin-konto.
 
-Adgangskoder gemmes som Werkzeug password hashes. Sessions er HttpOnly/SameSite og alle muterende routes er CSRF-beskyttet.
+Adgangskoder gemmes med PBKDF2-HMAC-SHA256. Sessions er HttpOnly/SameSite og alle muterende routes er CSRF-beskyttet.
 
 ## PWA og Web Push
 
@@ -57,6 +58,8 @@ Webcontaineren får ikke root- eller Docker-socket-adgang. Admin-knapper oprette
 
 Der kan ikke sendes vilkårlige shell-kommandoer fra webappen.
 
+Host-agenten skriver også løbende faktiske Pi-målinger til SQLite: PDL-service, gateway-container, ALSA capture-enheder, diskplads, CPU-temperatur, host uptime, PDL-log og backupstatus. Admin-siden viser dem som en klargøringsliste. Manglende USB-lydkort eller PDL-data vises som **afventer**, så Pi'en kan gøres færdig hjemme uden scanner.
+
 ## Lokal test på Mac
 
 ```bash
@@ -72,18 +75,32 @@ PAGER_DATA_DIR="$PWD/.data" python app.py
 
 PDL kan ikke bygges direkte på macOS; selve PDL-buildet udføres på Raspberry Pi OS/Debian/Ubuntu.
 
-## PDL på Raspberry Pi
+## Én-kommando installation på Raspberry Pi
 
-På Raspberry Pi OS 64-bit:
+På et nyt Raspberry Pi OS 64-bit system, efter `Racher-Homelab` er klonet:
 
 ```bash
-cd ~/Racher-Homelab/services/pager-gateway/pdl
-bash install-pdl.sh
-bash install-pdl-service.sh
-bash install-system-agent.sh
+cd ~/Racher-Homelab
+bash services/pager-gateway/install-pager-gateway.sh
 ```
 
-PDL-installeren installerer Linux build-afhængigheder, henter den fastlåste PDL-version, anvender headless-patchen og bygger binæren til Pi'ens egen arkitektur.
+Bootstrap-scriptet er idempotent og:
+
+1. installerer Docker, Compose, ALSA-værktøjer og SQLite,
+2. opretter `/var/lib/racher-pager`,
+3. bygger den fastlåste PDL 3.2.0 med headless-patch,
+4. installerer og aktiverer `racher-pdl.service`,
+5. bygger og starter `racher-pager-gateway`-containeren,
+6. sætter gatewayen til PDL-loginput,
+7. installerer den root-ejede health/system-agent,
+8. installerer daglig backup og opretter første backup,
+9. viser gatewayens lokale URL og slutstatus.
+
+Scriptet skal køres som normal bruger, **ikke** som `sudo bash`; det bruger selv `sudo` hvor det er nødvendigt.
+
+Det er forventet, at PDL/USB-lyd kan stå som afventende hjemme. Systemet er stadig klargjort til den senere scanner-test.
+
+## PDL og scanner-test
 
 Før første rigtige radio-test findes lydkortets ALSA-navn med:
 
@@ -93,24 +110,36 @@ arecord -L
 
 Konfiguration ligger i `/etc/racher-pager/pdl.env`. Dekodede linjer skrives til `/var/lib/racher-pager/pdl.log`.
 
-## Webgateway på Pi
-
-Sæt mindst:
+Når USB-lydkortet er kendt, ændres fx:
 
 ```text
-PAGER_DATA_HOST_PATH=/var/lib/racher-pager
-PAGER_COOKIE_SECURE=0
-PAGER_VAPID_SUBJECT=mailto:admin@example.dk
+PDL_CAPTURE_DEVICE=default
+PDL_SAMPLE_RATE=48000
 ```
 
-og start:
+og PDL genstartes fra admin-siden eller med:
 
 ```bash
-cd ~/Racher-Homelab
-docker compose -f compose/pager-gateway/docker-compose.yml up -d --build
+sudo systemctl restart racher-pdl
 ```
 
-Når HTTPS er sat op, ændres `PAGER_COOKIE_SECURE=1`.
+## Backup
+
+`racher-pager-backup.timer` laver daglig lokal backup. Første backup køres straks under bootstrap.
+
+Standardplacering:
+
+```text
+/var/backups/racher-pager/
+```
+
+Backup indeholder en konsistent SQLite-backup samt relevante lokale secrets/PDL-konfiguration, når filerne findes. Arkiverne er root-only (`0600`) og standard-retention er 14 dage.
+
+Status kan ses med:
+
+```bash
+systemctl status racher-pager-backup.timer --no-pager
+```
 
 ## Test uden scanner
 
@@ -121,3 +150,7 @@ Simulator -> SQLite -> alarmfeed -> PWA Web Push -> Pushover
 ```
 
 Det betyder, at login, brugere, historik, notifikationer og systemadministration kan gøres færdige hjemme, før Pi'en fysisk kobles på scanneren.
+
+## Når Pi'en skal online
+
+Den lokale bootstrap bruger HTTP og `PAGER_COOKIE_SECURE=0`. Næste driftstrin er reverse proxy/HTTPS og en stabil ekstern adresse. Først når HTTPS er sat op aktiveres `PAGER_COOKIE_SECURE=1` og PWA Web Push testes på telefonerne.
