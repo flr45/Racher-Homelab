@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -19,6 +21,58 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "pushover_user_key": "",
     "vapid_subject": "mailto:admin@racher.local",
 }
+
+SYSTEM_ACTIONS = {
+    "restart-pdl",
+    "restart-gateway",
+    "reboot",
+    "backup-now",
+    "restore-backup",
+    "update-gateway",
+    "rollback-gateway",
+    "wifi-add",
+    "wifi-remove",
+    "hotspot-start",
+    "hotspot-stop",
+    "restart-tunnel",
+}
+BACKUP_NAME_RE = re.compile(r"^racher-pager-\d{8}T\d{6}Z\.tar\.gz$")
+WIFI_PROFILE_RE = re.compile(r"^racher-wifi-[0-9a-f]{10}$")
+
+
+def validate_system_command(action: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Validate and normalize privileged command payloads before queueing.
+
+    The host agent validates the same values again. Keeping validation here
+    prevents malformed or arbitrary values from reaching the privileged queue.
+    """
+    action = str(action or "").strip()
+    if action not in SYSTEM_ACTIONS:
+        raise ValueError("invalid system action")
+
+    data = payload if isinstance(payload, dict) else {}
+    if action == "wifi-add":
+        ssid = str(data.get("ssid") or "").strip()
+        password = str(data.get("password") or "")
+        if not 1 <= len(ssid) <= 32:
+            raise ValueError("invalid Wi-Fi SSID")
+        if not 8 <= len(password) <= 63:
+            raise ValueError("invalid Wi-Fi password")
+        return {"ssid": ssid, "password": password}
+
+    if action == "wifi-remove":
+        profile = str(data.get("profile") or "").strip()
+        if not WIFI_PROFILE_RE.fullmatch(profile):
+            raise ValueError("invalid Wi-Fi profile")
+        return {"profile": profile}
+
+    if action == "restore-backup":
+        filename = str(data.get("filename") or "").strip()
+        if not BACKUP_NAME_RE.fullmatch(filename):
+            raise ValueError("invalid backup filename")
+        return {"filename": filename}
+
+    return {}
 
 
 class Storage:
@@ -99,6 +153,7 @@ class Storage:
                     status TEXT NOT NULL DEFAULT 'queued',
                     processed_at TEXT,
                     result TEXT,
+                    payload TEXT NOT NULL DEFAULT '{}',
                     FOREIGN KEY(requested_by) REFERENCES users(id) ON DELETE RESTRICT
                 );
                 CREATE INDEX IF NOT EXISTS idx_system_commands_status ON system_commands(status, id);
@@ -108,8 +163,26 @@ class Storage:
                     value TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    action TEXT NOT NULL,
+                    detail TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log(created_at DESC);
                 """
             )
+
+            columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(system_commands)").fetchall()
+            }
+            if "payload" not in columns:
+                conn.execute("ALTER TABLE system_commands ADD COLUMN payload TEXT NOT NULL DEFAULT '{}'")
+
             for key, value in DEFAULT_SETTINGS.items():
                 conn.execute(
                     "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",
@@ -193,13 +266,20 @@ class Storage:
                     role: str, created_by: int | None = None) -> int:
         if role not in {"admin", "user"}:
             raise ValueError("invalid role")
+        now = self._now()
         with self.connect() as conn:
             cur = conn.execute(
                 """INSERT INTO users(username, display_name, password_hash, role, active, created_at, created_by)
                    VALUES (?, ?, ?, ?, 1, ?, ?)""",
-                (username.strip(), display_name.strip(), password_hash, role, self._now(), created_by),
+                (username.strip(), display_name.strip(), password_hash, role, now, created_by),
             )
-            return int(cur.lastrowid)
+            user_id = int(cur.lastrowid)
+            if created_by is not None:
+                conn.execute(
+                    "INSERT INTO audit_log(user_id, action, detail, created_at) VALUES (?, ?, ?, ?)",
+                    (created_by, "user-create", f"user_id={user_id}; role={role}", now),
+                )
+            return user_id
 
     def get_user(self, user_id: int) -> dict[str, Any] | None:
         with self.connect() as conn:
@@ -276,22 +356,50 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def queue_system_command(self, action: str, requested_by: int) -> int:
-        if action not in {"restart-pdl", "restart-gateway", "reboot"}:
-            raise ValueError("invalid system action")
+    def add_audit(self, user_id: int | None, action: str, detail: str = "") -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO audit_log(user_id, action, detail, created_at) VALUES (?, ?, ?, ?)",
+                (user_id, str(action)[:80], str(detail)[:1000], self._now()),
+            )
+
+    def list_audit(self, limit: int = 50) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 200))
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT a.id, a.user_id, a.action, a.detail, a.created_at,
+                          u.username AS username
+                   FROM audit_log a LEFT JOIN users u ON u.id=a.user_id
+                   ORDER BY a.id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def queue_system_command(self, action: str, requested_by: int,
+                             payload: dict[str, Any] | None = None) -> int:
+        normalized = validate_system_command(action, payload)
+        now = self._now()
         with self.connect() as conn:
             cur = conn.execute(
-                """INSERT INTO system_commands(action, requested_by, requested_at, status)
-                   VALUES (?, ?, ?, 'queued')""",
-                (action, requested_by, self._now()),
+                """INSERT INTO system_commands(action, requested_by, requested_at, status, payload)
+                   VALUES (?, ?, ?, 'queued', ?)""",
+                (action, requested_by, now, json.dumps(normalized, ensure_ascii=False)),
             )
-            return int(cur.lastrowid)
+            command_id = int(cur.lastrowid)
+            # Never put command payloads (which may include a Wi-Fi password) in audit text.
+            conn.execute(
+                "INSERT INTO audit_log(user_id, action, detail, created_at) VALUES (?, ?, ?, ?)",
+                (requested_by, "system-command", f"action={action}; command_id={command_id}", now),
+            )
+            return command_id
 
     def list_system_commands(self, limit: int = 20) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 100))
         with self.connect() as conn:
             rows = conn.execute(
-                """SELECT sc.*, u.username AS requested_by_username
+                """SELECT sc.id, sc.action, sc.requested_by, sc.requested_at,
+                          sc.status, sc.processed_at, sc.result,
+                          u.username AS requested_by_username
                    FROM system_commands sc JOIN users u ON u.id=sc.requested_by
                    ORDER BY sc.id DESC LIMIT ?""",
                 (limit,),
@@ -311,12 +419,19 @@ class Storage:
             )
             if updated.rowcount != 1:
                 return None
-            return dict(row)
+            result = dict(row)
+            try:
+                result["payload"] = json.loads(str(result.get("payload") or "{}"))
+            except json.JSONDecodeError:
+                result["payload"] = {}
+            return result
 
     def finish_system_command(self, command_id: int, success: bool, result: str) -> None:
         with self.connect() as conn:
             conn.execute(
-                """UPDATE system_commands SET status=?, processed_at=?, result=? WHERE id=?""",
+                """UPDATE system_commands
+                   SET status=?, processed_at=?, result=?, payload='{}'
+                   WHERE id=?""",
                 ("done" if success else "failed", self._now(), result[:2000], command_id),
             )
 
