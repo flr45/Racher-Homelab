@@ -70,6 +70,19 @@ class RoutingStore:
                     ON user_station_subscriptions(station_key, user_id);
                 """
             )
+            # Preserve the old "admin sees everything" behaviour when upgrading an
+            # existing database that predates station subscriptions. Normal users are
+            # intentionally not auto-subscribed; admin chooses their stations.
+            existing = conn.execute(
+                "SELECT COUNT(*) AS count FROM user_station_subscriptions"
+            ).fetchone()
+            if existing and int(existing["count"]) == 0:
+                now = self._now()
+                admins = conn.execute("SELECT id FROM users WHERE role='admin' AND active=1").fetchall()
+                conn.executemany(
+                    "INSERT OR IGNORE INTO user_station_subscriptions(user_id, station_key, created_at) VALUES (?, ?, ?)",
+                    [(int(admin["id"]), key, now) for admin in admins for key in ALL_STATION_KEYS],
+                )
 
     @staticmethod
     def normalize_ric(value: Any) -> str:
