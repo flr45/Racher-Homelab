@@ -21,6 +21,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from gateway import FileTailSource, PagerEvent, PushoverClient, detect_station, parse_pdl_line
 from push_service import WebPushService
+from routing import ALL_STATION_KEYS, STATIONS, RoutingStore
 from storage import Storage
 
 
@@ -47,6 +48,14 @@ def persistent_secret(path: Path) -> str:
     return value
 
 
+def as_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 app = Flask(__name__)
 app.secret_key = os.getenv("PAGER_SECRET_KEY") or persistent_secret(DATA_DIR / "session-secret")
 app.config.update(
@@ -57,6 +66,7 @@ app.config.update(
 )
 
 storage = Storage(DB_PATH)
+routing = RoutingStore(DB_PATH)
 pushover = PushoverClient()
 started_at = datetime.now(timezone.utc)
 
@@ -119,6 +129,7 @@ def template_globals():
 
 
 def maybe_notify_pushover(message_id: int, event: dict[str, Any]) -> None:
+    """Pushover remains the global operator channel; Web Push is station-routed."""
     settings = storage.get_settings()
     if settings.get("pushover_enabled") != "1":
         return
@@ -134,12 +145,12 @@ def maybe_notify_pushover(message_id: int, event: dict[str, Any]) -> None:
 
 def send_web_push_for_event(message_id: int, event: dict[str, Any]) -> None:
     payload = {
-        "title": event.get("station") or "Pageralarm",
+        "title": event.get("station") or "Ukendt pageralarm",
         "body": event.get("message", ""),
         "message_id": message_id,
         "url": "/",
     }
-    for subscription in storage.list_active_push_subscriptions():
+    for subscription in routing.list_push_subscriptions_for_event(event.get("station")):
         try:
             web_push.send(subscription, payload)
         except WebPushException as exc:
@@ -153,6 +164,9 @@ def send_web_push_for_event(message_id: int, event: dict[str, Any]) -> None:
 
 def ingest_event(event: PagerEvent) -> int:
     data = event.to_dict()
+    station, routing_source = routing.classify(data.get("ric"), data.get("station"))
+    data["station"] = station
+    data["routing_source"] = routing_source
     message_id = storage.add_message(data)
     try:
         maybe_notify_pushover(message_id, data)
@@ -201,14 +215,12 @@ def _readiness(runtime: dict[str, str]) -> list[dict[str, str]]:
     agent_online = heartbeat_age is not None and heartbeat_age <= 30
     pdl_installed = runtime.get("pdl_installed") == "1"
     pdl_active = runtime.get("pdl_service") == "active"
+    fsk_connected = runtime.get("fsk_usb_connected") == "1"
+    fsk_in_use = runtime.get("fsk_usb_pdl_in_use") == "1"
     internet_online = runtime.get("internet_online") == "1"
     hotspot_active = runtime.get("hotspot_active") == "1"
     tunnel_installed = runtime.get("tunnel_installed") == "1"
     tunnel_active = runtime.get("tunnel_service") == "active"
-    try:
-        audio_count = int(runtime.get("audio_capture_devices", "0") or 0)
-    except ValueError:
-        audio_count = 0
     try:
         pdl_log_size = int(runtime.get("pdl_log_size", "0") or 0)
     except ValueError:
@@ -227,6 +239,13 @@ def _readiness(runtime: dict[str, str]) -> list[dict[str, str]]:
         tunnel_detail = "Cloudflare Tunnel kører" if tunnel_active else "Cloudflare er installeret, men tunnelen er ikke aktiv"
     else:
         tunnel_detail = "Konfigureres når tunnel-token og offentligt hostname er klar"
+
+    if fsk_connected:
+        fsk_detail = runtime.get("fsk_usb_summary") or runtime.get("fsk_usb_device") or "FSK-USB fundet"
+        if fsk_in_use:
+            fsk_detail += " · PDL har enheden åben"
+    else:
+        fsk_detail = "Tilslut discriminator.nl FSK-USB når hardware er tilgængelig"
 
     return [
         {"key": "gateway", "label": "Pager Gateway", "state": "ok", "detail": "Webtjenesten og databasen svarer"},
@@ -253,12 +272,12 @@ def _readiness(runtime: dict[str, str]) -> list[dict[str, str]]:
         {
             "key": "pdl-service", "label": "PDL service",
             "state": "ok" if pdl_active else "pending",
-            "detail": "Decoder-service kører" if pdl_active else "Kan afvente lydkort/input før scanner-test",
+            "detail": "Decoder-service kører" if pdl_active else "Kan afvente FSK-USB/scanner før live-test",
         },
         {
-            "key": "audio", "label": "USB lydinput",
-            "state": "ok" if audio_count > 0 else "pending",
-            "detail": runtime.get("audio_capture_summary") or "Tilslut USB-lydkort når hardware er tilgængelig",
+            "key": "fsk-usb", "label": "FSK-USB",
+            "state": "ok" if fsk_connected else "pending",
+            "detail": fsk_detail,
         },
         {
             "key": "pdl-data", "label": "PDL data",
@@ -271,6 +290,17 @@ def _readiness(runtime: dict[str, str]) -> list[dict[str, str]]:
             "detail": f"Seneste backup: {runtime.get('backup_latest')}" if runtime.get("backup_latest") else "Første backup oprettes under Pi-installationen",
         },
     ]
+
+
+def _station_keys_from_payload(payload: dict[str, Any]) -> list[str]:
+    supplied = payload.get("stations")
+    if isinstance(supplied, list):
+        return routing.normalize_station_keys(supplied)
+    selected = [
+        station["key"] for station in STATIONS
+        if as_bool(payload.get(f"station_{station['key']}"), False)
+    ]
+    return routing.normalize_station_keys(selected)
 
 
 # ---- Authentication ------------------------------------------------------------
@@ -290,6 +320,7 @@ def setup():
             error = "Adgangskoden skal være mindst 10 tegn."
         else:
             user_id = storage.create_user(username, display_name, hash_password(password), "admin", None)
+            routing.set_user_stations(user_id, ALL_STATION_KEYS)
             storage.add_audit(user_id, "first-admin", "Første administrator oprettet")
             session.clear()
             session["user_id"] = user_id
@@ -370,6 +401,7 @@ def api_me():
         "role": g.user["role"],
         "csrf_token": session["csrf_token"],
         "push_devices": len(storage.list_user_push_subscriptions(g.user["id"])),
+        "stations": routing.user_stations(g.user["id"]),
     })
 
 
@@ -380,7 +412,9 @@ def api_messages():
         limit = int(request.args.get("limit", "100"))
     except ValueError:
         limit = 100
-    return jsonify(storage.list_messages(limit))
+    if g.user["role"] == "admin":
+        return jsonify(storage.list_messages(limit))
+    return jsonify(routing.list_messages_for_user(g.user["id"], limit))
 
 
 @app.get("/api/push/vapid-public-key")
@@ -507,6 +541,11 @@ def api_mock():
     event = parse_pdl_line(raw_line, source="mock") or PagerEvent(message=text, raw_line=raw_line, source="mock")
     event.message = text
     event.station = detect_station(text)
+    if payload.get("ric"):
+        try:
+            event.ric = routing.normalize_ric(payload.get("ric"))
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
     return jsonify({"ok": True, "id": ingest_event(event)})
 
 
@@ -526,10 +565,79 @@ def api_pushover_test():
     return jsonify({"ok": True})
 
 
+@app.get("/api/stations")
+@auth_required(admin=True)
+def api_stations():
+    return jsonify(list(STATIONS))
+
+
+@app.get("/api/ric-codes")
+@auth_required(admin=True)
+def api_ric_codes_get():
+    return jsonify(routing.list_ric_codes())
+
+
+@app.get("/api/ric-codes/unknown")
+@auth_required(admin=True)
+def api_unknown_ric_codes():
+    return jsonify(routing.list_unknown_rics(limit=100))
+
+
+@app.post("/api/ric-codes")
+@auth_required(admin=True)
+def api_ric_codes_create():
+    payload = request.get_json(silent=True) or {}
+    try:
+        ric_id = routing.create_ric_code(
+            payload.get("ric"), payload.get("station_key"), payload.get("label", ""),
+            as_bool(payload.get("active"), True), g.user["id"],
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except sqlite3.IntegrityError:
+        return jsonify({"ok": False, "error": "RIC-koden findes allerede."}), 409
+    row = routing.get_ric_code(ric_id)
+    storage.add_audit(g.user["id"], "ric-create", f"ric={row['ric']}; station={row['station_key']}")
+    return jsonify({"ok": True, "id": ric_id, "ric": row})
+
+
+@app.patch("/api/ric-codes/<int:ric_id>")
+@auth_required(admin=True)
+def api_ric_code_update(ric_id: int):
+    payload = request.get_json(silent=True) or {}
+    kwargs: dict[str, Any] = {}
+    for key in ("ric", "station_key", "label"):
+        if key in payload:
+            kwargs[key] = payload[key]
+    if "active" in payload:
+        kwargs["active"] = as_bool(payload["active"])
+    try:
+        row = routing.update_ric_code(ric_id, **kwargs)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except sqlite3.IntegrityError:
+        return jsonify({"ok": False, "error": "RIC-koden findes allerede."}), 409
+    if not row:
+        return jsonify({"ok": False, "error": "RIC-koden findes ikke."}), 404
+    storage.add_audit(g.user["id"], "ric-update", f"ric={row['ric']}; station={row['station_key']}")
+    return jsonify({"ok": True, "ric": row})
+
+
+@app.delete("/api/ric-codes/<int:ric_id>")
+@auth_required(admin=True)
+def api_ric_code_delete(ric_id: int):
+    row = routing.get_ric_code(ric_id)
+    if not row:
+        return jsonify({"ok": False, "error": "RIC-koden findes ikke."}), 404
+    routing.delete_ric_code(ric_id)
+    storage.add_audit(g.user["id"], "ric-delete", f"ric={row['ric']}; station={row['station_key']}")
+    return jsonify({"ok": True})
+
+
 @app.get("/api/users")
 @auth_required(admin=True)
 def api_users_get():
-    return jsonify(storage.list_users())
+    return jsonify(routing.attach_user_stations(storage.list_users()))
 
 
 @app.post("/api/users")
@@ -547,10 +655,19 @@ def api_users_create():
     if role not in {"user", "admin"}:
         return jsonify({"ok": False, "error": "Ugyldig rolle."}), 400
     try:
+        stations = _station_keys_from_payload(payload)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    try:
         user_id = storage.create_user(username, display_name, hash_password(password), role, g.user["id"])
+        # New admins default to all stations unless the creator explicitly selected stations.
+        if role == "admin" and "stations" not in payload and not any(f"station_{key}" in payload for key in ALL_STATION_KEYS):
+            stations = list(ALL_STATION_KEYS)
+        routing.set_user_stations(user_id, stations)
     except sqlite3.IntegrityError:
         return jsonify({"ok": False, "error": "Brugernavnet findes allerede."}), 409
-    return jsonify({"ok": True, "id": user_id})
+    storage.add_audit(g.user["id"], "user-routing", f"user_id={user_id}; stations={','.join(stations) or '-'}")
+    return jsonify({"ok": True, "id": user_id, "stations": stations})
 
 
 @app.patch("/api/users/<int:user_id>")
@@ -562,7 +679,7 @@ def api_user_update(user_id: int):
     payload = request.get_json(silent=True) or {}
     changed: list[str] = []
     if "active" in payload:
-        active = bool(payload["active"])
+        active = as_bool(payload["active"])
         if user_id == g.user["id"] and not active:
             return jsonify({"ok": False, "error": "Du kan ikke deaktivere din egen admin-konto."}), 400
         storage.set_user_active(user_id, active)
@@ -573,6 +690,15 @@ def api_user_update(user_id: int):
             return jsonify({"ok": False, "error": "Adgangskoden skal være mindst 10 tegn."}), 400
         storage.set_user_password_hash(user_id, hash_password(password))
         changed.append("password")
+    if "stations" in payload:
+        if not isinstance(payload["stations"], list):
+            return jsonify({"ok": False, "error": "Stationer skal sendes som en liste."}), 400
+        try:
+            stations = routing.set_user_stations(user_id, payload["stations"])
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        changed.append("stations")
+        storage.add_audit(g.user["id"], "user-routing", f"user_id={user_id}; stations={','.join(stations) or '-'}")
     if changed:
         storage.add_audit(g.user["id"], "user-update", f"user_id={user_id}; fields={','.join(changed)}")
     return jsonify({"ok": True})
