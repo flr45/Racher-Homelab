@@ -24,12 +24,21 @@ sudo install -m 0755 "$SCRIPT_DIR/run-pdl-headless.sh" "$INSTALL_ROOT/run-pdl-he
 
 if [[ ! -f "$ENV_FILE" ]]; then
   sudo tee "$ENV_FILE" >/dev/null <<'EOF'
-# ALSA input. Start med "default"; find USB-kort med: arecord -L
-PDL_CAPTURE_DEVICE=default
-PDL_SAMPLE_RATE=48000
+# Primært input: discriminator.nl FSK->USB (FTDI serial bitstream).
+# PDL Linux finder /dev/ttyUSB*, /dev/ttyACM* og /dev/ttyS* og bruger Port=1 som første fundne enhed.
+PDL_INPUT_MODE=fsk-usb
+PDL_RS232_PORT=1
+PDL_RS232_BITRATE=19200
+PDL_RS232_DECODE_MODE=2
+
+# POCSAG-rater som PDL må forsøge at dekode. DIP-switch på FSK-USB skal samtidig stå korrekt.
 PDL_BAUD_512=1
 PDL_BAUD_1200=1
 PDL_BAUD_2400=1
+
+# Audio/ALSA beholdes som fallback og kan aktiveres med PDL_INPUT_MODE=audio.
+PDL_CAPTURE_DEVICE=default
+PDL_SAMPLE_RATE=48000
 PDL_INVERT=0
 PAGER_STATE_ROOT=/var/lib/racher-pager
 EOF
@@ -39,14 +48,13 @@ fi
 sudo tee "$UNIT_FILE" >/dev/null <<EOF
 [Unit]
 Description=Racher PDL POCSAG Decoder
-After=local-fs.target sound.target
-Wants=sound.target
+After=local-fs.target
 
 [Service]
 Type=simple
 User=$RUN_USER
 Group=$RUN_GROUP
-SupplementaryGroups=audio
+SupplementaryGroups=audio dialout
 WorkingDirectory=$PDL_STATE_DIR
 EnvironmentFile=-$ENV_FILE
 ExecStartPre=$INSTALL_ROOT/configure-pdl.sh
@@ -68,6 +76,7 @@ sudo systemctl enable racher-pdl.service
 
 echo "PDL systemd-service er installeret og aktiveret."
 echo "Konfiguration: $ENV_FILE"
+echo "Standardinput: FSK-USB / RS232 19200 8N1"
 echo "Start:  sudo systemctl start racher-pdl"
 echo "Status: sudo systemctl status racher-pdl --no-pager"
 echo "Log:    journalctl -u racher-pdl -f"
