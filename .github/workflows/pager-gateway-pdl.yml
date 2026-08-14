@@ -1,0 +1,49 @@
+name: Pager Gateway PDL
+
+on:
+  pull_request:
+    paths:
+      - 'services/pager-gateway/**'
+      - 'compose/pager-gateway/**'
+      - '.github/workflows/pager-gateway-pdl.yml'
+  workflow_dispatch:
+
+jobs:
+  gateway-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python dependencies
+        run: pip install -r services/pager-gateway/requirements.txt
+      - name: Run gateway tests
+        working-directory: services/pager-gateway
+        run: python -m unittest -v test_gateway.py
+
+  pdl-linux-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PDL build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git cmake g++ pkg-config python3 ffmpeg \
+            libssl-dev libasound2-dev libpulse-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libcurl4-openssl-dev
+      - name: Fetch pinned PDL 3.2.0
+        run: |
+          git clone https://github.com/sqpp/PDL.git /tmp/PDL
+          git -C /tmp/PDL checkout --detach f37a24ee45b06f35703d513d48780c9334c4ff89
+      - name: Apply Racher headless patch
+        run: python3 services/pager-gateway/pdl/patch_headless.py /tmp/PDL
+      - name: Build PDL
+        run: |
+          cmake -S /tmp/PDL -B /tmp/PDL/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/PDL/build --parallel 2
+      - name: Verify headless binary
+        run: |
+          /tmp/PDL/build/pdl --help | grep -- '--headless'
+          /tmp/PDL/build/pdl --help | grep 'PDL 3.2.0'
