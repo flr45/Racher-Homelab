@@ -171,9 +171,14 @@ sleep 4
 GATEWAY_STATE="$(sudo docker inspect --format '{{.State.Status}}' racher-pager-gateway 2>/dev/null || echo unknown)"
 PDL_STATE="$(systemctl is-active racher-pdl.service 2>/dev/null || true)"
 AGENT_STATE="$(systemctl is-active racher-pager-system-agent.service 2>/dev/null || true)"
+FSK_TIMER_STATE="$(systemctl is-active racher-pager-fsk-status.timer 2>/dev/null || true)"
 NETWORK_PORTAL_STATE="$(systemctl is-active racher-pager-network-portal.service 2>/dev/null || true)"
 BACKUP_TIMER_STATE="$(systemctl is-active racher-pager-backup.timer 2>/dev/null || true)"
-AUDIO_COUNT="$(arecord -l 2>/dev/null | grep -Eic '^card[[:space:]]+[0-9]+:' || true)"
+FSK_DEVICE=""
+shopt -s nullglob
+FSK_CANDIDATES=(/dev/serial/by-id/* /dev/ttyUSB* /dev/ttyACM*)
+shopt -u nullglob
+if (( ${#FSK_CANDIDATES[@]} > 0 )); then FSK_DEVICE="${FSK_CANDIDATES[0]}"; fi
 IP_ADDRESS="$(hostname -I 2>/dev/null | awk '{print $1}')"
 
 HOTSPOT_SSID="$(sudo awk -F= '$1=="PAGER_HOTSPOT_SSID"{print substr($0,index($0,"=")+1)}' /etc/racher-pager/network.env)"
@@ -187,8 +192,9 @@ Racher Pager Gateway er klargjort.
   Gateway container : ${GATEWAY_STATE:-unknown}
   System-agent      : ${AGENT_STATE:-unknown}
   PDL service       : ${PDL_STATE:-unknown}
+  FSK status probe  : ${FSK_TIMER_STATE:-unknown}
+  FSK-USB           : ${FSK_DEVICE:-afventer hardware}
   Network portal    : ${NETWORK_PORTAL_STATE:-unknown}
-  ALSA capture      : $AUDIO_COUNT enhed(er)
   Backup timer      : ${BACKUP_TIMER_STATE:-unknown}
   Runtime commit    : ${CURRENT_SHA:0:12}
   Data              : $STATE_ROOT
@@ -206,7 +212,7 @@ Fallback hvis Pi'en ikke kan komme online:
   Setup portal      : http://$HOTSPOT_IP/
 
 Gem Password/PIN et sikkert sted.
-Det er OK hvis USB-lyd/PDL endnu ikke er klar. Scanner-testen udføres senere.
+Det er OK hvis FSK-USB/PDL endnu ikke er klar. Scanner-testen udføres senere.
 Cloudflare Tunnel kan installeres, når tunnel-token og hostname er klar, med:
   bash $PDL_DIR/install-cloudflared.sh <TUNNEL_TOKEN> <pager.ditdomæne.dk>
 EOF
