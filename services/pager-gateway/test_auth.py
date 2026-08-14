@@ -80,8 +80,11 @@ class AuthenticationTests(unittest.TestCase):
         self.assertNotIn('data-tab="settings"', page)
         self.assertNotIn("Send testalarm", page)
         self.assertNotIn('id="readiness-list"', page)
+        self.assertNotIn("Network mobility", page)
+        self.assertNotIn("Backup & recovery", page)
+        self.assertNotIn("Update & rollback", page)
 
-    def test_admin_ui_contains_admin_features(self):
+    def test_admin_ui_contains_remote_appliance_features(self):
         response = self.admin.get("/")
         self.assertEqual(response.status_code, 200)
         page = response.get_data(as_text=True)
@@ -91,6 +94,10 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIn("Send testalarm", page)
         self.assertIn('id="readiness-list"', page)
         self.assertIn("Raspberry Pi-status", page)
+        self.assertIn("Network mobility", page)
+        self.assertIn("Backup & recovery", page)
+        self.assertIn("Update & rollback", page)
+        self.assertIn("Cloudflare Tunnel", page)
 
     def test_admin_status_contains_readiness_but_user_is_forbidden(self):
         response = self.admin.get("/api/status")
@@ -99,16 +106,18 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIn("runtime", payload)
         self.assertIn("readiness", payload)
         self.assertTrue(any(item["key"] == "gateway" for item in payload["readiness"]))
+        self.assertTrue(any(item["key"] == "network" for item in payload["readiness"]))
         self.assertEqual(self.user.get("/api/status").status_code, 403)
 
     def test_user_can_read_alarms(self):
         response = self.user.get("/api/messages")
         self.assertEqual(response.status_code, 200)
 
-    def test_user_cannot_read_admin_settings_or_users(self):
+    def test_user_cannot_read_admin_settings_users_status_or_audit(self):
         self.assertEqual(self.user.get("/api/settings").status_code, 403)
         self.assertEqual(self.user.get("/api/users").status_code, 403)
         self.assertEqual(self.user.get("/api/status").status_code, 403)
+        self.assertEqual(self.user.get("/api/audit").status_code, 403)
 
     def test_user_cannot_create_users_or_system_commands(self):
         response = self.user.post(
@@ -120,7 +129,10 @@ class AuthenticationTests(unittest.TestCase):
 
         response = self.user.post(
             "/api/system/commands",
-            json={"action": "reboot"},
+            json={
+                "action": "wifi-add",
+                "payload": {"ssid": "Station WiFi", "password": "12345678"},
+            },
             headers={"X-CSRF-Token": self.user_csrf},
         )
         self.assertEqual(response.status_code, 403)
@@ -131,6 +143,27 @@ class AuthenticationTests(unittest.TestCase):
             headers={"X-CSRF-Token": self.user_csrf},
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_queue_validated_wifi_action(self):
+        response = self.admin.post(
+            "/api/system/commands",
+            json={
+                "action": "wifi-add",
+                "payload": {"ssid": "Station WiFi", "password": "12345678"},
+            },
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        invalid = self.admin.post(
+            "/api/system/commands",
+            json={
+                "action": "wifi-add",
+                "payload": {"ssid": "Station WiFi", "password": "kort"},
+            },
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(invalid.status_code, 400)
 
     def test_admin_can_create_user_and_queue_whitelisted_action(self):
         response = self.admin.post(
@@ -156,7 +189,7 @@ class AuthenticationTests(unittest.TestCase):
     def test_system_action_whitelist_rejects_arbitrary_commands(self):
         response = self.admin.post(
             "/api/system/commands",
-            json={"action": "rm-everything"},
+            json={"action": "rm-everything", "payload": {"command": "rm -rf /"}},
             headers={"X-CSRF-Token": self.admin_csrf},
         )
         self.assertEqual(response.status_code, 400)
