@@ -232,7 +232,6 @@ class TrainingStore:
                     (run_id, station_name, count, station_samples[station_name][:500]),
                 )
             for (ric, station_name), count in ric_counts.items():
-                # Existing live RIC mappings are not suggestions; they are already known.
                 existing = conn.execute("SELECT 1 FROM ric_codes WHERE ric=?", (ric,)).fetchone()
                 if not existing:
                     conn.execute(
@@ -365,12 +364,10 @@ class TrainingStore:
                         now,
                     ),
                 )
-                # On conflict the vote above is not incremented, so do that explicitly.
                 conn.execute(
                     f"UPDATE adaptive_patterns SET {column}={column}+1 WHERE kind=? AND signature=?",
                     (kind, signature),
                 )
-                # INSERT path has now counted twice; normalize brand-new rows back by one.
                 conn.execute(
                     f"""UPDATE adaptive_patterns SET {column}={column}-1
                         WHERE kind=? AND signature=? AND {column}>0 AND seen_count=1""",
@@ -379,7 +376,7 @@ class TrainingStore:
             conn.commit()
 
     def apply_run(self, run_id: int) -> dict[str, Any]:
-        run = self.get_run(run_id, include_events=True)
+        run = self.get_run(run_id, include_events=False)
         if run.get("applied_at"):
             raise ValueError("Træningskørslen er allerede anvendt")
 
@@ -413,11 +410,15 @@ class TrainingStore:
             )
             rics_created += 1
 
-        for event in run["events"]:
-            verdict = event.get("feedback")
-            if verdict in {"relevant", "noise"}:
-                self._apply_text_feedback(event["message"], verdict)
-                feedback_applied += 1
+        with self._lock, self.connect() as conn:
+            feedback_rows = conn.execute(
+                """SELECT message, feedback FROM training_events
+                   WHERE run_id=? AND feedback IN ('relevant', 'noise') ORDER BY line_no""",
+                (run_id,),
+            ).fetchall()
+        for event in feedback_rows:
+            self._apply_text_feedback(event["message"], event["feedback"])
+            feedback_applied += 1
 
         applied_at = self._now()
         with self._lock, self.connect() as conn:
