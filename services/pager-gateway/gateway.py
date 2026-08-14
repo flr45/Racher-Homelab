@@ -20,9 +20,19 @@ STATION_MARKERS = {
     "R": "Ruds Vedby",
 }
 
-RIC_RE = re.compile(r"\b(?:RIC|CAP(?:CODE)?)\s*[:=]?\s*(\d{4,10})\b", re.I)
+RIC_RE = re.compile(r"\b(?:RIC|CAP(?:CODE)?|ADDRESS)\s*[:=]?\s*(\d{4,10})\b", re.I)
 BAUD_RE = re.compile(r"\b(?:POCSAG[- ]?)?(512|1200|2400)\b", re.I)
-FUNCTION_RE = re.compile(r"\b(?:FUNC(?:TION)?|F)\s*[:=]?\s*([0-3A-D])\b", re.I)
+FUNCTION_RE = re.compile(r"\b(?:FUNC(?:TION)?|F)\s*[:=]?\s*([0-4A-D])\b", re.I)
+PDW_POCSAG_RE = re.compile(
+    r"^\s*(?P<ric>\d{4,10})\s+"
+    r"(?P<time>\d{1,2}:\d{2}:\d{2})\s+"
+    r"(?P<date>\d{2}-\d{2}-\d{2,4})\s+"
+    r"POCSAG(?:-(?P<function>[1-4]))?\s+"
+    r"(?P<type>\S+)\s+"
+    r"(?P<baud>512|1200|2400)\s+"
+    r"(?P<message>.+)$",
+    re.I,
+)
 
 
 @dataclass
@@ -57,13 +67,30 @@ def parse_pdl_line(line: str, source: str = "pdl") -> PagerEvent | None:
     if not raw:
         return None
 
+    # PDW's documented paging logfile/display format begins with Address/RIC,
+    # followed by time, date, mode, type and bitrate. Parse that shape first so
+    # routing gets a reliable capcode while the complete raw line is preserved.
+    pdw_match = PDW_POCSAG_RE.match(raw)
+    if pdw_match:
+        message = pdw_match.group("message").strip()
+        return PagerEvent(
+            message=message,
+            raw_line=raw,
+            source=source,
+            protocol="POCSAG",
+            baud=int(pdw_match.group("baud")),
+            ric=pdw_match.group("ric"),
+            function=pdw_match.group("function"),
+            station=detect_station(message),
+        )
+
     ric_match = RIC_RE.search(raw)
     baud_match = BAUD_RE.search(raw)
     function_match = FUNCTION_RE.search(raw)
 
     message = raw
-    # PDL's current Linux build emits human-readable decoded lines. Keep the
-    # complete raw line, but strip a common "MESSAGE:" prefix when present.
+    # PDL's Linux output can also contain a human-readable MESSAGE: field. Keep
+    # the original raw line for diagnostics while exposing only its message body.
     message_match = re.search(r"\bMESSAGE\s*[:=]\s*(.+)$", raw, re.I)
     if message_match:
         message = message_match.group(1).strip()
