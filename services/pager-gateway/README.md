@@ -2,24 +2,33 @@
 
 Webbaseret gateway til POCSAG-meldinger. Systemet er lavet, så næsten hele løsningen kan færdiggøres og testes uden scanner; den fysiske radio kobles på til sidst.
 
-## Vigtigt princip: send alt
+## Vigtigt princip: gem rådata, rout bagefter
 
-Gatewayen bruger **ikke** `(A)`, `(S)`, `(K)`, `(L)` eller `(R)` som filter. Enhver gyldig dekodet pager-melding gemmes og kan videresendes.
+Gatewayen bruger **ikke** `(A)`, `(S)`, `(K)`, `(L)` eller `(R)` som et hårdt inputfilter. Enhver gyldig dekodet pager-melding gemmes med rålinjen intakt.
 
-Kendte stationsmarkører bruges kun som ekstra metadata/titel. Meldinger uden stationsmarkør behandles på samme måde og må aldrig kasseres af gatewayen.
+Kendte stationsmarkører kan bruges som ekstra metadata. Den kommende routing/notification-filtrering skal primært kunne bruge POCSAG RIC/capcode og kun bruge tekstmarkører som supplement/fallback. Meldinger må ikke forsvinde fra råhistorikken, fordi en klassifikation ikke lykkes.
 
 ## Arkitektur
 
 ```text
-Scanner -> USB-lydkort -> PDL 3.2.0 headless -> /var/lib/racher-pager/pdl.log
-                                                    |
-                                                    v
+Antenne -> Scanner -> discriminator -> FSK-USB -> USB serial / FTDI
+                                                   |
+                                      /dev/serial/by-id/...
+                                                   |
+                                                   v
+                                        PDL 3.2.0 headless
+                                                   |
+                                                   v
+                                  /var/lib/racher-pager/pdl.log
+                                                   |
+                                                   v
                                          Racher Pager Gateway
                                       |       |       |        |
                                    SQLite   PWA    Web Push  Pushover
                                       |
                                       +-- admin system command queue
                                       +-- runtime health/status
+                                      +-- FSK-USB hardware status
                                       +-- audit log
                                                    |
                                                    v
@@ -29,7 +38,9 @@ Scanner -> USB-lydkort -> PDL 3.2.0 headless -> /var/lib/racher-pager/pdl.log
                               Manager      restore    rollback     services
 ```
 
-PDL forbliver upstream decoder. Racher-integrationen ændrer ikke POCSAG-dekoderen; den tilføjer kun en lille `--headless` live-mode, så ALSA capture kan køre uden GTK/WebKit-vindue.
+FSK-USB er primært input. Interfacet leverer den slicede bitstrøm som USB-seriel, og PDL's eksisterende Linux RS232-bitstream-path føder den videre ind i POCSAG-dekoderen. ALSA/soundcard-input beholdes kun som fallback.
+
+Racher-patchen til headless mode kan bruge `PDL_RS232_DEVICE`, så den konkrete adapter kan fastlåses til en stabil `/dev/serial/by-id/...`-sti i stedet for at være afhængig af `ttyUSB0`-nummerering.
 
 Upstream er fastlåst til PDL 3.2.0 commit `f37a24ee45b06f35703d513d48780c9334c4ff89`.
 
@@ -46,7 +57,9 @@ Adgangskoder gemmes med PBKDF2-HMAC-SHA256. Sessions er HttpOnly/SameSite og all
 
 ## PWA og Web Push
 
-Gatewayen indeholder manifest, service worker og VAPID Web Push. Hver bruger kan tilmelde sin egen telefon/computer. Nye pageralarmer sendes til alle aktive push-subscriptions.
+Gatewayen indeholder manifest, service worker og VAPID Web Push. Hver bruger kan tilmelde sin egen telefon/computer.
+
+I den nuværende MVP sendes nye pageralarmer til alle aktive push-subscriptions. Per-station/per-user routing er bevidst ikke slået til endnu, før filterreglerne er fastlagt.
 
 VAPID private key genereres lokalt i dataområdet og returneres aldrig via API'et.
 
@@ -72,11 +85,15 @@ Admin-hændelser logges i `audit_log` uden password/token-payloads.
 
 ## Live diagnostik
 
-Host-agenten skriver løbende faktiske Pi-målinger til SQLite:
+Host-agenten og FSK-statusproben skriver løbende faktiske Pi-målinger til SQLite:
 
 - PDL-service og PDL-log,
+- FSK-USB tilsluttet/afventer,
+- stabil device path og underliggende `ttyUSB`/`ttyACM`,
+- FTDI/udev metadata og driver,
+- 19200 8N1 konfiguration,
+- om PDL aktuelt har den valgte serielenhed åben,
 - gateway-container,
-- ALSA capture-enheder,
 - CPU-temperatur, disk og host uptime,
 - Wi-Fi-forbindelse, IP og signal,
 - internetstatus,
@@ -85,7 +102,7 @@ Host-agenten skriver løbende faktiske Pi-målinger til SQLite:
 - backupkatalog,
 - installeret gateway- og rollback-version.
 
-Manglende USB-lydkort eller PDL-data vises som **afventer**, så Pi'en kan gøres færdig hjemme uden scanner.
+Manglende FSK-USB eller PDL-data vises som **afventer**, så Pi'en kan gøres færdig hjemme uden scanner.
 
 ## Lokal test på Mac
 
@@ -115,18 +132,18 @@ Bootstrap-scriptet skal køres som normal bruger, **ikke** med `sudo bash`; scri
 
 Bootstrap gør bl.a. følgende:
 
-1. installerer Docker/Compose, NetworkManager, ALSA og SQLite,
+1. installerer Docker/Compose, NetworkManager, SQLite og nødvendige systemværktøjer,
 2. laver en isoleret pager-runtime i `/opt/racher-pager/runtime-repo`, så admin-opdateringer ikke ændrer brugerens normale Homelab-checkout,
 3. opretter `/var/lib/racher-pager`, lokale env-filer og backupområde,
-4. bygger den fastlåste PDL 3.2.0 med headless-patch,
-5. installerer PDL som systemd-service,
+4. bygger den fastlåste PDL 3.2.0 med headless + explicit-device patch,
+5. installerer PDL som systemd-service med FSK-USB som standardinput,
 6. installerer Wi-Fi mobility og fallback-portal,
 7. bygger/starter Pager Gateway og sætter PDL som produktionsinput,
-8. installerer root-ejet health/system-agent og recovery-helpers,
+8. installerer root-ejet health/system-agent, FSK-USB statusprobe og recovery-helpers,
 9. installerer daglig backup og opretter første backup,
 10. gemmer installeret commit som version/reference og viser slutstatus samt fallback-Wi-Fi Password/PIN.
 
-Eksisterende `/etc/racher-pager/gateway.env` og `network.env` bevares ved genkørsel. Senere HTTPS-, tunnel- og netværksindstillinger bliver derfor ikke bevidst nulstillet af en repair/bootstrap.
+Eksisterende `/etc/racher-pager/gateway.env`, `network.env` og `pdl.env` bevares ved genkørsel. Senere HTTPS-, tunnel-, netværks- og hardwareindstillinger nulstilles derfor ikke af en repair/bootstrap.
 
 ## Wi-Fi mobility og flytning mellem netværk
 
@@ -148,24 +165,29 @@ Når fallback-hotspottet er startet automatisk, lukkes det igen når normal inte
 
 Det betyder, at Pi'en først kan sættes op hjemme og derefter flyttes til scannerlokationen uden reinstallering.
 
-## PDL og scanner-test
+## FSK-USB og scanner-test
 
-Før første rigtige radio-test findes lydkortets ALSA-navn med:
+FSK-USB forventes som USB-seriel/FTDI. Første hardwaretest på Pi'en bliver derfor:
 
 ```bash
-arecord -L
+lsusb
+ls -l /dev/serial/by-id/ 2>/dev/null || true
+ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null || true
 ```
 
-Konfiguration ligger i `/etc/racher-pager/pdl.env`. Dekodede linjer skrives til `/var/lib/racher-pager/pdl.log`.
-
-Når USB-lydkortet er kendt, ændres fx:
+Konfiguration ligger i `/etc/racher-pager/pdl.env`. Standard er:
 
 ```text
-PDL_CAPTURE_DEVICE=default
-PDL_SAMPLE_RATE=48000
+PDL_INPUT_MODE=fsk-usb
+PDL_RS232_DEVICE=
+PDL_RS232_PORT=1
+PDL_RS232_BITRATE=19200
+PDL_RS232_DECODE_MODE=2
 ```
 
-og PDL kan genstartes direkte fra admin-siden.
+Når adapterens stabile by-id er kendt, kan `PDL_RS232_DEVICE` sættes til fx `/dev/serial/by-id/usb-FTDI_...`. Hvis feltet er tomt, auto-detekterer startwrapperen først `/dev/serial/by-id/*` og derefter `/dev/ttyUSB*`/`ttyACM*`.
+
+Dekodede linjer skrives til `/var/lib/racher-pager/pdl.log`. PDL kan genstartes direkte fra admin-siden.
 
 ## Backup og restore
 
@@ -179,30 +201,13 @@ Standardplacering:
 
 Backup omfatter en konsistent SQLite-backup samt lokale session/VAPID-nøgler, PDL-konfiguration og relevante root-only env/tunnel-filer, når de findes. Arkiverne er `0600`, og standard-retention er 14 dage.
 
-Admin kan lave en backup nu og vælge en eksisterende backup til restore. Restore:
-
-- accepterer kun Racher-backupnavne,
-- afviser absolutte/traversal-stier i tar-arkivet,
-- kører SQLite integrity check før restore,
-- laver en ny safety-backup af den nuværende tilstand først,
-- genstarter relevante services bagefter.
+Admin kan lave en backup nu og vælge en eksisterende backup til restore. Restore accepterer kun Racher-backupnavne, afviser traversal-stier, integritetstjekker SQLite, laver safety-backup først og genstarter relevante services bagefter.
 
 ## Update og rollback
 
 Gateway-opdateringer kører kun mod den isolerede runtime-klon under `/opt/racher-pager/runtime-repo`.
 
-Update-flowet:
-
-1. henter den konfigurerede deploy-branch,
-2. kræver fast-forward fra installeret commit,
-3. laver backup,
-4. gemmer forrige commit som rollback-reference,
-5. validerer Python/shell-syntax,
-6. bygger nyt gateway-image,
-7. kræver et bestået `/healthz`,
-8. ruller automatisk tilbage til den tidligere commit hvis deployment fejler.
-
-Admin kan også vælge manuel rollback til den seneste gemte fungerende version.
+Update-flowet henter deploy-branch, kræver fast-forward, tager backup, gemmer rollback-reference, validerer kode/shell, bygger nyt image og kræver et bestået `/healthz`. Ved fejl rulles automatisk tilbage.
 
 ## Cloudflare Tunnel / stabil ekstern adresse
 
@@ -218,8 +223,6 @@ bash services/pager-gateway/pdl/install-cloudflared.sh \
 ```
 
 Tunnelens public hostname skal konfigureres til gatewayens lokale origin, normalt `http://localhost:8088`. `cloudflared` kører derefter som systemd-service og kan genstartes fra admin.
-
-Tunnel-tokenet skal behandles som en hemmelighed. Det gemmes root-only i `/etc/racher-pager/cloudflared.token` og vises ikke i gatewayens web-API.
 
 Når HTTPS er verificeret, sættes `PAGER_COOKIE_SECURE=1`, og PWA/Web Push testes på telefonerne.
 
