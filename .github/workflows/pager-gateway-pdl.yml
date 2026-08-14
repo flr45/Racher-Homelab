@@ -24,6 +24,12 @@ jobs:
       - name: Run gateway tests
         working-directory: services/pager-gateway
         run: python -m unittest discover -v -p 'test_*.py'
+      - name: Validate shell syntax
+        run: |
+          bash -n services/pager-gateway/install-pager-gateway.sh
+          for script in services/pager-gateway/pdl/*.sh; do
+            bash -n "$script"
+          done
 
   pdl-linux-build:
     runs-on: ubuntu-24.04
