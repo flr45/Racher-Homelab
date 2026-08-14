@@ -1,0 +1,24 @@
+services:
+  pager-gateway:
+    build:
+      context: ../../services/pager-gateway
+    container_name: racher-pager-gateway
+    restart: unless-stopped
+    environment:
+      PAGER_DATA_DIR: /data
+      PORT: 8088
+    volumes:
+      - pager_gateway_data:/data
+    ports:
+      - "${PAGER_GATEWAY_PORT:-8088}:8088"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pager_gateway_data:

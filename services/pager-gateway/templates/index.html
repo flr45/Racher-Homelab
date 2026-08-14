@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Racher Pager Gateway</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">RACHER</div>
+        <h1>Pager Gateway</h1>
+      </div>
+      <div id="live-pill" class="pill"><span class="dot"></span><span>Starter…</span></div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="history">Historik</button>
+      <button class="tab" data-tab="settings">Indstillinger</button>
+    </nav>
+
+    <main>
+      <section id="dashboard" class="panel active">
+        <div class="grid stats">
+          <article class="card">
+            <span class="label">Modtagelse</span>
+            <strong id="source-state">—</strong>
+            <small id="source-error">—</small>
+          </article>
+          <article class="card">
+            <span class="label">Meldinger</span>
+            <strong id="message-count">0</strong>
+            <small>gemt i historikken</small>
+          </article>
+          <article class="card">
+            <span class="label">Uptime</span>
+            <strong id="uptime">—</strong>
+            <small id="hostname">—</small>
+          </article>
+        </div>
+
+        <article class="card latest-card">
+          <div class="card-head">
+            <div>
+              <span class="label">Seneste melding</span>
+              <h2 id="latest-station">Ingen meldinger endnu</h2>
+            </div>
+            <span id="latest-time" class="muted">—</span>
+          </div>
+          <p id="latest-message" class="latest-message">Brug simulatoren nedenfor, mens vi venter på Raspberry Pi'en.</p>
+          <div id="latest-meta" class="meta"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <span class="label">Simulator</span>
+              <h2>Test uden radio</h2>
+            </div>
+          </div>
+          <div class="row">
+            <input id="mock-message" value="(A) TESTALARM - Racher Pager Gateway" aria-label="Testmelding">
+            <button id="send-mock" class="primary">Send testmelding</button>
+          </div>
+          <p class="hint">Meldingen går gennem samme database-, filter- og Pushover-flow som en rigtig dekodet melding.</p>
+        </article>
+      </section>
+
+      <section id="history" class="panel">
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <span class="label">Historik</span>
+              <h2>Seneste dekodninger</h2>
+            </div>
+            <button id="refresh-history">Opdater</button>
+          </div>
+          <div id="history-list" class="history-list"></div>
+        </article>
+      </section>
+
+      <section id="settings" class="panel">
+        <form id="settings-form">
+          <article class="card">
+            <span class="label">Gateway</span>
+            <h2>Grundindstillinger</h2>
+            <div class="form-grid">
+              <label>Navn<input name="gateway_name"></label>
+              <label>Input
+                <select name="source_mode">
+                  <option value="mock">Simulator</option>
+                  <option value="pdl-file">PDL logfil</option>
+                </select>
+              </label>
+              <label class="wide">PDL logfil<input name="pdl_log_path" placeholder="/data/pdl.log"></label>
+              <label>POCSAG bitrate
+                <select name="pocsag_baud">
+                  <option value="auto">Auto</option>
+                  <option value="512">512</option>
+                  <option value="1200">1200</option>
+                  <option value="2400">2400</option>
+                </select>
+              </label>
+              <label>Polaritet
+                <select name="invert">
+                  <option value="auto">Auto</option>
+                  <option value="normal">Normal</option>
+                  <option value="inverted">Inverteret</option>
+                </select>
+              </label>
+            </div>
+          </article>
+
+          <article class="card">
+            <span class="label">Stationer</span>
+            <h2>Videreformidling</h2>
+            <div class="switch-grid">
+              <label><input type="checkbox" name="station_a_enabled"> (A) Slagelse</label>
+              <label><input type="checkbox" name="station_s_enabled"> (S) Sorø</label>
+              <label><input type="checkbox" name="station_k_enabled"> (K) Korsør</label>
+              <label><input type="checkbox" name="station_l_enabled"> (L) Skælskør</label>
+              <label><input type="checkbox" name="station_r_enabled"> (R) Ruds Vedby</label>
+            </div>
+          </article>
+
+          <article class="card">
+            <span class="label">Pushover</span>
+            <h2>Notifikationer</h2>
+            <div class="form-grid">
+              <label class="checkbox wide"><input type="checkbox" name="pushover_enabled"> Aktivér Pushover</label>
+              <label>App token<input type="password" name="pushover_app_token" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label>
+              <label>User/group key<input type="password" name="pushover_user_key" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label>
+            </div>
+            <div class="actions">
+              <button type="button" id="test-pushover">Send Pushover-test</button>
+            </div>
+          </article>
+
+          <div class="savebar">
+            <span id="save-status"></span>
+            <button class="primary" type="submit">Gem indstillinger</button>
+          </div>
+        </form>
+      </section>
+    </main>
+  </div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+
+function formatUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return d ? `${d}d ${h}t` : h ? `${h}t ${m}m` : `${m}m`;
+}
+
+function formatDate(value) {
+  if (!value) return '—';
+  return new Date(value).toLocaleString('da-DK');
+}
+
+async function api(url, options={}) {
+  const response = await fetch(url, {headers:{'Content-Type':'application/json'}, ...options});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Ukendt fejl');
+  return data;
+}
+
+async function refreshStatus() {
+  const data = await api('/api/status');
+  $('#message-count').textContent = data.message_count;
+  $('#uptime').textContent = formatUptime(data.uptime_seconds);
+  $('#hostname').textContent = data.hostname;
+  $('#source-state').textContent = data.source.state === 'running' ? 'ONLINE' : data.source.state.toUpperCase();
+  $('#source-error').textContent = data.source.error || (data.source_mode === 'mock' ? 'Simulator klar' : 'PDL input aktivt');
+  const online = data.source_mode === 'mock' || data.source.state === 'running';
+  $('#live-pill').classList.toggle('ok', online);
+  $('#live-pill span:last-child').textContent = online ? 'Gateway online' : 'Afventer input';
+
+  const latest = data.latest_message;
+  if (latest) {
+    $('#latest-station').textContent = latest.station || 'POCSAG';
+    $('#latest-time').textContent = formatDate(latest.received_at);
+    $('#latest-message').textContent = latest.message;
+    $('#latest-meta').textContent = [latest.ric && `RIC ${latest.ric}`, latest.baud && `${latest.baud} baud`, latest.source].filter(Boolean).join(' · ');
+  }
+}
+
+async function refreshHistory() {
+  const rows = await api('/api/messages?limit=100');
+  $('#history-list').innerHTML = rows.length ? rows.map(row => `
+    <div class="history-row">
+      <div class="history-time">${formatDate(row.received_at)}</div>
+      <div><strong>${row.station || row.protocol}</strong><p>${escapeHtml(row.message)}</p><small>${[row.ric && `RIC ${row.ric}`, row.baud && `${row.baud} baud`, row.source, row.notification_sent ? 'Pushover ✓' : ''].filter(Boolean).join(' · ')}</small></div>
+    </div>`).join('') : '<p class="muted">Ingen meldinger endnu.</p>';
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text || '';
+  return div.innerHTML;
+}
+
+async function loadSettings() {
+  const data = await api('/api/settings');
+  const form = $('#settings-form');
+  for (const [key, value] of Object.entries(data)) {
+    const el = form.elements[key];
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = value === '1' || value === true;
+    else if (!key.endsWith('_set')) el.value = value ?? '';
+  }
+}
+
+$$('.tab').forEach(button => button.addEventListener('click', () => {
+  $$('.tab').forEach(x => x.classList.remove('active'));
+  $$('.panel').forEach(x => x.classList.remove('active'));
+  button.classList.add('active');
+  $('#' + button.dataset.tab).classList.add('active');
+  if (button.dataset.tab === 'history') refreshHistory();
+  if (button.dataset.tab === 'settings') loadSettings();
+}));
+
+$('#send-mock').addEventListener('click', async () => {
+  const button = $('#send-mock');
+  button.disabled = true;
+  try {
+    await api('/api/mock', {method:'POST', body:JSON.stringify({message:$('#mock-message').value})});
+    await refreshStatus();
+  } finally { button.disabled = false; }
+});
+
+$('#refresh-history').addEventListener('click', refreshHistory);
+
+$('#settings-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = {};
+  [...form.elements].forEach(el => {
+    if (!el.name) return;
+    payload[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  $('#save-status').textContent = 'Gemmer…';
+  try {
+    await api('/api/settings', {method:'POST', body:JSON.stringify(payload)});
+    $('#save-status').textContent = 'Gemt';
+    await refreshStatus();
+  } catch (err) { $('#save-status').textContent = err.message; }
+});
+
+$('#test-pushover').addEventListener('click', async () => {
+  const el = $('#test-pushover');
+  el.disabled = true;
+  try {
+    await api('/api/pushover/test', {method:'POST', body:'{}'});
+    alert('Testbeskeden er sendt.');
+  } catch (err) { alert(err.message); }
+  finally { el.disabled = false; }
+});
+
+refreshStatus();
+setInterval(refreshStatus, 3000);
+</script>
+</body>
+</html>
