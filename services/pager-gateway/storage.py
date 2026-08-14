@@ -14,11 +14,6 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "pdl_log_path": "/data/pdl.log",
     "pocsag_baud": "auto",
     "invert": "auto",
-    "station_a_enabled": "1",
-    "station_s_enabled": "1",
-    "station_k_enabled": "1",
-    "station_l_enabled": "1",
-    "station_r_enabled": "1",
     "pushover_enabled": "0",
     "pushover_app_token": "",
     "pushover_user_key": "",
@@ -76,6 +71,20 @@ class Storage:
                     "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",
                     (key, value),
                 )
+
+            # Earlier MVP builds exposed station enable/disable switches. Pager
+            # traffic without a station marker is valid, so those settings must
+            # never become forwarding filters. Remove stale keys on upgrade.
+            conn.execute(
+                "DELETE FROM settings WHERE key IN (?, ?, ?, ?, ?)",
+                (
+                    "station_a_enabled",
+                    "station_s_enabled",
+                    "station_k_enabled",
+                    "station_l_enabled",
+                    "station_r_enabled",
+                ),
+            )
 
     def get_settings(self) -> dict[str, str]:
         with self.connect() as conn:
