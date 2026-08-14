@@ -33,6 +33,8 @@ jobs:
             services/pager-gateway/routing.py \
             services/pager-gateway/adaptive.py \
             services/pager-gateway/adaptive_routes.py \
+            services/pager-gateway/training.py \
+            services/pager-gateway/training_routes.py \
             services/pager-gateway/system_agent.py \
             services/pager-gateway/fsk_status_agent.py \
             services/pager-gateway/network_portal.py
