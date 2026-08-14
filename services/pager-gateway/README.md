@@ -1,14 +1,28 @@
 # Racher Pager Gateway
 
-Webbaseret gateway til POCSAG-meldinger. Første version er hardware-uafhængig, så webinterface, historik, filtrering og Pushover kan udvikles før Raspberry Pi og scanner er tilsluttet.
+Webbaseret gateway til POCSAG-meldinger. Første version er hardware-uafhængig, så webinterface, historik og Pushover kan udvikles før Raspberry Pi og scanner er tilsluttet.
+
+## Vigtigt princip: send alt
+
+Gatewayen bruger **ikke** `(A)`, `(S)`, `(K)`, `(L)` eller `(R)` som filter. Enhver gyldig dekodet pager-melding gemmes og kan videresendes via Pushover.
+
+Kendte stationsmarkører bruges kun som ekstra metadata/titel:
+
+- `(A)` Slagelse
+- `(S)` Sorø
+- `(K)` Korsør
+- `(L)` Skælskør
+- `(R)` Ruds Vedby
+
+Meldinger uden stationsmarkør, fx `$8 ISL ...`, `@6 ØF ...` og `VCT - ISL-Eftersyn ...`, behandles på samme måde og må aldrig kasseres af gatewayen.
 
 ## MVP
 
 - Mobilvenligt dashboard
 - SQLite-historik
-- Stationsgenkendelse: `(A)` Slagelse, `(S)` Sorø, `(K)` Korsør, `(L)` Skælskør og `(R)` Ruds Vedby
+- Frivillig stationsgenkendelse som metadata
 - Simulator til testmeldinger
-- Pushover-test og automatisk videresendelse
+- Pushover-test og automatisk videresendelse af alle dekodede meldinger
 - PDL-logfil som inputkilde
 - `/healthz` til watchdog/monitorering
 
