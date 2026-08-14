@@ -38,6 +38,12 @@ jobs:
             services/pager-gateway/system_agent.py \
             services/pager-gateway/fsk_status_agent.py \
             services/pager-gateway/network_portal.py
+      - name: Validate browser JavaScript syntax
+        run: |
+          node --check services/pager-gateway/static/app.js
+          node --check services/pager-gateway/static/fsk-status.js
+          node --check services/pager-gateway/static/ric-admin.js
+          node --check services/pager-gateway/static/adaptive-admin.js
       - name: Validate shell syntax
         run: |
           bash -n services/pager-gateway/install-pager-gateway.sh
