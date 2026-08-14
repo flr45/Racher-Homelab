@@ -98,6 +98,8 @@ Bootstrap-scriptet er idempotent og:
 
 Scriptet skal køres som normal bruger, **ikke** som `sudo bash`; det bruger selv `sudo` hvor det er nødvendigt.
 
+Eksisterende `/etc/racher-pager/gateway.env` bevares ved genkørsel. Det betyder bl.a., at en senere HTTPS-port, `PAGER_COOKIE_SECURE=1` og VAPID-konfiguration ikke nulstilles af en opdatering/reparation.
+
 Det er forventet, at PDL/USB-lyd kan stå som afventende hjemme. Systemet er stadig klargjort til den senere scanner-test.
 
 ## PDL og scanner-test
@@ -153,4 +155,4 @@ Det betyder, at login, brugere, historik, notifikationer og systemadministration
 
 ## Når Pi'en skal online
 
-Den lokale bootstrap bruger HTTP og `PAGER_COOKIE_SECURE=0`. Næste driftstrin er reverse proxy/HTTPS og en stabil ekstern adresse. Først når HTTPS er sat op aktiveres `PAGER_COOKIE_SECURE=1` og PWA Web Push testes på telefonerne.
+Den lokale bootstrap bruger HTTP og `PAGER_COOKIE_SECURE=0` ved første installation. Næste driftstrin er reverse proxy/HTTPS og en stabil ekstern adresse. Først når HTTPS er sat op aktiveres `PAGER_COOKIE_SECURE=1` og PWA Web Push testes på telefonerne.
