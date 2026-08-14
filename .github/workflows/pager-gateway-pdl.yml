@@ -24,6 +24,13 @@ jobs:
       - name: Run gateway tests
         working-directory: services/pager-gateway
         run: python -m unittest discover -v -p 'test_*.py'
+      - name: Validate host Python syntax
+        run: |
+          python -m py_compile \
+            services/pager-gateway/app.py \
+            services/pager-gateway/storage.py \
+            services/pager-gateway/system_agent.py \
+            services/pager-gateway/network_portal.py
       - name: Validate shell syntax
         run: |
           bash -n services/pager-gateway/install-pager-gateway.sh
