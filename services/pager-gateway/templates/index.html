@@ -11,6 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/routing.css">
 </head>
 <body data-admin="{{ '1' if is_admin else '0' }}">
   <div class="shell">
@@ -28,6 +29,7 @@
       {% if is_admin %}
       <button class="tab" data-tab="system">System</button>
       <button class="tab" data-tab="users">Brugere</button>
+      <button class="tab" data-tab="ric">RIC-koder</button>
       <button class="tab" data-tab="settings">Indstillinger</button>
       {% endif %}
     </nav>
@@ -133,7 +135,7 @@
         <article class="card">
           <span class="label">Simulator</span><h2>Test hele alarmflowet uden scanner</h2>
           <div class="row"><input id="mock-message" value="$8 ISL KA MØ M1 + V1 (1+5) Naturbrand-Mark, Høstet mark" aria-label="Testmelding"><button id="send-mock" class="primary">Send testalarm</button></div>
-          <p class="hint">Testalarmen gemmes og sendes til aktive PWA-notifikationer og Pushover på samme måde som en rigtig dekodet melding.</p>
+          <p class="hint">Testalarmen gemmes og sendes efter samme routingregler som en rigtig dekodet melding.</p>
         </article>
 
         <article class="card">
@@ -151,15 +153,52 @@
 
       <section id="users" class="panel">
         <article class="card">
-          <span class="label">Brugeradministration</span><h2>Opret bruger</h2><p class="hint">Kun administratorer har adgang til denne funktion.</p>
+          <span class="label">Brugeradministration</span><h2>Opret bruger</h2><p class="hint">Vælg allerede ved oprettelsen hvilke stationer brugeren skal modtage alarmer fra.</p>
           <form id="create-user-form" class="form-grid">
             <label>Navn<input name="display_name" required></label><label>Brugernavn<input name="username" minlength="3" maxlength="40" required></label>
             <label>Adgangskode<input type="password" name="password" minlength="10" autocomplete="new-password" required></label>
-            <label>Rolle<select name="role"><option value="user">Bruger · kun alarmer</option><option value="admin">Administrator</option></select></label>
+            <label>Rolle<select name="role"><option value="user">Bruger · kun egne stationer</option><option value="admin">Administrator</option></select></label>
+            <div class="wide"><span class="label">Alarmer fra</span><div class="station-pills">
+              <label class="station-pill"><input type="checkbox" name="station_A" value="1"> Slagelse</label>
+              <label class="station-pill"><input type="checkbox" name="station_S" value="1"> Sorø</label>
+              <label class="station-pill"><input type="checkbox" name="station_K" value="1"> Korsør</label>
+              <label class="station-pill"><input type="checkbox" name="station_L" value="1"> Skælskør</label>
+              <label class="station-pill"><input type="checkbox" name="station_R" value="1"> Ruds Vedby</label>
+            </div></div>
             <div class="wide actions"><button class="primary" type="submit">Opret bruger</button></div>
           </form>
         </article>
         <article class="card"><div class="card-head"><div><span class="label">Konti</span><h2>Brugere</h2></div><button id="refresh-users">Opdater</button></div><div id="user-list" class="user-list"></div></article>
+        <article class="card">
+          <div class="card-head"><div><span class="label">Alarmrouting</span><h2>Stationer pr. bruger</h2></div><button id="refresh-user-routing">Opdater</button></div>
+          <p class="hint">Ændringer gælder både alarmfeed og Web Push. Administratorer kan stadig se hele råhistorikken.</p>
+          <div id="user-routing-list"><p class="muted">Åbn fanen for at hente brugere.</p></div>
+        </article>
+      </section>
+
+      <section id="ric" class="panel">
+        <article class="card">
+          <span class="label">RIC / Capcode</span><h2>Tilføj pageradresse</h2>
+          <p class="routing-note">RIC er den primære routingnøgle. Hvis en aktiv RIC findes her, vinder den over tekstmarkører som (A)/(S)/(K)/(L)/(R).</p>
+          <form id="ric-create-form" class="form-grid">
+            <label>RIC / capcode<input name="ric" inputmode="numeric" pattern="[0-9]{4,10}" minlength="4" maxlength="10" required placeholder="1234567"></label>
+            <label>Station<select id="ric-station" name="station_key" required></select></label>
+            <label class="wide">Navn / beskrivelse<input name="label" maxlength="120" placeholder="fx Primær alarmgruppe"></label>
+            <label class="checkbox wide"><input type="checkbox" name="active" checked> Aktiv routing</label>
+            <div class="wide actions"><button class="primary" type="submit">Tilføj RIC</button></div>
+          </form>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><div><span class="label">Register</span><h2>Gemte RIC-koder</h2></div><button id="refresh-ric">Opdater</button></div>
+          <div id="ric-list"><p class="muted">Åbn fanen for at hente RIC-registeret.</p></div>
+        </article>
+
+        <article class="card">
+          <span class="label">Læring</span><h2>Ukendte RIC-koder</h2>
+          <p class="hint">Alle råmeldinger gemmes. En RIC der endnu ikke findes i registeret vises her, så admin kan tildele den en station med ét klik.</p>
+          <div id="unknown-ric-list"><p class="muted">Ingen data hentet endnu.</p></div>
+        </article>
       </section>
 
       <section id="settings" class="panel">
@@ -175,7 +214,7 @@
             <p class="hint">FSK-USB / RS232 er det primære hardwareinput. POCSAG 512/1200/2400 styres i PDL; ALSA-lydinput bevares kun som fallback.</p>
           </article>
           <article class="card"><span class="label">Web Push</span><h2>PWA notifikationer</h2><div class="form-grid"><label class="wide">VAPID kontakt<input name="vapid_subject" placeholder="mailto:admin@example.dk"></label></div><p class="hint">VAPID-nøglen genereres lokalt på gatewayen. Den private nøgle vises aldrig i webinterfacet.</p></article>
-          <article class="card"><span class="label">Pushover</span><h2>Ekstra notifikationskanal</h2><div class="form-grid"><label class="checkbox wide"><input type="checkbox" name="pushover_enabled"> Aktivér Pushover</label><label>App token<input type="password" name="pushover_app_token" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label><label>User/group key<input type="password" name="pushover_user_key" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label></div><div class="actions"><button type="button" id="test-pushover">Send Pushover-test</button></div></article>
+          <article class="card"><span class="label">Pushover</span><h2>Ekstra operatørkanal</h2><div class="form-grid"><label class="checkbox wide"><input type="checkbox" name="pushover_enabled"> Aktivér Pushover</label><label>App token<input type="password" name="pushover_app_token" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label><label>User/group key<input type="password" name="pushover_user_key" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label></div><p class="hint">Pushover er fortsat en global operatørkanal og modtager alle dekodede meldinger når den er aktiveret. Brugerfiltrering sker på Web Push og webfeed.</p><div class="actions"><button type="button" id="test-pushover">Send Pushover-test</button></div></article>
           <div class="savebar"><span id="save-status"></span><button class="primary" type="submit">Gem indstillinger</button></div>
         </form>
       </section>
@@ -184,5 +223,6 @@
   </div>
   <script src="/static/app.js" defer></script>
   <script src="/static/fsk-status.js" defer></script>
+  <script src="/static/ric-admin.js" defer></script>
 </body>
 </html>
