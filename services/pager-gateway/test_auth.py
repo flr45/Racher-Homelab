@@ -79,6 +79,7 @@ class AuthenticationTests(unittest.TestCase):
         self.assertNotIn('data-tab="users"', page)
         self.assertNotIn('data-tab="settings"', page)
         self.assertNotIn("Send testalarm", page)
+        self.assertNotIn('id="readiness-list"', page)
 
     def test_admin_ui_contains_admin_features(self):
         response = self.admin.get("/")
@@ -88,6 +89,17 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIn('data-tab="users"', page)
         self.assertIn('data-tab="settings"', page)
         self.assertIn("Send testalarm", page)
+        self.assertIn('id="readiness-list"', page)
+        self.assertIn("Raspberry Pi-status", page)
+
+    def test_admin_status_contains_readiness_but_user_is_forbidden(self):
+        response = self.admin.get("/api/status")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("runtime", payload)
+        self.assertIn("readiness", payload)
+        self.assertTrue(any(item["key"] == "gateway" for item in payload["readiness"]))
+        self.assertEqual(self.user.get("/api/status").status_code, 403)
 
     def test_user_can_read_alarms(self):
         response = self.user.get("/api/messages")
