@@ -23,6 +23,7 @@ STATION_MARKERS = {
 RIC_RE = re.compile(r"\b(?:RIC|CAP(?:CODE)?|ADDRESS)\s*[:=]?\s*(\d{4,10})\b", re.I)
 BAUD_RE = re.compile(r"\b(?:POCSAG[- ]?)?(512|1200|2400)\b", re.I)
 FUNCTION_RE = re.compile(r"\b(?:FUNC(?:TION)?|F)\s*[:=]?\s*([0-4A-D])\b", re.I)
+PUBLIC_RIC_FIELD_RE = re.compile(r"\b(?:RIC|CAP(?:CODE)?|ADDRESS)\s*[:=]?\s*\d{4,10}\b", re.I)
 PDW_POCSAG_RE = re.compile(
     r"^\s*(?P<ric>\d{4,10})\s+"
     r"(?P<time>\d{1,2}:\d{2}:\d{2})\s+"
@@ -54,6 +55,21 @@ class PagerEvent:
         return data
 
 
+def public_message(text: str) -> str:
+    """Return user-facing alarm text with decoder/capcode metadata removed.
+
+    The raw decoder line is retained separately for admins. This function is used
+    for every outbound notification so RIC/capcode never becomes user-facing data.
+    """
+    value = str(text or "").strip()
+    message_match = re.search(r"\bMESSAGE\s*[:=]\s*(.+)$", value, re.I)
+    if message_match:
+        value = message_match.group(1).strip()
+    value = PUBLIC_RIC_FIELD_RE.sub("", value)
+    value = re.sub(r"\s{2,}", " ", value).strip(" -|:;")
+    return value
+
+
 def detect_station(text: str) -> str | None:
     upper = text.upper()
     for marker, station in STATION_MARKERS.items():
@@ -67,12 +83,9 @@ def parse_pdl_line(line: str, source: str = "pdl") -> PagerEvent | None:
     if not raw:
         return None
 
-    # PDW's documented paging logfile/display format begins with Address/RIC,
-    # followed by time, date, mode, type and bitrate. Parse that shape first so
-    # routing gets a reliable capcode while the complete raw line is preserved.
     pdw_match = PDW_POCSAG_RE.match(raw)
     if pdw_match:
-        message = pdw_match.group("message").strip()
+        message = public_message(pdw_match.group("message"))
         return PagerEvent(
             message=message,
             raw_line=raw,
@@ -88,13 +101,7 @@ def parse_pdl_line(line: str, source: str = "pdl") -> PagerEvent | None:
     baud_match = BAUD_RE.search(raw)
     function_match = FUNCTION_RE.search(raw)
 
-    message = raw
-    # PDL's Linux output can also contain a human-readable MESSAGE: field. Keep
-    # the original raw line for diagnostics while exposing only its message body.
-    message_match = re.search(r"\bMESSAGE\s*[:=]\s*(.+)$", raw, re.I)
-    if message_match:
-        message = message_match.group(1).strip()
-
+    message = public_message(raw)
     return PagerEvent(
         message=message,
         raw_line=raw,
@@ -114,12 +121,7 @@ class PushoverClient:
             raise ValueError("Pushover app token eller user key mangler")
         response = requests.post(
             self.endpoint,
-            data={
-                "token": app_token,
-                "user": user_key,
-                "title": title,
-                "message": message,
-            },
+            data={"token": app_token, "user": user_key, "title": title, "message": public_message(message)},
             timeout=10,
         )
         response.raise_for_status()
@@ -174,7 +176,6 @@ class FileTailSource:
 
                 if handle is None:
                     handle = path.open("r", encoding="utf-8", errors="replace")
-                    # On startup we only want new radio traffic, not replay an old log.
                     handle.seek(0, os.SEEK_END)
                     self._status = "running"
                     self._error = None
@@ -184,7 +185,6 @@ class FileTailSource:
                     self.on_line(line)
                     continue
 
-                # Handle rotation/truncation.
                 try:
                     if path.stat().st_size < handle.tell():
                         handle.close()
@@ -194,7 +194,7 @@ class FileTailSource:
                     handle = None
 
                 time.sleep(0.2)
-        except Exception as exc:  # keep diagnostics visible in the web UI
+        except Exception as exc:
             self._status = "error"
             self._error = str(exc)
         finally:
