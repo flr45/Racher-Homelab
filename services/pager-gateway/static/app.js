@@ -22,6 +22,18 @@ function formatUptime(seconds) {
   return d ? `${d}d ${h}t` : h ? `${h}t ${m}m` : `${m}m`;
 }
 
+function formatBytes(value) {
+  let bytes = Number(value || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let unit = 0;
+  while (bytes >= 1024 && unit < units.length - 1) {
+    bytes /= 1024;
+    unit += 1;
+  }
+  return `${bytes.toFixed(unit >= 3 ? 1 : 0)} ${units[unit]}`;
+}
+
 async function api(url, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers || {});
@@ -197,6 +209,32 @@ $('#push-test')?.addEventListener('click', async () => {
 
 // ---- Admin ---------------------------------------------------------------------
 
+function renderReadiness(data) {
+  const list = $('#readiness-list');
+  if (!list) return;
+  const rows = data.readiness || [];
+  list.innerHTML = rows.length ? rows.map((row) => `
+    <div class="readiness-row ${escapeHtml(row.state || 'pending')}">
+      <span class="readiness-icon">${row.state === 'ok' ? '✓' : '○'}</span>
+      <div>
+        <strong>${escapeHtml(row.label)}</strong>
+        <small>${escapeHtml(row.detail)}</small>
+      </div>
+    </div>`).join('') : '<p class="muted">Ingen host-status endnu.</p>';
+
+  const runtime = data.runtime || {};
+  const heartbeat = runtime.agent_heartbeat;
+  $('#runtime-meta').textContent = heartbeat ? `Host-agent ${formatDate(heartbeat)}` : 'Afventer host-agent';
+
+  const metrics = [];
+  if (runtime.cpu_temp_c) metrics.push(`CPU ${runtime.cpu_temp_c} °C`);
+  if (runtime.disk_free_bytes) metrics.push(`${formatBytes(runtime.disk_free_bytes)} ledig`);
+  if (runtime.host_uptime_seconds) metrics.push(`Pi uptime ${formatUptime(runtime.host_uptime_seconds)}`);
+  if (runtime.gateway_container) metrics.push(`Container ${runtime.gateway_container}`);
+  if (runtime.backup_count) metrics.push(`${runtime.backup_count} backup(s)`);
+  $('#host-metrics').innerHTML = metrics.map((value) => `<span>${escapeHtml(value)}</span>`).join('');
+}
+
 async function refreshAdminStatus() {
   if (!isAdmin) return;
   const data = await api('/api/status');
@@ -205,6 +243,7 @@ async function refreshAdminStatus() {
   $('#hostname').textContent = data.hostname;
   $('#source-state').textContent = data.source.state === 'running' ? 'ONLINE' : String(data.source.state || 'ukendt').toUpperCase();
   $('#source-error').textContent = data.source.error || (data.source_mode === 'mock' ? 'Simulator klar' : 'PDL input aktivt');
+  renderReadiness(data);
   await refreshCommands();
 }
 
