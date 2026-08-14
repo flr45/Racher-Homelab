@@ -25,12 +25,12 @@ fi
 SERVICE_DIR="$REPO_ROOT/services/pager-gateway"
 PDL_DIR="$SERVICE_DIR/pdl"
 COMPOSE_FILE="$REPO_ROOT/compose/pager-gateway/docker-compose.yml"
-STATE_ROOT="${PAGER_STATE_ROOT:-/var/lib/racher-pager}"
+DEFAULT_STATE_ROOT="${PAGER_STATE_ROOT:-/var/lib/racher-pager}"
 BACKUP_DIR="${PAGER_BACKUP_DIR:-/var/backups/racher-pager}"
 ENV_DIR="/etc/racher-pager"
 GATEWAY_ENV="$ENV_DIR/gateway.env"
-GATEWAY_PORT="${PAGER_GATEWAY_PORT:-8088}"
-VAPID_SUBJECT="${PAGER_VAPID_SUBJECT:-mailto:admin@racher.local}"
+DEFAULT_GATEWAY_PORT="${PAGER_GATEWAY_PORT:-8088}"
+DEFAULT_VAPID_SUBJECT="${PAGER_VAPID_SUBJECT:-mailto:admin@racher.local}"
 
 for required in \
   "$PDL_DIR/install-pdl.sh" \
@@ -48,6 +48,16 @@ step() {
   printf '\n\033[1;36m==> %s\033[0m\n' "$1"
 }
 
+env_value() {
+  sudo awk -F= -v key="$1" '
+    $1 == key {
+      sub(/^[^=]*=/, "")
+      print
+      exit
+    }
+  ' "$GATEWAY_ENV" 2>/dev/null || true
+}
+
 step "1/9 Grundpakker og Docker"
 sudo -v
 sudo apt-get update
@@ -60,7 +70,6 @@ if sudo docker compose version >/dev/null 2>&1; then
   COMPOSE_KIND="plugin"
 else
   # Debian/Raspberry Pi OS-versioner har brugt forskellige pakkenavne over tid.
-  # Prøv dem i rækkefølge og verificér den faktiske kommando bagefter.
   if sudo apt-get install -y docker-compose-v2 >/dev/null 2>&1; then
     :
   elif sudo apt-get install -y docker-compose-plugin >/dev/null 2>&1; then
@@ -79,40 +88,52 @@ else
   fi
 fi
 
+step "2/9 Dataområder og lokal konfiguration"
+sudo mkdir -p "$ENV_DIR"
+if [[ ! -f "$GATEWAY_ENV" ]]; then
+  sudo tee "$GATEWAY_ENV" >/dev/null <<EOF
+# Lokale bootstrap-værdier. HTTPS sættes op i et senere trin.
+PAGER_DATA_HOST_PATH=$DEFAULT_STATE_ROOT
+PAGER_GATEWAY_PORT=$DEFAULT_GATEWAY_PORT
+PAGER_COOKIE_SECURE=0
+PAGER_VAPID_SUBJECT=$DEFAULT_VAPID_SUBJECT
+EOF
+  sudo chmod 0640 "$GATEWAY_ENV"
+fi
+
+# Eksisterende konfiguration vinder. Det er vigtigt, hvis bootstrap køres igen
+# efter HTTPS er sat op, så secure cookies/port ikke bliver nulstillet.
+STATE_ROOT="$(env_value PAGER_DATA_HOST_PATH)"
+GATEWAY_PORT="$(env_value PAGER_GATEWAY_PORT)"
+COOKIE_SECURE="$(env_value PAGER_COOKIE_SECURE)"
+VAPID_SUBJECT="$(env_value PAGER_VAPID_SUBJECT)"
+STATE_ROOT="${STATE_ROOT:-$DEFAULT_STATE_ROOT}"
+GATEWAY_PORT="${GATEWAY_PORT:-$DEFAULT_GATEWAY_PORT}"
+COOKIE_SECURE="${COOKIE_SECURE:-0}"
+VAPID_SUBJECT="${VAPID_SUBJECT:-$DEFAULT_VAPID_SUBJECT}"
+
+sudo mkdir -p "$STATE_ROOT" "$STATE_ROOT/pdl" "$BACKUP_DIR"
+sudo chown -R "$(id -un):$(id -gn)" "$STATE_ROOT"
+sudo chmod 0750 "$STATE_ROOT"
+sudo chmod 0700 "$BACKUP_DIR"
+
 compose() {
   if [[ "$COMPOSE_KIND" == "plugin" ]]; then
     sudo env \
       PAGER_DATA_HOST_PATH="$STATE_ROOT" \
       PAGER_GATEWAY_PORT="$GATEWAY_PORT" \
-      PAGER_COOKIE_SECURE="0" \
+      PAGER_COOKIE_SECURE="$COOKIE_SECURE" \
       PAGER_VAPID_SUBJECT="$VAPID_SUBJECT" \
       docker compose -f "$COMPOSE_FILE" "$@"
   else
     sudo env \
       PAGER_DATA_HOST_PATH="$STATE_ROOT" \
       PAGER_GATEWAY_PORT="$GATEWAY_PORT" \
-      PAGER_COOKIE_SECURE="0" \
+      PAGER_COOKIE_SECURE="$COOKIE_SECURE" \
       PAGER_VAPID_SUBJECT="$VAPID_SUBJECT" \
       docker-compose -f "$COMPOSE_FILE" "$@"
   fi
 }
-
-step "2/9 Dataområder og lokal konfiguration"
-sudo mkdir -p "$STATE_ROOT" "$STATE_ROOT/pdl" "$BACKUP_DIR" "$ENV_DIR"
-sudo chown -R "$(id -un):$(id -gn)" "$STATE_ROOT"
-sudo chmod 0750 "$STATE_ROOT"
-sudo chmod 0700 "$BACKUP_DIR"
-
-if [[ ! -f "$GATEWAY_ENV" ]]; then
-  sudo tee "$GATEWAY_ENV" >/dev/null <<EOF
-# Lokale bootstrap-værdier. HTTPS sættes op i et senere trin.
-PAGER_DATA_HOST_PATH=$STATE_ROOT
-PAGER_GATEWAY_PORT=$GATEWAY_PORT
-PAGER_COOKIE_SECURE=0
-PAGER_VAPID_SUBJECT=$VAPID_SUBJECT
-EOF
-  sudo chmod 0640 "$GATEWAY_ENV"
-fi
 
 step "3/9 Byg PDL 3.2.0 headless"
 bash "$PDL_DIR/install-pdl.sh"
@@ -178,7 +199,7 @@ Racher Pager Gateway er klargjort.
   Data              : $STATE_ROOT
   Backups           : $BACKUP_DIR
 
-Åbn lokalt:
+Lokal health/web-port:
   http://127.0.0.1:$GATEWAY_PORT
 EOF
 
