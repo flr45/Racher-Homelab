@@ -43,21 +43,24 @@ printf '%s\n' "$CURRENT" > "$UPDATE_DIR/previous-sha"
 printf '%s\n' "$CURRENT" > "$UPDATE_DIR/current-sha"
 
 rollback_failed_update() {
-  echo "Ny version fejlede healthcheck; ruller automatisk tilbage til ${CURRENT:0:12}." >&2
+  local rc=$?
+  trap - ERR
+  set +e
+  echo "Ny version fejlede; ruller automatisk tilbage til ${CURRENT:0:12}." >&2
   git -C "$RUNTIME_REPO" reset --hard "$CURRENT"
   "$COMPOSE_SCRIPT" build pager-gateway
   "$COMPOSE_SCRIPT" up -d --remove-orphans
   printf '%s\n' "$CURRENT" > "$UPDATE_DIR/current-sha"
+  exit "$rc"
 }
 trap 'rollback_failed_update' ERR
 
 git -C "$RUNTIME_REPO" reset --hard "$TARGET"
-
-# Test Python og shell før image bygges.
 python3 -m py_compile \
   "$RUNTIME_REPO/services/pager-gateway/app.py" \
   "$RUNTIME_REPO/services/pager-gateway/storage.py" \
-  "$RUNTIME_REPO/services/pager-gateway/system_agent.py"
+  "$RUNTIME_REPO/services/pager-gateway/system_agent.py" \
+  "$RUNTIME_REPO/services/pager-gateway/network_portal.py"
 for script in "$RUNTIME_REPO/services/pager-gateway/"*.sh "$RUNTIME_REPO/services/pager-gateway/pdl/"*.sh; do
   bash -n "$script"
 done
@@ -73,8 +76,8 @@ for _ in $(seq 1 60); do
 done
 [[ "$READY" == "1" ]]
 
-# Installér opdaterede root-helpers efter gatewayen er verificeret.
 REPO_ROOT="$RUNTIME_REPO" \
+PAGER_RUNTIME_REPO="$RUNTIME_REPO" \
 PAGER_DATA_HOST_PATH="$STATE_ROOT" \
 PAGER_BACKUP_DIR="${PAGER_BACKUP_DIR:-/var/backups/racher-pager}" \
   bash "$RUNTIME_REPO/services/pager-gateway/pdl/install-system-agent.sh"
