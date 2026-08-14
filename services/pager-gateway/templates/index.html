@@ -62,10 +62,10 @@
             </div>
           </div>
           <div class="row">
-            <input id="mock-message" value="(A) TESTALARM - Racher Pager Gateway" aria-label="Testmelding">
+            <input id="mock-message" value="$8 ISL KA MØ M1 + V1 (1+5) Naturbrand-Mark, Høstet mark" aria-label="Testmelding">
             <button id="send-mock" class="primary">Send testmelding</button>
           </div>
-          <p class="hint">Meldingen går gennem samme database-, filter- og Pushover-flow som en rigtig dekodet melding.</p>
+          <p class="hint">Alle dekodede meldinger går gennem samme database- og Pushover-flow. Stationsmarkører som (A), (S), (K), (L) og (R) bruges kun som ekstra mærkning.</p>
         </article>
       </section>
 
@@ -115,15 +115,9 @@
           </article>
 
           <article class="card">
-            <span class="label">Stationer</span>
-            <h2>Videreformidling</h2>
-            <div class="switch-grid">
-              <label><input type="checkbox" name="station_a_enabled"> (A) Slagelse</label>
-              <label><input type="checkbox" name="station_s_enabled"> (S) Sorø</label>
-              <label><input type="checkbox" name="station_k_enabled"> (K) Korsør</label>
-              <label><input type="checkbox" name="station_l_enabled"> (L) Skælskør</label>
-              <label><input type="checkbox" name="station_r_enabled"> (R) Ruds Vedby</label>
-            </div>
+            <span class="label">Videreformidling</span>
+            <h2>Alle meldinger sendes</h2>
+            <p class="hint">Gatewayen filtrerer ikke efter stationsbogstav. Meldinger uden (A)/(S)/(K)/(L)/(R), fx ISL-, ØF- eller VCT-meldinger, gemmes og videresendes også. Hvis en kendt stationsmarkør findes, bruges den kun som titel/mærkat.</p>
           </article>
 
           <article class="card">
@@ -184,7 +178,7 @@ async function refreshStatus() {
 
   const latest = data.latest_message;
   if (latest) {
-    $('#latest-station').textContent = latest.station || 'POCSAG';
+    $('#latest-station').textContent = latest.station || 'Pager-melding';
     $('#latest-time').textContent = formatDate(latest.received_at);
     $('#latest-message').textContent = latest.message;
     $('#latest-meta').textContent = [latest.ric && `RIC ${latest.ric}`, latest.baud && `${latest.baud} baud`, latest.source].filter(Boolean).join(' · ');
@@ -196,7 +190,7 @@ async function refreshHistory() {
   $('#history-list').innerHTML = rows.length ? rows.map(row => `
     <div class="history-row">
       <div class="history-time">${formatDate(row.received_at)}</div>
-      <div><strong>${row.station || row.protocol}</strong><p>${escapeHtml(row.message)}</p><small>${[row.ric && `RIC ${row.ric}`, row.baud && `${row.baud} baud`, row.source, row.notification_sent ? 'Pushover ✓' : ''].filter(Boolean).join(' · ')}</small></div>
+      <div><strong>${row.station || 'Pager-melding'}</strong><p>${escapeHtml(row.message)}</p><small>${[row.protocol, row.ric && `RIC ${row.ric}`, row.baud && `${row.baud} baud`, row.source, row.notification_sent ? 'Pushover ✓' : ''].filter(Boolean).join(' · ')}</small></div>
     </div>`).join('') : '<p class="muted">Ingen meldinger endnu.</p>';
 }
 
