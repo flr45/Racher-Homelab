@@ -1,20 +1,12 @@
 # Racher Pager Gateway
 
-Webbaseret gateway til POCSAG-meldinger. Første version er hardware-uafhængig, så webinterface, historik og Pushover kan udvikles før Raspberry Pi og scanner er tilsluttet.
+Webbaseret gateway til POCSAG-meldinger. Systemet er lavet, så næsten hele løsningen kan færdiggøres og testes uden scanner; den fysiske radio kobles på til sidst.
 
 ## Vigtigt princip: send alt
 
-Gatewayen bruger **ikke** `(A)`, `(S)`, `(K)`, `(L)` eller `(R)` som filter. Enhver gyldig dekodet pager-melding gemmes og kan videresendes via Pushover.
+Gatewayen bruger **ikke** `(A)`, `(S)`, `(K)`, `(L)` eller `(R)` som filter. Enhver gyldig dekodet pager-melding gemmes og kan videresendes.
 
-Kendte stationsmarkører bruges kun som ekstra metadata/titel:
-
-- `(A)` Slagelse
-- `(S)` Sorø
-- `(K)` Korsør
-- `(L)` Skælskør
-- `(R)` Ruds Vedby
-
-Meldinger uden stationsmarkør, fx `$8 ISL ...`, `@6 ØF ...` og `VCT - ISL-Eftersyn ...`, behandles på samme måde og må aldrig kasseres af gatewayen.
+Kendte stationsmarkører bruges kun som ekstra metadata/titel. Meldinger uden stationsmarkør, fx `$8 ISL ...`, `@6 ØF ...` og `VCT - ISL-Eftersyn ...`, behandles på samme måde og må aldrig kasseres af gatewayen.
 
 ## Arkitektur
 
@@ -23,33 +15,52 @@ Scanner -> USB-lydkort -> PDL 3.2.0 headless -> /var/lib/racher-pager/pdl.log
                                                     |
                                                     v
                                          Racher Pager Gateway
-                                          |      |       |
-                                       SQLite  Web UI  Pushover
+                                      |       |       |        |
+                                   SQLite   PWA    Web Push  Pushover
+                                      |
+                                      +-- admin system command queue
+                                                   |
+                                                   v
+                                         root-ejet host-agent
 ```
 
 PDL forbliver upstream decoder. Racher-integrationen ændrer ikke POCSAG-dekoderen; den tilføjer kun en lille `--headless` live-mode, så ALSA capture kan køre uden GTK/WebKit-vindue.
 
-Upstream er fastlåst til PDL 3.2.0 commit:
+Upstream er fastlåst til PDL 3.2.0 commit `f37a24ee45b06f35703d513d48780c9334c4ff89`.
 
-`f37a24ee45b06f35703d513d48780c9334c4ff89`
+## Roller og login
 
-## MVP
+Der findes to roller:
 
-- Mobilvenligt dashboard
-- SQLite-historik
-- Frivillig stationsgenkendelse som metadata
-- Simulator til testmeldinger
-- Pushover-test og automatisk videresendelse af alle dekodede meldinger
-- PDL-logfil som inputkilde
-- `/healthz` til watchdog/monitorering
-- reproducerbar Linux/ARM PDL-build
-- `--headless` live ALSA capture
-- systemd service med automatisk genstart
+- `admin`: ser alarmer samt systemstatus, simulator, indstillinger og brugeradministration.
+- `user`: ser kun alarmfeed/historik og kan aktivere PWA-notifikationer på egne enheder.
 
-## Lokal test af webgateway på Mac
+Når databasen er tom, sender `/login` automatisk videre til `/setup`. Her oprettes den **første administrator**. Når første konto eksisterer, lukker setup-flowet, og nye brugere kan kun oprettes fra en admin-konto.
+
+Adgangskoder gemmes som Werkzeug password hashes. Sessions er HttpOnly/SameSite og alle muterende routes er CSRF-beskyttet.
+
+## PWA og Web Push
+
+Gatewayen indeholder manifest, service worker og VAPID Web Push. Hver bruger kan tilmelde sin egen telefon/computer. Nye pageralarmer sendes til alle aktive push-subscriptions.
+
+VAPID private key genereres lokalt i dataområdet og returneres aldrig via API'et.
+
+Web Push kræver secure context: HTTPS i normal drift. `localhost` kan bruges til udvikling. Når Pi'en sættes i rigtig drift bag HTTPS sættes `PAGER_COOKIE_SECURE=1`.
+
+## Admin systemstyring
+
+Webcontaineren får ikke root- eller Docker-socket-adgang. Admin-knapper opretter i stedet en kommando i SQLite. En separat root-ejet systemd-agent på Pi'en accepterer kun denne whitelist:
+
+- `restart-pdl`
+- `restart-gateway`
+- `reboot`
+
+Der kan ikke sendes vilkårlige shell-kommandoer fra webappen.
+
+## Lokal test på Mac
 
 ```bash
-cd services/pager-gateway
+cd ~/Racher-Homelab/services/pager-gateway
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -57,9 +68,9 @@ mkdir -p .data
 PAGER_DATA_DIR="$PWD/.data" python app.py
 ```
 
-Åbn `http://localhost:8088`.
+Åbn `http://localhost:8088`. Første gang bliver du sendt til `/setup` for at oprette admin.
 
-PDL kan ikke bygges direkte på macOS; upstream CMake stopper bevidst på Apple. Selve PDL-buildet udføres på Raspberry Pi OS/Debian/Ubuntu.
+PDL kan ikke bygges direkte på macOS; selve PDL-buildet udføres på Raspberry Pi OS/Debian/Ubuntu.
 
 ## PDL på Raspberry Pi
 
@@ -67,65 +78,46 @@ På Raspberry Pi OS 64-bit:
 
 ```bash
 cd ~/Racher-Homelab/services/pager-gateway/pdl
-chmod +x *.sh
-./install-pdl.sh
-./install-pdl-service.sh
+bash install-pdl.sh
+bash install-pdl-service.sh
+bash install-system-agent.sh
 ```
 
-Installeren:
+PDL-installeren installerer Linux build-afhængigheder, henter den fastlåste PDL-version, anvender headless-patchen og bygger binæren til Pi'ens egen arkitektur.
 
-1. installerer PDL's Linux build-afhængigheder,
-2. henter den fastlåste PDL 3.2.0-kildekode,
-3. anvender vores minimale headless-patch,
-4. bygger PDL til Pi'ens egen arkitektur,
-5. installerer `racher-pdl.service`.
-
-Før første rigtige start findes lydkortets ALSA-navn med:
+Før første rigtige radio-test findes lydkortets ALSA-navn med:
 
 ```bash
 arecord -L
 ```
 
-Redigér derefter:
+Konfiguration ligger i `/etc/racher-pager/pdl.env`. Dekodede linjer skrives til `/var/lib/racher-pager/pdl.log`.
 
-```bash
-sudo nano /etc/racher-pager/pdl.env
-```
+## Webgateway på Pi
 
-Eksempel:
-
-```text
-PDL_CAPTURE_DEVICE=default
-PDL_SAMPLE_RATE=48000
-PDL_BAUD_512=1
-PDL_BAUD_1200=1
-PDL_BAUD_2400=1
-PDL_INVERT=0
-PAGER_STATE_ROOT=/var/lib/racher-pager
-```
-
-Start og følg decoder:
-
-```bash
-sudo systemctl start racher-pdl
-sudo systemctl status racher-pdl --no-pager
-journalctl -u racher-pdl -f
-```
-
-Dekodede linjer skrives til:
-
-`/var/lib/racher-pager/pdl.log`
-
-## Del PDL-data med webgatewayen
-
-Når gatewayen køres med Docker på Pi'en sættes:
+Sæt mindst:
 
 ```text
 PAGER_DATA_HOST_PATH=/var/lib/racher-pager
+PAGER_COOKIE_SECURE=0
+PAGER_VAPID_SUBJECT=mailto:admin@example.dk
 ```
 
-Compose binder derefter samme mappe ind som `/data`, og gatewayen læser `/data/pdl.log` direkte.
+og start:
 
-## Sikkerhed
+```bash
+cd ~/Racher-Homelab
+docker compose -f compose/pager-gateway/docker-compose.yml up -d --build
+```
 
-Pushover-nøgler gemmes lokalt i SQLite på gatewayen og returneres aldrig i klartekst fra settings-API'et. Før ekstern adgang aktiveres, skal webinterfacet have login og TLS/reverse proxy.
+Når HTTPS er sat op, ændres `PAGER_COOKIE_SECURE=1`.
+
+## Test uden scanner
+
+Admin-simulatoren sender en testalarm gennem samme flow som en rigtig PDL-melding:
+
+```text
+Simulator -> SQLite -> alarmfeed -> PWA Web Push -> Pushover
+```
+
+Det betyder, at login, brugere, historik, notifikationer og systemadministration kan gøres færdige hjemme, før Pi'en fysisk kobles på scanneren.
