@@ -25,9 +25,19 @@ class SystemAgentTests(unittest.TestCase):
             config_path = root / "pdl" / "pdl.ini"
             config_path.parent.mkdir(parents=True)
             config_path.write_text(
-                """[POCSAG]\nEnable=1\nBaud512=1\nBaud1200=1\nBaud2400=1\n\n"
-                "[Audio]\nCaptureDevice=hw:9,0\nSampleRate=44100\nConfig=1\nEnabled=1\nInvert=0\n\n"
-                "[General]\nBlockDuplicate=0\n""",
+                "[POCSAG]\n"
+                "Enable=1\n"
+                "Baud512=1\n"
+                "Baud1200=1\n"
+                "Baud2400=1\n\n"
+                "[Audio]\n"
+                "CaptureDevice=hw:9,0\n"
+                "SampleRate=44100\n"
+                "Config=1\n"
+                "Enabled=1\n"
+                "Invert=0\n\n"
+                "[General]\n"
+                "BlockDuplicate=0\n",
                 encoding="utf-8",
             )
 
