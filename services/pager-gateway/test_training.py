@@ -83,6 +83,25 @@ class TrainingStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.training.apply_run(run["id"])
 
+    def test_apply_uses_feedback_beyond_first_1000_displayed_events(self):
+        text = "\n".join(
+            self.pdw("8888888", f"SYSTEMTEST MELDING {index}", "14:00:00")
+            for index in range(1001)
+        )
+        run = self.training.create_replay("Large replay", text, self.admin_id)
+        self.assertEqual(run["parsed_count"], 1001)
+        self.assertEqual(len(run["events"]), 1000)
+        with self.training.connect() as conn:
+            last = conn.execute(
+                "SELECT id, message FROM training_events WHERE run_id=? ORDER BY line_no DESC LIMIT 1",
+                (run["id"],),
+            ).fetchone()
+        self.training.set_event_feedback(last["id"], "noise")
+        result = self.training.apply_run(run["id"])
+        self.assertEqual(result["feedback_applied"], 1)
+        learned = self.adaptive.learned_relevance(last["message"])
+        self.assertEqual(learned["classification"], "unknown")
+
     def test_bulk_ric_import_preview_and_apply(self):
         text = (
             "RIC;Område;Beskrivelse;Aktiv\n"
