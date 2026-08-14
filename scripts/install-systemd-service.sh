@@ -31,7 +31,8 @@ RemainAfterExit=yes
 User=$USER_NAME
 WorkingDirectory=$REPO_ROOT
 Environment=RACHER_ENV_FILE=$ENV_FILE
-ExecStart=$REPO_ROOT/scripts/install-racher-os.sh
+ExecStartPre=/bin/bash -c 'for i in {1..60}; do getent hosts registry-1.docker.io >/dev/null 2>&1 && exit 0; echo "Venter på netværk/DNS..."; sleep 2; done; exit 1'
+ExecStart=/usr/bin/bash $REPO_ROOT/scripts/install-racher-os.sh
 ExecStop=/usr/bin/docker compose --env-file $ENV_FILE -f $REPO_ROOT/compose/core/compose.yml down
 ExecStop=/usr/bin/docker compose --env-file $ENV_FILE -f $REPO_ROOT/compose/data/compose.yml down
 TimeoutStartSec=900
@@ -44,5 +45,6 @@ EOF
 sudo install -m 0644 "$unit" "$SERVICE_PATH"
 sudo systemctl daemon-reload
 sudo systemctl enable racher-os.service
-log "Autostart aktiveret. Tjenesten starter ved næste boot."
+log "Autostart aktiveret. Tjenesten venter op til 120 sekunder på netværk/DNS ved boot."
+log "Tjenesten starter ved næste boot."
 log "Manuel start: sudo systemctl start racher-os"
