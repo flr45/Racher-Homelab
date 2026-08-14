@@ -30,6 +30,7 @@ jobs:
             services/pager-gateway/app.py \
             services/pager-gateway/storage.py \
             services/pager-gateway/system_agent.py \
+            services/pager-gateway/fsk_status_agent.py \
             services/pager-gateway/network_portal.py
       - name: Validate shell syntax
         run: |
@@ -54,7 +55,9 @@ jobs:
           git clone https://github.com/sqpp/PDL.git /tmp/PDL
           git -C /tmp/PDL checkout --detach f37a24ee45b06f35703d513d48780c9334c4ff89
       - name: Apply Racher headless patch
-        run: python3 services/pager-gateway/pdl/patch_headless.py /tmp/PDL
+        run: |
+          python3 services/pager-gateway/pdl/patch_headless.py /tmp/PDL
+          grep -F 'PDL_RS232_DEVICE' /tmp/PDL/linux/rs232_linux.cpp
       - name: Build PDL
         run: |
           cmake -S /tmp/PDL -B /tmp/PDL/build -DCMAKE_BUILD_TYPE=Release
