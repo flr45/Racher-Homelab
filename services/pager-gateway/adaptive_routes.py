@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Callable
+from typing import Callable
 
-from flask import jsonify, request
+from flask import g, jsonify, request
 
 
 def register_adaptive_routes(app, storage, routing, adaptive, auth_required: Callable) -> None:
@@ -26,12 +26,11 @@ def register_adaptive_routes(app, storage, routing, adaptive, auth_required: Cal
         body = request.get_json(silent=True) or {}
         verdict = str(body.get("verdict") or "").strip().lower()
         try:
-            learned = adaptive.record_feedback(message_id, verdict, request.environ["racher.user_id"])
+            learned = adaptive.record_feedback(message_id, verdict, int(g.user["id"]))
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         storage.add_audit(
-            request.environ["racher.user_id"],
-            "adaptive-feedback",
+            g.user["id"], "adaptive-feedback",
             f"message_id={message_id}; verdict={verdict}; learned={learned.get('classification')}",
         )
         return jsonify({"ok": True, "learned": learned})
@@ -44,7 +43,7 @@ def register_adaptive_routes(app, storage, routing, adaptive, auth_required: Cal
             row = routing.create_station(body.get("name"), source="admin")
         except (ValueError, sqlite3.IntegrityError) as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
-        storage.add_audit(request.environ["racher.user_id"], "station-create", f"station={row['key']}; name={row['name']}")
+        storage.add_audit(g.user["id"], "station-create", f"station={row['key']}; name={row['name']}")
         return jsonify({"ok": True, "station": row})
 
     @app.patch("/api/stations/<station_key>")
@@ -61,5 +60,5 @@ def register_adaptive_routes(app, storage, routing, adaptive, auth_required: Cal
             return jsonify({"ok": False, "error": str(exc)}), 400
         if not row:
             return jsonify({"ok": False, "error": "Stationen findes ikke."}), 404
-        storage.add_audit(request.environ["racher.user_id"], "station-update", f"station={station_key}; name={row['name']}")
+        storage.add_audit(g.user["id"], "station-update", f"station={station_key}; name={row['name']}")
         return jsonify({"ok": True, "station": row})
