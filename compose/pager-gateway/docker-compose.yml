@@ -7,9 +7,11 @@ services:
     environment:
       PAGER_DATA_DIR: /data
       PORT: 8088
+      PAGER_COOKIE_SECURE: ${PAGER_COOKIE_SECURE:-0}
+      PAGER_VAPID_SUBJECT: ${PAGER_VAPID_SUBJECT:-mailto:admin@racher.local}
     volumes:
       # På den dedikerede Pi sættes PAGER_DATA_HOST_PATH=/var/lib/racher-pager,
-      # så den native PDL-service og webgatewayen deler pdl.log og SQLite-data.
+      # så den native PDL-service, host-agenten og webgatewayen deler data.
       - ${PAGER_DATA_HOST_PATH:-../../data/pager-gateway}:/data
     ports:
       - "${PAGER_GATEWAY_PORT:-8088}:8088"
