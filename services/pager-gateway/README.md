@@ -16,6 +16,23 @@ Kendte stationsmarkører bruges kun som ekstra metadata/titel:
 
 Meldinger uden stationsmarkør, fx `$8 ISL ...`, `@6 ØF ...` og `VCT - ISL-Eftersyn ...`, behandles på samme måde og må aldrig kasseres af gatewayen.
 
+## Arkitektur
+
+```text
+Scanner -> USB-lydkort -> PDL 3.2.0 headless -> /var/lib/racher-pager/pdl.log
+                                                    |
+                                                    v
+                                         Racher Pager Gateway
+                                          |      |       |
+                                       SQLite  Web UI  Pushover
+```
+
+PDL forbliver upstream decoder. Racher-integrationen ændrer ikke POCSAG-dekoderen; den tilføjer kun en lille `--headless` live-mode, så ALSA capture kan køre uden GTK/WebKit-vindue.
+
+Upstream er fastlåst til PDL 3.2.0 commit:
+
+`f37a24ee45b06f35703d513d48780c9334c4ff89`
+
 ## MVP
 
 - Mobilvenligt dashboard
@@ -25,8 +42,11 @@ Meldinger uden stationsmarkør, fx `$8 ISL ...`, `@6 ØF ...` og `VCT - ISL-Efte
 - Pushover-test og automatisk videresendelse af alle dekodede meldinger
 - PDL-logfil som inputkilde
 - `/healthz` til watchdog/monitorering
+- reproducerbar Linux/ARM PDL-build
+- `--headless` live ALSA capture
+- systemd service med automatisk genstart
 
-## Lokal test
+## Lokal test af webgateway på Mac
 
 ```bash
 cd services/pager-gateway
@@ -39,16 +59,72 @@ PAGER_DATA_DIR="$PWD/.data" python app.py
 
 Åbn `http://localhost:8088`.
 
-## PDL-integration
+PDL kan ikke bygges direkte på macOS; upstream CMake stopper bevidst på Apple. Selve PDL-buildet udføres på Raspberry Pi OS/Debian/Ubuntu.
 
-Den nuværende Linux-version af PDL kan skrive hver dekodet linje til en fil med `-o <file>`. Gatewayen kan tail'e den fil og behandle nye linjer. På Raspberry Pi sætter vi som udgangspunkt stien til `/data/pdl.log`.
+## PDL på Raspberry Pi
 
-PDL har i øjeblikket ikke en ren live `--headless`-tilstand; den normale live capture starter en GTK/WebKit-GUI. Derfor er næste integrationsmilepæl enten:
+På Raspberry Pi OS 64-bit:
 
-1. en lille patch til PDL med `--headless`, eller
-2. en separat PDL decoder-service, der deler decoderkoden men ikke GUI'en.
+```bash
+cd ~/Racher-Homelab/services/pager-gateway/pdl
+chmod +x *.sh
+./install-pdl.sh
+./install-pdl-service.sh
+```
 
-Vi undgår at gøre gatewayens webapp afhængig af den beslutning ved at holde inputlaget separat.
+Installeren:
+
+1. installerer PDL's Linux build-afhængigheder,
+2. henter den fastlåste PDL 3.2.0-kildekode,
+3. anvender vores minimale headless-patch,
+4. bygger PDL til Pi'ens egen arkitektur,
+5. installerer `racher-pdl.service`.
+
+Før første rigtige start findes lydkortets ALSA-navn med:
+
+```bash
+arecord -L
+```
+
+Redigér derefter:
+
+```bash
+sudo nano /etc/racher-pager/pdl.env
+```
+
+Eksempel:
+
+```text
+PDL_CAPTURE_DEVICE=default
+PDL_SAMPLE_RATE=48000
+PDL_BAUD_512=1
+PDL_BAUD_1200=1
+PDL_BAUD_2400=1
+PDL_INVERT=0
+PAGER_STATE_ROOT=/var/lib/racher-pager
+```
+
+Start og følg decoder:
+
+```bash
+sudo systemctl start racher-pdl
+sudo systemctl status racher-pdl --no-pager
+journalctl -u racher-pdl -f
+```
+
+Dekodede linjer skrives til:
+
+`/var/lib/racher-pager/pdl.log`
+
+## Del PDL-data med webgatewayen
+
+Når gatewayen køres med Docker på Pi'en sættes:
+
+```text
+PAGER_DATA_HOST_PATH=/var/lib/racher-pager
+```
+
+Compose binder derefter samme mappe ind som `/data`, og gatewayen læser `/data/pdl.log` direkte.
 
 ## Sikkerhed
 
