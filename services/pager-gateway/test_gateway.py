@@ -1,6 +1,6 @@
 import unittest
 
-from gateway import detect_station, parse_pdl_line
+from gateway import detect_station, parse_pdl_line, public_message
 
 
 class PagerParsingTests(unittest.TestCase):
@@ -41,13 +41,20 @@ class PagerParsingTests(unittest.TestCase):
         self.assertEqual(event.message, "(A) Please call ASAP")
         self.assertEqual(event.station, "Slagelse")
         self.assertEqual(event.raw_line, line)
+        self.assertNotIn("1234567", event.message)
 
-    def test_labeled_address_is_accepted_as_ric(self):
+    def test_labeled_address_is_accepted_as_ric_but_not_public_text(self):
         event = parse_pdl_line("Address: 7654321 POCSAG 512 MESSAGE: test")
         self.assertIsNotNone(event)
         self.assertEqual(event.ric, "7654321")
         self.assertEqual(event.baud, 512)
         self.assertEqual(event.message, "test")
+        self.assertNotIn("7654321", event.message)
+
+    def test_public_message_strips_labeled_ric_metadata(self):
+        text = public_message("RIC: 1234567 MESSAGE: BRANDALARM Testvej 1")
+        self.assertEqual(text, "BRANDALARM Testvej 1")
+        self.assertNotIn("1234567", text)
 
 
 if __name__ == "__main__":
