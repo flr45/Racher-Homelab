@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Patch upstream PDL 3.2.0 with a small --headless live-capture mode.
 
-The patch deliberately keeps PDL's decoder and ALSA implementation unchanged.
-It only bypasses GTK/WebKit initialization while keeping the existing capture
-thread, pdl.ini settings and stdout/log output.
+The patch deliberately keeps PDL's decoder, Linux RS232 bitstream input and
+ALSA implementation unchanged. It only bypasses GTK/WebKit initialization so
+headless mode can run either an FSK->USB/RS232 converter or ALSA capture while
+keeping pdl.ini settings and stdout/log output.
 """
 from __future__ import annotations
 
@@ -78,7 +79,7 @@ def main() -> int:
         text,
         "\t\t\tprintf(\"  --no-invert         Force normal polarity\\n\");\n",
         "\t\t\tprintf(\"  --no-invert         Force normal polarity\\n\");\n"
-        "\t\t\tprintf(\"  --headless          Live ALSA decode without opening a GUI\\n\");\n",
+        "\t\t\tprintf(\"  --headless          Live RS232/ALSA decode without opening a GUI\\n\");\n",
         "headless help",
     )
 
@@ -87,16 +88,26 @@ def main() -> int:
 		signal(SIGINT, headless_signal_handler);
 		signal(SIGTERM, headless_signal_handler);
 
-		if (start_capture_thread() != 0) {
-			fprintf(stderr, "Failed to open audio capture.\n");
-			curl_global_cleanup();
-			return 1;
+		if (Profile.comPortRS232 > 0) {
+			/* The FSK->USB converter already performs slicing/bit timing.  Do
+			 * not require or open ALSA before starting the existing Linux
+			 * RS232 bitstream decoder. */
+			if (pdl_linux_hw_decode_start() != 0) {
+				fprintf(stderr, "Failed to open RS232/FSK bitstream input.\n");
+				curl_global_cleanup();
+				return 1;
+			}
+			fprintf(stderr, "[HEADLESS] PDL RS232/FSK bitstream decode active.\n");
+		} else {
+			if (start_capture_thread() != 0) {
+				fprintf(stderr, "Failed to open audio capture.\n");
+				curl_global_cleanup();
+				return 1;
+			}
+			fprintf(stderr, "[HEADLESS] PDL ALSA live capture active.\n");
 		}
 
-		if (Profile.comPortRS232 > 0)
-			pdl_linux_hw_decode_apply_settings();
-
-		fprintf(stderr, "[HEADLESS] PDL live capture active; Ctrl+C/SIGTERM to stop.\n");
+		fprintf(stderr, "[HEADLESS] Ctrl+C/SIGTERM to stop.\n");
 		while (!s_headless_stop)
 			sleep(1);
 
