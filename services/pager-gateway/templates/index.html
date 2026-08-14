@@ -15,19 +15,10 @@
 <body data-admin="{{ '1' if is_admin else '0' }}">
   <div class="shell">
     <header class="topbar">
-      <div>
-        <div class="eyebrow">RACHER</div>
-        <h1>Pager Gateway</h1>
-      </div>
+      <div><div class="eyebrow">RACHER</div><h1>Pager Gateway</h1></div>
       <div class="account">
-        <div class="account-text">
-          <strong>{{ current_user.display_name }}</strong>
-          <small>{{ 'Administrator' if current_user.role == 'admin' else 'Bruger' }}</small>
-        </div>
-        <form method="post" action="/logout">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit">Log ud</button>
-        </form>
+        <div class="account-text"><strong>{{ current_user.display_name }}</strong><small>{{ 'Administrator' if current_user.role == 'admin' else 'Bruger' }}</small></div>
+        <form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Log ud</button></form>
       </div>
     </header>
 
@@ -44,201 +35,143 @@
     <main>
       <section id="alarms" class="panel active">
         <article class="card latest-card">
-          <div class="card-head">
-            <div>
-              <span class="label">Seneste alarm</span>
-              <h2 id="latest-title">Ingen alarmer endnu</h2>
-            </div>
-            <span id="latest-time" class="muted">—</span>
-          </div>
-          <p id="latest-message" class="latest-message">Afventer en dekodet melding.</p>
-          <div id="latest-meta" class="meta"></div>
+          <div class="card-head"><div><span class="label">Seneste alarm</span><h2 id="latest-title">Ingen alarmer endnu</h2></div><span id="latest-time" class="muted">—</span></div>
+          <p id="latest-message" class="latest-message">Afventer en dekodet melding.</p><div id="latest-meta" class="meta"></div>
         </article>
-
         <article class="card notification-card">
-          <div>
-            <span class="label">PWA notifikationer</span>
-            <h2 id="push-title">Notifikationer ikke aktiveret</h2>
-            <p id="push-help" class="hint">Aktivér notifikationer på denne enhed for at få nye alarmer som push.</p>
-          </div>
-          <div class="actions push-actions">
-            <button id="push-enable" class="primary">Aktivér notifikationer</button>
-            <button id="push-test" hidden>Send test</button>
-            <button id="push-disable" hidden>Deaktivér</button>
-          </div>
+          <div><span class="label">PWA notifikationer</span><h2 id="push-title">Notifikationer ikke aktiveret</h2><p id="push-help" class="hint">Aktivér notifikationer på denne enhed for at få nye alarmer som push.</p></div>
+          <div class="actions push-actions"><button id="push-enable" class="primary">Aktivér notifikationer</button><button id="push-test" hidden>Send test</button><button id="push-disable" hidden>Deaktivér</button></div>
         </article>
-
         <article class="card">
-          <div class="card-head">
-            <div>
-              <span class="label">Seneste</span>
-              <h2>Alarmfeed</h2>
-            </div>
-            <button id="refresh-alarms">Opdater</button>
-          </div>
+          <div class="card-head"><div><span class="label">Seneste</span><h2>Alarmfeed</h2></div><button id="refresh-alarms">Opdater</button></div>
           <div id="alarm-list" class="history-list"></div>
         </article>
       </section>
 
       <section id="history" class="panel">
-        <article class="card">
-          <div class="card-head">
-            <div>
-              <span class="label">Historik</span>
-              <h2>Seneste 100 meldinger</h2>
-            </div>
-            <button id="refresh-history">Opdater</button>
-          </div>
-          <div id="history-list" class="history-list"></div>
-        </article>
+        <article class="card"><div class="card-head"><div><span class="label">Historik</span><h2>Seneste 100 meldinger</h2></div><button id="refresh-history">Opdater</button></div><div id="history-list" class="history-list"></div></article>
       </section>
 
       {% if is_admin %}
       <section id="system" class="panel">
         <div class="grid stats">
-          <article class="card">
-            <span class="label">Decoder</span>
-            <strong id="source-state">—</strong>
-            <small id="source-error">—</small>
-          </article>
-          <article class="card">
-            <span class="label">Meldinger</span>
-            <strong id="message-count">0</strong>
-            <small>gemt i databasen</small>
-          </article>
-          <article class="card">
-            <span class="label">Gateway uptime</span>
-            <strong id="uptime">—</strong>
-            <small id="hostname">—</small>
-          </article>
+          <article class="card"><span class="label">Decoder</span><strong id="source-state">—</strong><small id="source-error">—</small></article>
+          <article class="card"><span class="label">Meldinger</span><strong id="message-count">0</strong><small>gemt i databasen</small></article>
+          <article class="card"><span class="label">Gateway uptime</span><strong id="uptime">—</strong><small id="hostname">—</small></article>
         </div>
 
         <article class="card readiness-card">
-          <div class="card-head">
-            <div>
-              <span class="label">Systemklargøring</span>
-              <h2>Raspberry Pi-status</h2>
-            </div>
-            <span id="runtime-meta" class="muted">Afventer host-agent</span>
-          </div>
+          <div class="card-head"><div><span class="label">Systemklargøring</span><h2>Raspberry Pi-status</h2></div><span id="runtime-meta" class="muted">Afventer host-agent</span></div>
           <p class="hint">Grøn betyder klar. Punkter der afventer USB-lydkort eller scanner er normale, mens Pi'en klargøres hjemme.</p>
           <div id="readiness-list" class="readiness-list"><p class="muted">Henter systemstatus…</p></div>
           <div id="host-metrics" class="host-metrics"></div>
         </article>
 
         <article class="card">
-          <span class="label">Simulator</span>
-          <h2>Test hele alarmflowet uden scanner</h2>
-          <div class="row">
-            <input id="mock-message" value="$8 ISL KA MØ M1 + V1 (1+5) Naturbrand-Mark, Høstet mark" aria-label="Testmelding">
-            <button id="send-mock" class="primary">Send testalarm</button>
+          <div class="card-head"><div><span class="label">Network mobility</span><h2>Wi-Fi og fallback</h2></div><span id="network-state" class="status-badge">—</span></div>
+          <div class="ops-grid">
+            <div><span class="label">Forbindelse</span><strong id="wifi-name">—</strong><small id="wifi-ip">—</small></div>
+            <div><span class="label">Signal</span><strong id="wifi-signal">—</strong><small>Wi-Fi signal</small></div>
+            <div><span class="label">Internet</span><strong id="internet-state">—</strong><small>udgående forbindelse</small></div>
           </div>
+          <div class="split-section">
+            <div>
+              <h3>Tilføj kendt Wi-Fi</h3>
+              <form id="wifi-form" class="form-grid compact-form">
+                <label>SSID<input name="ssid" maxlength="32" required autocomplete="off"></label>
+                <label>Adgangskode<input name="password" type="password" minlength="8" maxlength="63" required autocomplete="new-password"></label>
+                <div class="wide actions"><button class="primary" type="submit">Gem og forbind</button></div>
+              </form>
+              <div id="wifi-profile-list" class="command-list"></div>
+            </div>
+            <div>
+              <h3>Fallback-hotspot</h3>
+              <p class="hint">Hvis Pi'en ikke kommer online, starter den automatisk et lokalt setup-netværk. Portalen virker uafhængigt af den normale web-login-session.</p>
+              <div class="credential-box"><span id="hotspot-ssid">Racher-Pager-Setup</span><code id="hotspot-password">••••••••••••••••</code><small id="hotspot-portal">http://10.42.0.1/</small></div>
+              <div class="actions wrap"><button id="reveal-hotspot">Vis Password/PIN</button><button data-system-action="hotspot-start">Start setup-hotspot</button><button data-system-action="hotspot-stop">Stop setup-hotspot</button></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><div><span class="label">Online adgang</span><h2>Cloudflare Tunnel</h2></div><span id="tunnel-state" class="status-badge">—</span></div>
+          <div class="ops-grid">
+            <div><span class="label">Hostname</span><strong id="public-hostname">Ikke sat</strong><small>samme adresse efter netværksskift</small></div>
+            <div><span class="label">Service</span><strong id="tunnel-service">—</strong><small id="tunnel-version">—</small></div>
+          </div>
+          <p class="hint">Tunnel-token og offentligt hostname sættes én gang, når Pi'en er hjemme. Derefter laver Pi'en selv den udgående tunnel fra hvilket netværk den står på.</p>
+          <div class="actions"><button data-system-action="restart-tunnel">Genstart tunnel</button></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><div><span class="label">Backup & recovery</span><h2>Gendan uden SSH</h2></div><span id="backup-summary" class="muted">—</span></div>
+          <div class="actions"><button data-system-action="backup-now" class="primary">Lav backup nu</button></div>
+          <div id="backup-list" class="command-list"><p class="muted">Ingen backupdata endnu.</p></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><div><span class="label">Update & rollback</span><h2>Gateway-version</h2></div><span id="update-state" class="muted">—</span></div>
+          <div class="ops-grid">
+            <div><span class="label">Installeret</span><strong id="deploy-current">—</strong><small id="deploy-branch">—</small></div>
+            <div><span class="label">Tilgængelig</span><strong id="deploy-remote">Tjekkes på Pi</strong><small>remote branch</small></div>
+            <div><span class="label">Rollback</span><strong id="deploy-previous">—</strong><small>forrige fungerende commit</small></div>
+          </div>
+          <p class="hint">En update laver backup først og bygges i den isolerede pager-runtime. Hvis healthcheck fejler, ruller updateren automatisk tilbage.</p>
+          <div class="actions wrap"><button data-system-action="update-gateway" class="primary">Opdatér gateway</button><button data-system-action="rollback-gateway">Rul tilbage</button></div>
+        </article>
+
+        <article class="card">
+          <span class="label">Simulator</span><h2>Test hele alarmflowet uden scanner</h2>
+          <div class="row"><input id="mock-message" value="$8 ISL KA MØ M1 + V1 (1+5) Naturbrand-Mark, Høstet mark" aria-label="Testmelding"><button id="send-mock" class="primary">Send testalarm</button></div>
           <p class="hint">Testalarmen gemmes og sendes til aktive PWA-notifikationer og Pushover på samme måde som en rigtig dekodet melding.</p>
         </article>
 
+        <article class="card">
+          <div class="card-head"><div><span class="label">Audit</span><h2>Seneste admin-hændelser</h2></div><button id="refresh-audit">Opdater</button></div>
+          <div id="audit-list" class="command-list"></div>
+        </article>
+
         <article class="card danger-zone">
-          <span class="label">Systemstyring</span>
-          <h2>Genstart</h2>
-          <p class="hint">Handlingerne lægges i en sikker kø. Host-agenten på Pi'en kan kun udføre de tre viste handlinger.</p>
-          <div class="actions wrap">
-            <button data-system-action="restart-pdl">Genstart PDL decoder</button>
-            <button data-system-action="restart-gateway">Genstart Pager Gateway</button>
-            <button class="danger-button" data-system-action="reboot">Genstart Raspberry Pi</button>
-          </div>
+          <span class="label">Systemstyring</span><h2>Genstart</h2>
+          <p class="hint">Handlingerne går gennem host-agentens faste whitelist. Webcontaineren har ikke root- eller Docker-socket-adgang.</p>
+          <div class="actions wrap"><button data-system-action="restart-pdl">Genstart PDL decoder</button><button data-system-action="restart-gateway">Genstart Pager Gateway</button><button class="danger-button" data-system-action="reboot">Genstart Raspberry Pi</button></div>
           <div id="command-list" class="command-list"></div>
         </article>
       </section>
 
       <section id="users" class="panel">
         <article class="card">
-          <span class="label">Brugeradministration</span>
-          <h2>Opret bruger</h2>
-          <p class="hint">Kun administratorer har adgang til denne funktion.</p>
+          <span class="label">Brugeradministration</span><h2>Opret bruger</h2><p class="hint">Kun administratorer har adgang til denne funktion.</p>
           <form id="create-user-form" class="form-grid">
-            <label>Navn<input name="display_name" required></label>
-            <label>Brugernavn<input name="username" minlength="3" maxlength="40" required></label>
+            <label>Navn<input name="display_name" required></label><label>Brugernavn<input name="username" minlength="3" maxlength="40" required></label>
             <label>Adgangskode<input type="password" name="password" minlength="10" autocomplete="new-password" required></label>
-            <label>Rolle
-              <select name="role">
-                <option value="user">Bruger · kun alarmer</option>
-                <option value="admin">Administrator</option>
-              </select>
-            </label>
+            <label>Rolle<select name="role"><option value="user">Bruger · kun alarmer</option><option value="admin">Administrator</option></select></label>
             <div class="wide actions"><button class="primary" type="submit">Opret bruger</button></div>
           </form>
         </article>
-        <article class="card">
-          <div class="card-head">
-            <div><span class="label">Konti</span><h2>Brugere</h2></div>
-            <button id="refresh-users">Opdater</button>
-          </div>
-          <div id="user-list" class="user-list"></div>
-        </article>
+        <article class="card"><div class="card-head"><div><span class="label">Konti</span><h2>Brugere</h2></div><button id="refresh-users">Opdater</button></div><div id="user-list" class="user-list"></div></article>
       </section>
 
       <section id="settings" class="panel">
         <form id="settings-form">
           <article class="card">
-            <span class="label">Gateway</span>
-            <h2>Decoder og input</h2>
+            <span class="label">Gateway</span><h2>Decoder og input</h2>
             <div class="form-grid">
-              <label>Navn<input name="gateway_name"></label>
-              <label>Input
-                <select name="source_mode">
-                  <option value="mock">Simulator</option>
-                  <option value="pdl-file">PDL logfil</option>
-                </select>
-              </label>
+              <label>Navn<input name="gateway_name"></label><label>Input<select name="source_mode"><option value="mock">Simulator</option><option value="pdl-file">PDL logfil</option></select></label>
               <label class="wide">PDL logfil<input name="pdl_log_path" placeholder="/data/pdl.log"></label>
-              <label>POCSAG bitrate
-                <select name="pocsag_baud">
-                  <option value="auto">Auto</option>
-                  <option value="512">512</option>
-                  <option value="1200">1200</option>
-                  <option value="2400">2400</option>
-                </select>
-              </label>
-              <label>Polaritet
-                <select name="invert">
-                  <option value="auto">Auto / normal</option>
-                  <option value="normal">Normal</option>
-                  <option value="inverted">Inverteret</option>
-                </select>
-              </label>
+              <label>POCSAG bitrate<select name="pocsag_baud"><option value="auto">Auto</option><option value="512">512</option><option value="1200">1200</option><option value="2400">2400</option></select></label>
+              <label>Polaritet<select name="invert"><option value="auto">Auto / normal</option><option value="normal">Normal</option><option value="inverted">Inverteret</option></select></label>
             </div>
-            <p class="hint">POCSAG bitrate og polaritet gemmes her. På Pi'en aktiveres de i PDL, når du vælger <strong>Genstart PDL decoder</strong> under System. Lydkort og sample rate bevares, så de senere kan indstilles specifikt til scannerens USB-lydkort.</p>
+            <p class="hint">POCSAG bitrate og polaritet aktiveres i PDL, når du vælger <strong>Genstart PDL decoder</strong>. Lydkort og sample rate bevares separat.</p>
           </article>
-
-          <article class="card">
-            <span class="label">Web Push</span>
-            <h2>PWA notifikationer</h2>
-            <div class="form-grid">
-              <label class="wide">VAPID kontakt<input name="vapid_subject" placeholder="mailto:admin@example.dk"></label>
-            </div>
-            <p class="hint">VAPID-nøglen genereres lokalt på gatewayen. Den private nøgle vises aldrig i webinterfacet.</p>
-          </article>
-
-          <article class="card">
-            <span class="label">Pushover</span>
-            <h2>Ekstra notifikationskanal</h2>
-            <div class="form-grid">
-              <label class="checkbox wide"><input type="checkbox" name="pushover_enabled"> Aktivér Pushover</label>
-              <label>App token<input type="password" name="pushover_app_token" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label>
-              <label>User/group key<input type="password" name="pushover_user_key" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label>
-            </div>
-            <div class="actions"><button type="button" id="test-pushover">Send Pushover-test</button></div>
-          </article>
-
-          <div class="savebar">
-            <span id="save-status"></span>
-            <button class="primary" type="submit">Gem indstillinger</button>
-          </div>
+          <article class="card"><span class="label">Web Push</span><h2>PWA notifikationer</h2><div class="form-grid"><label class="wide">VAPID kontakt<input name="vapid_subject" placeholder="mailto:admin@example.dk"></label></div><p class="hint">VAPID-nøglen genereres lokalt på gatewayen. Den private nøgle vises aldrig i webinterfacet.</p></article>
+          <article class="card"><span class="label">Pushover</span><h2>Ekstra notifikationskanal</h2><div class="form-grid"><label class="checkbox wide"><input type="checkbox" name="pushover_enabled"> Aktivér Pushover</label><label>App token<input type="password" name="pushover_app_token" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label><label>User/group key<input type="password" name="pushover_user_key" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label></div><div class="actions"><button type="button" id="test-pushover">Send Pushover-test</button></div></article>
+          <div class="savebar"><span id="save-status"></span><button class="primary" type="submit">Gem indstillinger</button></div>
         </form>
       </section>
       {% endif %}
     </main>
   </div>
-
   <script src="/static/app.js" defer></script>
 </body>
 </html>
