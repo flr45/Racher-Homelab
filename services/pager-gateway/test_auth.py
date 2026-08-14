@@ -142,7 +142,7 @@ class AuthenticationTests(unittest.TestCase):
         self.assertNotIn("function", routed)
         self.assertNotIn("1111111", str(routed))
 
-    def test_user_cannot_read_admin_settings_users_status_audit_rics_or_learning(self):
+    def test_user_cannot_read_admin_settings_users_status_audit_rics_learning_or_training(self):
         self.assertEqual(self.user.get("/api/settings").status_code, 403)
         self.assertEqual(self.user.get("/api/users").status_code, 403)
         self.assertEqual(self.user.get("/api/status").status_code, 403)
@@ -152,13 +152,16 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(self.user.get("/api/ric-codes/unknown").status_code, 403)
         self.assertEqual(self.user.get("/api/adaptive/status").status_code, 403)
         self.assertEqual(self.user.get("/api/adaptive/review").status_code, 403)
+        self.assertEqual(self.user.get("/api/training/runs").status_code, 403)
 
-    def test_user_cannot_create_users_rics_stations_feedback_or_system_commands(self):
+    def test_user_cannot_create_users_rics_stations_feedback_training_or_system_commands(self):
         for url, body in (
             ("/api/users", {"username": "forbidden", "password": "1234567890", "role": "user"}),
             ("/api/ric-codes", {"ric": "9999999", "station_key": "A"}),
             ("/api/stations", {"name": "Næstved"}),
             ("/api/adaptive/messages/1/feedback", {"verdict": "noise"}),
+            ("/api/training/replay", {"name": "forbidden", "text": "test"}),
+            ("/api/training/ric-import/preview", {"text": "1234567;Slagelse"}),
         ):
             response = self.user.post(url, json=body, headers={"X-CSRF-Token": self.user_csrf})
             self.assertEqual(response.status_code, 403)
@@ -213,6 +216,38 @@ class AuthenticationTests(unittest.TestCase):
         routing.set_user_stations(user["id"], ["A"])
         routing.set_user_receive_all(user["id"], False)
 
+    def test_admin_can_replay_without_touching_live_messages(self):
+        before = storage.message_count()
+        response = self.admin.post(
+            "/api/training/replay",
+            json={
+                "name": "Auth replay",
+                "text": (
+                    "8111111 12:00:00 14-08-2026 POCSAG-1 ALPHA 1200 Ringsted Brandvæsen TEST\n"
+                    "8222222 12:00:05 14-08-2026 POCSAG-1 ALPHA 1200 Ringsted Brandvæsen TEST"
+                ),
+            },
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        run = response.get_json()["run"]
+        self.assertEqual(run["parsed_count"], 2)
+        self.assertEqual(run["duplicate_count"], 1)
+        self.assertEqual(storage.message_count(), before)
+        self.assertEqual(self.admin.get(f"/api/training/runs/{run['id']}").status_code, 200)
+        self.assertEqual(self.user.get(f"/api/training/runs/{run['id']}").status_code, 403)
+
+    def test_admin_can_preview_bulk_ric_import(self):
+        response = self.admin.post(
+            "/api/training/ric-import/preview",
+            json={"text": "RIC;Område;Beskrivelse\n8333333;Kalundborg;Test"},
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        preview = response.get_json()["preview"]
+        self.assertEqual(preview["rows"][0]["ric"], "8333333")
+        self.assertEqual(preview["rows"][0]["station"], "Kalundborg")
+
     def test_admin_can_queue_validated_wifi_action(self):
         response = self.admin.post(
             "/api/system/commands",
@@ -252,6 +287,7 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(self.admin.post("/api/system/commands", json={"action": "restart-pdl"}).status_code, 400)
         self.assertEqual(self.admin.post("/api/ric-codes", json={"ric": "5555555", "station_key": "A"}).status_code, 400)
         self.assertEqual(self.admin.post("/api/stations", json={"name": "Holbæk"}).status_code, 400)
+        self.assertEqual(self.admin.post("/api/training/replay", json={"text": "test"}).status_code, 400)
 
 
 if __name__ == "__main__":
