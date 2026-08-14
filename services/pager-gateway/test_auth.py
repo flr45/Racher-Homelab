@@ -69,6 +69,26 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login", response.location)
 
+    def test_user_ui_only_exposes_alarm_features(self):
+        response = self.user.get("/")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Alarmer", page)
+        self.assertIn("Historik", page)
+        self.assertNotIn('data-tab="system"', page)
+        self.assertNotIn('data-tab="users"', page)
+        self.assertNotIn('data-tab="settings"', page)
+        self.assertNotIn("Send testalarm", page)
+
+    def test_admin_ui_contains_admin_features(self):
+        response = self.admin.get("/")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn('data-tab="system"', page)
+        self.assertIn('data-tab="users"', page)
+        self.assertIn('data-tab="settings"', page)
+        self.assertIn("Send testalarm", page)
+
     def test_user_can_read_alarms(self):
         response = self.user.get("/api/messages")
         self.assertEqual(response.status_code, 200)
