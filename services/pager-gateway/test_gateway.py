@@ -31,6 +31,24 @@ class PagerParsingTests(unittest.TestCase):
         self.assertIsNone(event.station)
         self.assertEqual(event.message, text)
 
+    def test_documented_pdw_pocsag_format_extracts_ric_and_message(self):
+        line = "1234567 14:13:33 17-08-09 POCSAG-1 ALPHA 1200 (A) Please call ASAP"
+        event = parse_pdl_line(line)
+        self.assertIsNotNone(event)
+        self.assertEqual(event.ric, "1234567")
+        self.assertEqual(event.function, "1")
+        self.assertEqual(event.baud, 1200)
+        self.assertEqual(event.message, "(A) Please call ASAP")
+        self.assertEqual(event.station, "Slagelse")
+        self.assertEqual(event.raw_line, line)
+
+    def test_labeled_address_is_accepted_as_ric(self):
+        event = parse_pdl_line("Address: 7654321 POCSAG 512 MESSAGE: test")
+        self.assertIsNotNone(event)
+        self.assertEqual(event.ric, "7654321")
+        self.assertEqual(event.baud, 512)
+        self.assertEqual(event.message, "test")
+
 
 if __name__ == "__main__":
     unittest.main()
