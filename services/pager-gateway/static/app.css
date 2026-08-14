@@ -83,6 +83,15 @@ input:focus, select:focus { border-color: #697586; box-shadow: 0 0 0 3px rgba(10
 .auth-card h1 { margin-top: 6px; }
 .auth-form { display: grid; gap: 15px; margin-top: 22px; }
 .auth-form button { margin-top: 4px; }
+.readiness-list { display: grid; gap: 8px; margin-top: 18px; }
+.readiness-row { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-3); }
+.readiness-row strong, .readiness-row small { display: block; }
+.readiness-row small { margin-top: 3px; }
+.readiness-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border); font-weight: 800; color: var(--warning); }
+.readiness-row.ok .readiness-icon { color: var(--accent); border-color: rgba(102,229,140,.35); background: rgba(102,229,140,.08); }
+.readiness-row.pending .readiness-icon { color: var(--warning); border-color: rgba(247,198,92,.35); background: rgba(247,198,92,.07); }
+.host-metrics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.host-metrics span { color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 6px 9px; font-size: 12px; }
 
 @media (max-width: 700px) {
   .shell { width: min(100% - 20px, 1100px); }
@@ -96,4 +105,6 @@ input:focus, select:focus { border-color: #697586; box-shadow: 0 0 0 3px rgba(10
   .notification-card, .user-row { align-items: stretch; flex-direction: column; }
   .push-actions { justify-content: flex-start; flex-wrap: wrap; }
   .command-row { flex-direction: column; gap: 4px; }
+  .card-head { align-items: flex-start; }
+  #runtime-meta { max-width: 45%; text-align: right; font-size: 12px; }
 }
