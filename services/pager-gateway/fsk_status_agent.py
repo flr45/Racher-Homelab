@@ -7,7 +7,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from storage import Storage
 
@@ -84,7 +84,7 @@ def serial_candidates() -> list[dict[str, Any]]:
     return found
 
 
-def choose_device(candidates: list[dict[str, Any]], explicit: str = EXPLICIT_DEVICE) -> dict[str, Any] | None:
+def choose_device(candidates: list[dict[str, Any]], explicit: str = EXPLICIT_DEVICE) -> Optional[dict[str, Any]]:
     if explicit:
         explicit_path = Path(explicit)
         try:
