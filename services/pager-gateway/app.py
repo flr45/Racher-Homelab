@@ -28,6 +28,21 @@ DATA_DIR = Path(os.getenv("PAGER_DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = os.getenv("PAGER_DB_PATH", str(DATA_DIR / "pager.db"))
 USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{3,40}$")
+PASSWORD_HASH_METHOD = os.getenv("PAGER_PASSWORD_HASH_METHOD", "pbkdf2:sha256:600000")
+
+
+def hash_password(password: str) -> str:
+    """Create a portable password hash without requiring hashlib.scrypt.
+
+    Some macOS Python builds linked against LibreSSL do not expose
+    hashlib.scrypt. PBKDF2-HMAC-SHA256 is supported by Werkzeug on both the
+    local macOS test runtime and the Raspberry Pi/Linux production runtime.
+    """
+    return generate_password_hash(
+        password,
+        method=PASSWORD_HASH_METHOD,
+        salt_length=16,
+    )
 
 
 def persistent_secret(path: Path) -> str:
@@ -191,7 +206,7 @@ def setup():
             error = "Adgangskoden skal være mindst 10 tegn."
         else:
             user_id = storage.create_user(
-                username, display_name, generate_password_hash(password), "admin", None
+                username, display_name, hash_password(password), "admin", None
             )
             session.clear()
             session["user_id"] = user_id
@@ -436,7 +451,7 @@ def api_users_create():
         return jsonify({"ok": False, "error": "Ugyldig rolle."}), 400
     try:
         user_id = storage.create_user(
-            username, display_name, generate_password_hash(password), role, g.user["id"]
+            username, display_name, hash_password(password), role, g.user["id"]
         )
     except sqlite3.IntegrityError:
         return jsonify({"ok": False, "error": "Brugernavnet findes allerede."}), 409
@@ -459,7 +474,7 @@ def api_user_update(user_id: int):
         password = str(payload["password"] or "")
         if len(password) < 10:
             return jsonify({"ok": False, "error": "Adgangskoden skal være mindst 10 tegn."}), 400
-        storage.set_user_password_hash(user_id, generate_password_hash(password))
+        storage.set_user_password_hash(user_id, hash_password(password))
     return jsonify({"ok": True})
 
 
