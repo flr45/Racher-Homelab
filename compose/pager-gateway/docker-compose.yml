@@ -8,7 +8,9 @@ services:
       PAGER_DATA_DIR: /data
       PORT: 8088
     volumes:
-      - pager_gateway_data:/data
+      # På den dedikerede Pi sættes PAGER_DATA_HOST_PATH=/var/lib/racher-pager,
+      # så den native PDL-service og webgatewayen deler pdl.log og SQLite-data.
+      - ${PAGER_DATA_HOST_PATH:-../../data/pager-gateway}:/data
     ports:
       - "${PAGER_GATEWAY_PORT:-8088}:8088"
     healthcheck:
@@ -19,6 +21,3 @@ services:
       start_period: 15s
     security_opt:
       - no-new-privileges:true
-
-volumes:
-  pager_gateway_data:
