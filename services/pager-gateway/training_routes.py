@@ -5,6 +5,16 @@ from typing import Any, Callable
 from flask import g, jsonify, request
 
 
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().casefold() in {"1", "true", "yes", "ja", "on"}
+
+
 def register_training_routes(app: Any, storage: Any, training: Any, auth_required: Callable) -> None:
     @app.get("/api/training/runs")
     @auth_required(admin=True)
@@ -87,7 +97,7 @@ def register_training_routes(app: Any, storage: Any, training: Any, auth_require
     @auth_required(admin=True)
     def api_training_ric_import_apply():
         body = request.get_json(silent=True) or {}
-        create_missing = bool(body.get("create_missing_stations", True))
+        create_missing = _as_bool(body.get("create_missing_stations"), True)
         try:
             result = training.apply_ric_import(
                 body.get("text"), create_missing, int(g.user["id"]),
