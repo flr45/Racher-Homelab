@@ -32,12 +32,7 @@ PASSWORD_HASH_METHOD = os.getenv("PAGER_PASSWORD_HASH_METHOD", "pbkdf2:sha256:60
 
 
 def hash_password(password: str) -> str:
-    """Create a portable password hash without requiring hashlib.scrypt.
-
-    Some macOS Python builds linked against LibreSSL do not expose
-    hashlib.scrypt. PBKDF2-HMAC-SHA256 is supported by Werkzeug on both the
-    local macOS test runtime and the Raspberry Pi/Linux production runtime.
-    """
+    """Create a portable password hash without requiring hashlib.scrypt."""
     return generate_password_hash(
         password,
         method=PASSWORD_HASH_METHOD,
@@ -187,6 +182,85 @@ def on_pdl_line(line: str) -> None:
 
 source = FileTailSource(lambda: setting("pdl_log_path", "/data/pdl.log"), on_pdl_line)
 source.start()
+
+
+def _runtime_flat() -> tuple[dict[str, str], dict[str, str]]:
+    rows = storage.get_runtime_status()
+    values = {key: item.get("value", "") for key, item in rows.items()}
+    updated = {key: item.get("updated_at", "") for key, item in rows.items()}
+    return values, updated
+
+
+def _iso_age_seconds(value: str) -> float | None:
+    if not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - moment.astimezone(timezone.utc)).total_seconds())
+    except ValueError:
+        return None
+
+
+def _readiness(runtime: dict[str, str]) -> list[dict[str, str]]:
+    heartbeat_age = _iso_age_seconds(runtime.get("agent_heartbeat", ""))
+    agent_online = heartbeat_age is not None and heartbeat_age <= 30
+    pdl_installed = runtime.get("pdl_installed") == "1"
+    pdl_active = runtime.get("pdl_service") == "active"
+    try:
+        audio_count = int(runtime.get("audio_capture_devices", "0") or 0)
+    except ValueError:
+        audio_count = 0
+    try:
+        pdl_log_size = int(runtime.get("pdl_log_size", "0") or 0)
+    except ValueError:
+        pdl_log_size = 0
+
+    return [
+        {
+            "key": "gateway",
+            "label": "Pager Gateway",
+            "state": "ok",
+            "detail": "Webtjenesten og databasen svarer",
+        },
+        {
+            "key": "system-agent",
+            "label": "System-agent",
+            "state": "ok" if agent_online else "pending",
+            "detail": "Host-status modtages" if agent_online else "Installeres/aktiveres på Raspberry Pi",
+        },
+        {
+            "key": "pdl-installed",
+            "label": "PDL decoder",
+            "state": "ok" if pdl_installed else "pending",
+            "detail": "PDL 3.2.0 er installeret" if pdl_installed else "PDL installeres af Pi-bootstrap",
+        },
+        {
+            "key": "pdl-service",
+            "label": "PDL service",
+            "state": "ok" if pdl_active else "pending",
+            "detail": "Decoder-service kører" if pdl_active else "Kan afvente lydkort/input før scanner-test",
+        },
+        {
+            "key": "audio",
+            "label": "USB lydinput",
+            "state": "ok" if audio_count > 0 else "pending",
+            "detail": runtime.get("audio_capture_summary") or "Tilslut USB-lydkort når hardware er tilgængelig",
+        },
+        {
+            "key": "pdl-data",
+            "label": "PDL data",
+            "state": "ok" if pdl_log_size > 0 else "pending",
+            "detail": "PDL har skrevet modtagne data" if pdl_log_size > 0 else "Afventer første rigtige dekodning fra scanner",
+        },
+        {
+            "key": "backup",
+            "label": "Backup",
+            "state": "ok" if runtime.get("backup_latest") else "pending",
+            "detail": f"Seneste backup: {runtime.get('backup_latest')}" if runtime.get("backup_latest") else "Første backup oprettes under Pi-installationen",
+        },
+    ]
 
 
 # ---- Authentication ------------------------------------------------------------
@@ -357,15 +431,19 @@ def api_push_test():
 @auth_required(admin=True)
 def api_status():
     now = datetime.now(timezone.utc)
+    runtime, runtime_updated = _runtime_flat()
     return jsonify({
         "name": setting("gateway_name", "Racher Pager Gateway"),
-        "hostname": socket.gethostname(),
+        "hostname": runtime.get("host_hostname") or socket.gethostname(),
         "source_mode": setting("source_mode", "mock"),
         "source": source.status,
         "message_count": storage.message_count(),
         "latest_message": storage.latest_message(),
         "uptime_seconds": int((now - started_at).total_seconds()),
         "server_time": now.isoformat(),
+        "runtime": runtime,
+        "runtime_updated_at": runtime_updated,
+        "readiness": _readiness(runtime),
     })
 
 
