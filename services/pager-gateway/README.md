@@ -6,7 +6,14 @@ Webbaseret gateway til POCSAG-meldinger. Systemet er lavet, så næsten hele lø
 
 Gatewayen bruger **ikke** `(A)`, `(S)`, `(K)`, `(L)` eller `(R)` som et hårdt inputfilter. Enhver gyldig dekodet pager-melding gemmes med rålinjen intakt.
 
-Kendte stationsmarkører kan bruges som ekstra metadata. Den kommende routing/notification-filtrering skal primært kunne bruge POCSAG RIC/capcode og kun bruge tekstmarkører som supplement/fallback. Meldinger må ikke forsvinde fra råhistorikken, fordi en klassifikation ikke lykkes.
+Routing sker efter lagring:
+
+1. aktiv RIC/capcode i admin-registeret er primær klassifikation,
+2. `(A)/(S)/(K)/(L)/(R)` bruges som fallback, hvis RIC ikke er kendt,
+3. ukendt/uklassificeret trafik gemmes stadig og sendes som sikkerhedsnet kun til administratorernes Web Push,
+4. normale brugere ser og modtager kun de stationer, admin har tildelt dem.
+
+Det betyder, at en opfølgende melding uden stationsmarkør stadig kan routes korrekt via samme RIC, og at en forkert/manglende regel aldrig sletter råmeldingen.
 
 ## Arkitektur
 
@@ -26,6 +33,7 @@ Antenne -> Scanner -> discriminator -> FSK-USB -> USB serial / FTDI
                                       |       |       |        |
                                    SQLite   PWA    Web Push  Pushover
                                       |
+                                      +-- RIC -> station -> user routing
                                       +-- admin system command queue
                                       +-- runtime health/status
                                       +-- FSK-USB hardware status
@@ -44,22 +52,49 @@ Racher-patchen til headless mode kan bruge `PDL_RS232_DEVICE`, så den konkrete 
 
 Upstream er fastlåst til PDL 3.2.0 commit `f37a24ee45b06f35703d513d48780c9334c4ff89`.
 
-## Roller og login
+## RIC / capcode og stationer
+
+Admin har en særskilt **RIC-koder**-fane. En RIC kan oprettes med:
+
+- RIC/capcode,
+- station: Slagelse, Sorø, Korsør, Skælskør eller Ruds Vedby,
+- valgfrit navn/beskrivelse,
+- aktiv/deaktiveret routing.
+
+Der kan være flere RIC-koder pr. station. RIC-registeret viser også antal historiske meldinger og senest set.
+
+Hvis en dekodet melding indeholder en RIC som endnu ikke findes i registeret, vises den under **Ukendte RIC-koder** sammen med antal meldinger, senest set og en eksempelmelding. Admin kan tildele den en station direkte. Når en RIC aktiveres/tildeles, omklassificeres eksisterende historik med samme RIC til den valgte station; rålinjerne ændres ikke.
+
+Gateway-parseren understøtter både mærkede felter som `RIC: 1234567` / `Address: 1234567` og PDW's dokumenterede POCSAG-layout:
+
+```text
+Address Time Date POCSAG-n Type Bitrate Message
+```
+
+Den fysiske PDL-outputform verificeres stadig med rigtig radiohardware, når Pi og scanner kobles sammen.
+
+## Roller, brugere og stationsrouting
 
 Der findes to roller:
 
-- `admin`: ser alarmer, diagnostik, netværk, backup/recovery, update/rollback, systemstatus, simulator, indstillinger og brugeradministration.
-- `user`: ser kun alarmfeed/historik og kan aktivere PWA-notifikationer på egne enheder.
+- `admin`: ser hele alarmhistorikken, RIC-register, diagnostik, netværk, backup/recovery, update/rollback, systemstatus, simulator, indstillinger og brugeradministration.
+- `user`: ser kun alarmfeed/historik for de stationer admin har tildelt brugeren og kan aktivere PWA-notifikationer på egne enheder.
+
+Ved brugeroprettelse kan admin vælge en eller flere stationer. Tildelingen kan senere ændres under **Stationer pr. bruger** uden at ændre RIC-registeret. Dermed behøver en ny RIC til Slagelse kun oprettes én gang; alle brugere der allerede abonnerer på Slagelse følger automatisk med.
+
+Den første administrator får som standard alle stationer. Ved opgradering af en ældre database, som endnu ikke har stationsabonnementer, får eksisterende aktive admins også alle stationer for at bevare tidligere admin-adfærd.
 
 Når databasen er tom, sender `/login` automatisk videre til `/setup`. Her oprettes den **første administrator**. Når første konto eksisterer, lukker setup-flowet, og nye brugere kan kun oprettes fra en admin-konto.
 
 Adgangskoder gemmes med PBKDF2-HMAC-SHA256. Sessions er HttpOnly/SameSite og alle muterende routes er CSRF-beskyttet.
 
-## PWA og Web Push
+## PWA, Web Push og Pushover
 
 Gatewayen indeholder manifest, service worker og VAPID Web Push. Hver bruger kan tilmelde sin egen telefon/computer.
 
-I den nuværende MVP sendes nye pageralarmer til alle aktive push-subscriptions. Per-station/per-user routing er bevidst ikke slået til endnu, før filterreglerne er fastlagt.
+Web Push følger stationsrouting. Kendte stationer sendes kun til brugere med den station. En helt ukendt/uklassificeret melding sendes kun til admins som sikkerhedsnet, så en manglende RIC-regel ikke forsvinder lydløst.
+
+Pushover er fortsat en **global operatørkanal**. Når Pushover er aktiveret, modtager den alle dekodede meldinger uanset stationsrouting. Det gør den egnet som separat overvågnings-/fallbackkanal, mens brugerfiltreringen sker i web/PWA.
 
 VAPID private key genereres lokalt i dataområdet og returneres aldrig via API'et.
 
@@ -81,7 +116,7 @@ Handlingerne omfatter:
 
 Wi-Fi-passwords returneres ikke i kommandohistorikken. Den aktive payload ryddes efter behandling. Setup-hotspottets Password/PIN ligger i root-only `/etc/racher-pager/network.env` og kan vises af admin via runtime-status.
 
-Admin-hændelser logges i `audit_log` uden password/token-payloads.
+Admin-hændelser, RIC-ændringer og bruger-routing logges i `audit_log` uden password/token-payloads.
 
 ## Live diagnostik
 
@@ -199,7 +234,7 @@ Standardplacering:
 /var/backups/racher-pager/
 ```
 
-Backup omfatter en konsistent SQLite-backup samt lokale session/VAPID-nøgler, PDL-konfiguration og relevante root-only env/tunnel-filer, når de findes. Arkiverne er `0600`, og standard-retention er 14 dage.
+Backup omfatter en konsistent SQLite-backup, og dermed også RIC-register og bruger-stationsrouting, samt lokale session/VAPID-nøgler, PDL-konfiguration og relevante root-only env/tunnel-filer. Arkiverne er `0600`, og standard-retention er 14 dage.
 
 Admin kan lave en backup nu og vælge en eksisterende backup til restore. Restore accepterer kun Racher-backupnavne, afviser traversal-stier, integritetstjekker SQLite, laver safety-backup først og genstarter relevante services bagefter.
 
@@ -228,13 +263,15 @@ Når HTTPS er verificeret, sættes `PAGER_COOKIE_SECURE=1`, og PWA/Web Push test
 
 ## Test uden scanner
 
-Admin-simulatoren sender en testalarm gennem samme flow som en rigtig PDL-melding:
+Admin-simulatoren sender en testalarm gennem samme ingest/routing-flow som en rigtig PDL-melding. Simulator-API'et kan også få en test-RIC, så RIC-register og stationsrouting kan verificeres før scannerhardware er tilsluttet.
 
 ```text
-Simulator -> SQLite -> alarmfeed -> PWA Web Push -> Pushover
+Simulator -> klassificering -> SQLite -> stationsfeed -> Web Push
+                                 |
+                                 +-> global Pushover (hvis aktiv)
 ```
 
-Det betyder, at login, brugere, historik, notifikationer, netværksdiagnostik, backup og systemadministration kan klargøres hjemme før den fysiske scanner-test.
+Det betyder, at login, RIC-koder, bruger-routing, historik, notifikationer, netværksdiagnostik, backup og systemadministration kan klargøres hjemme før den fysiske scanner-test.
 
 ## Drifts- og datanote
 
