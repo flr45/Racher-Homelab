@@ -107,8 +107,6 @@ class Storage:
                 );
                 CREATE INDEX IF NOT EXISTS idx_messages_received_at ON messages(received_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_messages_station ON messages(station);
-                CREATE INDEX IF NOT EXISTS idx_messages_fingerprint ON messages(message_fingerprint, id DESC);
-                CREATE INDEX IF NOT EXISTS idx_messages_delivery ON messages(delivery_eligible, id DESC);
 
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -184,6 +182,16 @@ class Storage:
             for name, definition in migrations.items():
                 if name not in message_columns:
                     conn.execute(f"ALTER TABLE messages ADD COLUMN {name} {definition}")
+
+            # Indexes referencing migrated columns must be created only after the
+            # ALTER TABLE statements above. Otherwise an older pager.db fails to
+            # open before it gets a chance to migrate.
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_fingerprint ON messages(message_fingerprint, id DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_delivery ON messages(delivery_eligible, id DESC)"
+            )
 
             for key, value in DEFAULT_SETTINGS.items():
                 conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
