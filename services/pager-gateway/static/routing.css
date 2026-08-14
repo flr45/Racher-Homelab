@@ -1,0 +1,113 @@
+.station-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .55rem;
+  margin-top: .55rem;
+}
+
+.station-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .55rem .7rem;
+  border: 1px solid var(--line, #2a2f36);
+  border-radius: .7rem;
+  background: rgba(255,255,255,.025);
+  font-size: .9rem;
+}
+
+.station-pill input { margin: 0; }
+
+.routing-user,
+.ric-row,
+.unknown-ric-row {
+  border-top: 1px solid var(--line, #2a2f36);
+  padding: 1rem 0;
+}
+
+.routing-user:first-child,
+.ric-row:first-child,
+.unknown-ric-row:first-child { border-top: 0; }
+
+.routing-user {
+  display: grid;
+  grid-template-columns: minmax(160px, .8fr) minmax(280px, 2fr) auto;
+  gap: 1rem;
+  align-items: center;
+}
+
+.routing-user small,
+.unknown-ric-row small,
+.ric-meta small {
+  display: block;
+  margin-top: .2rem;
+  color: var(--muted, #9aa3ad);
+}
+
+.ric-main {
+  display: grid;
+  grid-template-columns: minmax(120px, .6fr) minmax(160px, .8fr) minmax(220px, 1.5fr) auto;
+  gap: .8rem;
+  align-items: end;
+}
+
+.ric-main label:not(.checkbox) {
+  display: grid;
+  gap: .35rem;
+  font-size: .8rem;
+  color: var(--muted, #9aa3ad);
+}
+
+.ric-active {
+  min-height: 42px;
+  align-items: center;
+}
+
+.ric-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: .7rem;
+}
+
+.unknown-ric-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  align-items: center;
+}
+
+.unknown-ric-row p {
+  margin: .45rem 0 0;
+  word-break: break-word;
+}
+
+.unknown-assign {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+}
+
+.routing-note {
+  padding: .8rem 1rem;
+  border-radius: .75rem;
+  background: rgba(255,255,255,.035);
+  margin: .8rem 0 1rem;
+}
+
+@media (max-width: 820px) {
+  .routing-user,
+  .ric-main,
+  .unknown-ric-row {
+    grid-template-columns: 1fr;
+  }
+  .ric-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .unknown-assign {
+    width: 100%;
+  }
+  .unknown-assign select { flex: 1; }
+}
