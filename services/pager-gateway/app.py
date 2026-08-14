@@ -24,26 +24,16 @@ def setting(name: str, default: str = "") -> str:
     return storage.get_settings().get(name, default)
 
 
-def station_is_enabled(station: str | None) -> bool:
-    if not station:
-        return True
-    keys = {
-        "Slagelse": "station_a_enabled",
-        "Sorø": "station_s_enabled",
-        "Korsør": "station_k_enabled",
-        "Skælskør": "station_l_enabled",
-        "Ruds Vedby": "station_r_enabled",
-    }
-    key = keys.get(station)
-    return True if not key else setting(key, "1") == "1"
-
-
 def maybe_notify(message_id: int, event: dict) -> None:
+    """Forward every decoded message when Pushover is enabled.
+
+    Station detection is deliberately metadata only. Pager traffic does not
+    need to contain (A)/(S)/(K)/(L)/(R) to be forwarded.
+    """
     settings = storage.get_settings()
     if settings.get("pushover_enabled") != "1":
         return
-    if not station_is_enabled(event.get("station")):
-        return
+
     title = event.get("station") or settings.get("gateway_name", "Pager")
     pushover.send(
         settings.get("pushover_app_token", ""),
@@ -131,17 +121,12 @@ def api_settings_post():
         if secret in payload and not str(payload[secret]).strip():
             payload[secret] = current.get(secret, "")
 
-    allowed_bool = {
-        "station_a_enabled",
-        "station_s_enabled",
-        "station_k_enabled",
-        "station_l_enabled",
-        "station_r_enabled",
-        "pushover_enabled",
-    }
-    for key in allowed_bool:
-        if key in payload:
-            payload[key] = "1" if str(payload[key]).lower() in {"1", "true", "on", "yes"} else "0"
+    if "pushover_enabled" in payload:
+        payload["pushover_enabled"] = (
+            "1"
+            if str(payload["pushover_enabled"]).lower() in {"1", "true", "on", "yes"}
+            else "0"
+        )
 
     storage.update_settings(payload)
     return jsonify({"ok": True})
@@ -150,7 +135,10 @@ def api_settings_post():
 @app.post("/api/mock")
 def api_mock():
     payload = request.get_json(silent=True) or {}
-    text = str(payload.get("message") or "(A) TESTALARM - Racher Pager Gateway").strip()
+    text = str(
+        payload.get("message")
+        or "$8 ISL KA MØ M1 + V1 (1+5) Naturbrand-Mark, Høstet mark"
+    ).strip()
     if not text:
         return jsonify({"ok": False, "error": "message is required"}), 400
 
