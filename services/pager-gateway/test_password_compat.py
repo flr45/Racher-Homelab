@@ -1,43 +1,25 @@
 import hashlib
 import unittest
 
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import check_password_hash
 
-import sitecustomize
+from app import hash_password
 
 
 class PasswordCompatibilityTests(unittest.TestCase):
-    def test_fallback_matches_native_scrypt_when_available(self):
-        if not hasattr(hashlib, "scrypt"):
-            self.skipTest("runtime has no native hashlib.scrypt")
-
-        password = b"meget-hemmelig-testkode"
-        salt = b"0123456789abcdef"
-        kwargs = {"salt": salt, "n": 2**14, "r": 8, "p": 1, "dklen": 64}
-
-        native = hashlib.scrypt(password, **kwargs)
-        fallback = sitecustomize._cryptography_scrypt(password, **kwargs)
-        self.assertEqual(native, fallback)
-
-    def test_werkzeug_hashing_works_without_native_hashlib_scrypt(self):
+    def test_password_hashing_does_not_require_hashlib_scrypt(self):
         original = getattr(hashlib, "scrypt", None)
-        if hasattr(hashlib, "scrypt"):
+        had_scrypt = hasattr(hashlib, "scrypt")
+        if had_scrypt:
             delattr(hashlib, "scrypt")
 
         try:
-            installed = sitecustomize.install_scrypt_fallback()
-            self.assertTrue(installed)
-            password_hash = generate_password_hash("meget-hemmelig-testkode")
-            self.assertTrue(password_hash.startswith("scrypt:"))
+            password_hash = hash_password("meget-hemmelig-testkode")
+            self.assertTrue(password_hash.startswith("pbkdf2:sha256:600000$"))
             self.assertTrue(check_password_hash(password_hash, "meget-hemmelig-testkode"))
             self.assertFalse(check_password_hash(password_hash, "forkert-kode"))
         finally:
-            if original is None:
-                try:
-                    delattr(hashlib, "scrypt")
-                except AttributeError:
-                    pass
-            else:
+            if had_scrypt:
                 setattr(hashlib, "scrypt", original)
 
 
