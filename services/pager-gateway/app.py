@@ -33,11 +33,7 @@ PASSWORD_HASH_METHOD = os.getenv("PAGER_PASSWORD_HASH_METHOD", "pbkdf2:sha256:60
 
 def hash_password(password: str) -> str:
     """Create a portable password hash without requiring hashlib.scrypt."""
-    return generate_password_hash(
-        password,
-        method=PASSWORD_HASH_METHOD,
-        salt_length=16,
-    )
+    return generate_password_hash(password, method=PASSWORD_HASH_METHOD, salt_length=16)
 
 
 def persistent_secret(path: Path) -> str:
@@ -119,10 +115,7 @@ def load_identity_and_csrf():
 
 @app.context_processor
 def template_globals():
-    return {
-        "current_user": g.get("user"),
-        "csrf_token": session.get("csrf_token", ""),
-    }
+    return {"current_user": g.get("user"), "csrf_token": session.get("csrf_token", "")}
 
 
 def maybe_notify_pushover(message_id: int, event: dict[str, Any]) -> None:
@@ -208,6 +201,10 @@ def _readiness(runtime: dict[str, str]) -> list[dict[str, str]]:
     agent_online = heartbeat_age is not None and heartbeat_age <= 30
     pdl_installed = runtime.get("pdl_installed") == "1"
     pdl_active = runtime.get("pdl_service") == "active"
+    internet_online = runtime.get("internet_online") == "1"
+    hotspot_active = runtime.get("hotspot_active") == "1"
+    tunnel_installed = runtime.get("tunnel_installed") == "1"
+    tunnel_active = runtime.get("tunnel_service") == "active"
     try:
         audio_count = int(runtime.get("audio_capture_devices", "0") or 0)
     except ValueError:
@@ -217,46 +214,59 @@ def _readiness(runtime: dict[str, str]) -> list[dict[str, str]]:
     except ValueError:
         pdl_log_size = 0
 
+    network_detail = "Netværksstatus kommer fra Pi'en"
+    if agent_online:
+        if internet_online:
+            network_detail = f"Online · {runtime.get('wifi_connection') or 'netværk'} · {runtime.get('wifi_ip') or 'IP afventer'}"
+        elif hotspot_active:
+            network_detail = f"Fallback aktiv: {runtime.get('hotspot_ssid') or 'Racher-Pager-Setup'}"
+        else:
+            network_detail = "Offline · fallback-hotspot starter automatisk efter timeout"
+
+    if tunnel_installed:
+        tunnel_detail = "Cloudflare Tunnel kører" if tunnel_active else "Cloudflare er installeret, men tunnelen er ikke aktiv"
+    else:
+        tunnel_detail = "Konfigureres når tunnel-token og offentligt hostname er klar"
+
     return [
+        {"key": "gateway", "label": "Pager Gateway", "state": "ok", "detail": "Webtjenesten og databasen svarer"},
         {
-            "key": "gateway",
-            "label": "Pager Gateway",
-            "state": "ok",
-            "detail": "Webtjenesten og databasen svarer",
-        },
-        {
-            "key": "system-agent",
-            "label": "System-agent",
+            "key": "system-agent", "label": "System-agent",
             "state": "ok" if agent_online else "pending",
             "detail": "Host-status modtages" if agent_online else "Installeres/aktiveres på Raspberry Pi",
         },
         {
-            "key": "pdl-installed",
-            "label": "PDL decoder",
+            "key": "network", "label": "Netværk",
+            "state": "ok" if internet_online else "pending",
+            "detail": network_detail,
+        },
+        {
+            "key": "tunnel", "label": "Remote tunnel",
+            "state": "ok" if tunnel_active else "pending",
+            "detail": tunnel_detail,
+        },
+        {
+            "key": "pdl-installed", "label": "PDL decoder",
             "state": "ok" if pdl_installed else "pending",
             "detail": "PDL 3.2.0 er installeret" if pdl_installed else "PDL installeres af Pi-bootstrap",
         },
         {
-            "key": "pdl-service",
-            "label": "PDL service",
+            "key": "pdl-service", "label": "PDL service",
             "state": "ok" if pdl_active else "pending",
             "detail": "Decoder-service kører" if pdl_active else "Kan afvente lydkort/input før scanner-test",
         },
         {
-            "key": "audio",
-            "label": "USB lydinput",
+            "key": "audio", "label": "USB lydinput",
             "state": "ok" if audio_count > 0 else "pending",
             "detail": runtime.get("audio_capture_summary") or "Tilslut USB-lydkort når hardware er tilgængelig",
         },
         {
-            "key": "pdl-data",
-            "label": "PDL data",
+            "key": "pdl-data", "label": "PDL data",
             "state": "ok" if pdl_log_size > 0 else "pending",
             "detail": "PDL har skrevet modtagne data" if pdl_log_size > 0 else "Afventer første rigtige dekodning fra scanner",
         },
         {
-            "key": "backup",
-            "label": "Backup",
+            "key": "backup", "label": "Backup",
             "state": "ok" if runtime.get("backup_latest") else "pending",
             "detail": f"Seneste backup: {runtime.get('backup_latest')}" if runtime.get("backup_latest") else "Første backup oprettes under Pi-installationen",
         },
@@ -279,9 +289,8 @@ def setup():
         elif len(password) < 10:
             error = "Adgangskoden skal være mindst 10 tegn."
         else:
-            user_id = storage.create_user(
-                username, display_name, hash_password(password), "admin", None
-            )
+            user_id = storage.create_user(username, display_name, hash_password(password), "admin", None)
+            storage.add_audit(user_id, "first-admin", "Første administrator oprettet")
             session.clear()
             session["user_id"] = user_id
             session["csrf_token"] = secrets.token_urlsafe(32)
@@ -309,6 +318,7 @@ def login():
             session["csrf_token"] = secrets.token_urlsafe(32)
             session.permanent = True
             storage.touch_login(user["id"])
+            storage.add_audit(user["id"], "login", "Web login")
             return redirect(url_for("index"))
     return render_template("login.html", error=error)
 
@@ -316,6 +326,8 @@ def login():
 @app.post("/logout")
 @auth_required()
 def logout():
+    user_id = g.user["id"]
+    storage.add_audit(user_id, "logout", "Web logout")
     session.clear()
     return redirect(url_for("login"))
 
@@ -447,6 +459,12 @@ def api_status():
     })
 
 
+@app.get("/api/audit")
+@auth_required(admin=True)
+def api_audit():
+    return jsonify(storage.list_audit(limit=50))
+
+
 @app.get("/api/settings")
 @auth_required(admin=True)
 def api_settings_get():
@@ -474,6 +492,7 @@ def api_settings_post():
     if subject and not (subject.startswith("mailto:") or subject.startswith("https://")):
         return jsonify({"ok": False, "error": "VAPID subject skal være mailto: eller https://"}), 400
     storage.update_settings(payload)
+    storage.add_audit(g.user["id"], "settings-update", "Gateway-indstillinger ændret")
     return jsonify({"ok": True})
 
 
@@ -528,9 +547,7 @@ def api_users_create():
     if role not in {"user", "admin"}:
         return jsonify({"ok": False, "error": "Ugyldig rolle."}), 400
     try:
-        user_id = storage.create_user(
-            username, display_name, hash_password(password), role, g.user["id"]
-        )
+        user_id = storage.create_user(username, display_name, hash_password(password), role, g.user["id"])
     except sqlite3.IntegrityError:
         return jsonify({"ok": False, "error": "Brugernavnet findes allerede."}), 409
     return jsonify({"ok": True, "id": user_id})
@@ -543,16 +560,21 @@ def api_user_update(user_id: int):
     if not target:
         return jsonify({"ok": False, "error": "Brugeren findes ikke."}), 404
     payload = request.get_json(silent=True) or {}
+    changed: list[str] = []
     if "active" in payload:
         active = bool(payload["active"])
         if user_id == g.user["id"] and not active:
             return jsonify({"ok": False, "error": "Du kan ikke deaktivere din egen admin-konto."}), 400
         storage.set_user_active(user_id, active)
+        changed.append("active")
     if "password" in payload:
         password = str(payload["password"] or "")
         if len(password) < 10:
             return jsonify({"ok": False, "error": "Adgangskoden skal være mindst 10 tegn."}), 400
         storage.set_user_password_hash(user_id, hash_password(password))
+        changed.append("password")
+    if changed:
+        storage.add_audit(g.user["id"], "user-update", f"user_id={user_id}; fields={','.join(changed)}")
     return jsonify({"ok": True})
 
 
@@ -565,11 +587,13 @@ def api_system_commands():
 @app.post("/api/system/commands")
 @auth_required(admin=True)
 def api_system_command_create():
-    action = str((request.get_json(silent=True) or {}).get("action") or "")
+    body = request.get_json(silent=True) or {}
+    action = str(body.get("action") or "")
+    command_payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     try:
-        command_id = storage.queue_system_command(action, g.user["id"])
+        command_id = storage.queue_system_command(action, g.user["id"], command_payload)
     except ValueError:
-        return jsonify({"ok": False, "error": "Ugyldig systemhandling."}), 400
+        return jsonify({"ok": False, "error": "Ugyldig systemhandling eller parametre."}), 400
     return jsonify({"ok": True, "id": command_id, "action": action})
 
 
