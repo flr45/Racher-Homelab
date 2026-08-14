@@ -102,6 +102,12 @@ class Storage:
                     FOREIGN KEY(requested_by) REFERENCES users(id) ON DELETE RESTRICT
                 );
                 CREATE INDEX IF NOT EXISTS idx_system_commands_status ON system_commands(status, id);
+
+                CREATE TABLE IF NOT EXISTS runtime_status (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             for key, value in DEFAULT_SETTINGS.items():
@@ -313,3 +319,27 @@ class Storage:
                 """UPDATE system_commands SET status=?, processed_at=?, result=? WHERE id=?""",
                 ("done" if success else "failed", self._now(), result[:2000], command_id),
             )
+
+    def update_runtime_status(self, values: dict[str, Any]) -> None:
+        updated_at = self._now()
+        with self.connect() as conn:
+            for key, value in values.items():
+                conn.execute(
+                    """INSERT INTO runtime_status(key, value, updated_at) VALUES (?, ?, ?)
+                       ON CONFLICT(key) DO UPDATE SET
+                           value=excluded.value, updated_at=excluded.updated_at""",
+                    (str(key), str(value), updated_at),
+                )
+
+    def get_runtime_status(self) -> dict[str, dict[str, str]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT key, value, updated_at FROM runtime_status ORDER BY key"
+            ).fetchall()
+        return {
+            str(row["key"]): {
+                "value": str(row["value"]),
+                "updated_at": str(row["updated_at"]),
+            }
+            for row in rows
+        }
