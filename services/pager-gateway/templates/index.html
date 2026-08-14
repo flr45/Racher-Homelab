@@ -62,9 +62,19 @@
 
         <article class="card readiness-card">
           <div class="card-head"><div><span class="label">Systemklargøring</span><h2>Raspberry Pi-status</h2></div><span id="runtime-meta" class="muted">Afventer host-agent</span></div>
-          <p class="hint">Grøn betyder klar. Punkter der afventer USB-lydkort eller scanner er normale, mens Pi'en klargøres hjemme.</p>
+          <p class="hint">Grøn betyder klar. FSK-USB eller scanner kan stå som afventende, mens Pi'en klargøres hjemme.</p>
           <div id="readiness-list" class="readiness-list"><p class="muted">Henter systemstatus…</p></div>
           <div id="host-metrics" class="host-metrics"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><div><span class="label">Pager input</span><h2>FSK-USB interface</h2></div><span id="fsk-state" class="status-badge">—</span></div>
+          <div class="ops-grid">
+            <div><span class="label">Enhed</span><strong id="fsk-device">—</strong><small id="fsk-summary">—</small></div>
+            <div><span class="label">Seriel</span><strong id="fsk-serial-config">19200 8N1</strong><small id="fsk-driver">FTDI / Linux USB-serial</small></div>
+            <div><span class="label">PDL input</span><strong id="fsk-pdl-state">—</strong><small id="fsk-input-mode">fsk-usb</small></div>
+          </div>
+          <p id="fsk-meta" class="hint">Afventer hardwarestatus fra Raspberry Pi.</p>
         </article>
 
         <article class="card">
@@ -162,7 +172,7 @@
               <label>POCSAG bitrate<select name="pocsag_baud"><option value="auto">Auto</option><option value="512">512</option><option value="1200">1200</option><option value="2400">2400</option></select></label>
               <label>Polaritet<select name="invert"><option value="auto">Auto / normal</option><option value="normal">Normal</option><option value="inverted">Inverteret</option></select></label>
             </div>
-            <p class="hint">POCSAG bitrate og polaritet aktiveres i PDL, når du vælger <strong>Genstart PDL decoder</strong>. Lydkort og sample rate bevares separat.</p>
+            <p class="hint">FSK-USB / RS232 er det primære hardwareinput. POCSAG 512/1200/2400 styres i PDL; ALSA-lydinput bevares kun som fallback.</p>
           </article>
           <article class="card"><span class="label">Web Push</span><h2>PWA notifikationer</h2><div class="form-grid"><label class="wide">VAPID kontakt<input name="vapid_subject" placeholder="mailto:admin@example.dk"></label></div><p class="hint">VAPID-nøglen genereres lokalt på gatewayen. Den private nøgle vises aldrig i webinterfacet.</p></article>
           <article class="card"><span class="label">Pushover</span><h2>Ekstra notifikationskanal</h2><div class="form-grid"><label class="checkbox wide"><input type="checkbox" name="pushover_enabled"> Aktivér Pushover</label><label>App token<input type="password" name="pushover_app_token" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label><label>User/group key<input type="password" name="pushover_user_key" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label></div><div class="actions"><button type="button" id="test-pushover">Send Pushover-test</button></div></article>
@@ -173,5 +183,6 @@
     </main>
   </div>
   <script src="/static/app.js" defer></script>
+  <script src="/static/fsk-status.js" defer></script>
 </body>
 </html>
