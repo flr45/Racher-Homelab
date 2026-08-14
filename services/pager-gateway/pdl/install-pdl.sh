@@ -30,8 +30,8 @@ sudo apt-get install -y \
   libwebkit2gtk-4.1-dev libcurl4-openssl-dev
 
 echo "[2/5] Henter PDL ved fastlåst upstream commit..."
-sudo mkdir -p "$PDL_ROOT/src" "$PDL_PREFIX"
-sudo chown -R "$(id -u):$(id -g)" "$PDL_ROOT/src" "$PDL_PREFIX"
+sudo mkdir -p "$PDL_ROOT/src" "$PDL_PREFIX" "$PDL_ROOT/bin"
+sudo chown -R "$(id -u):$(id -g)" "$PDL_ROOT/src" "$PDL_PREFIX" "$PDL_ROOT/bin"
 
 if [[ ! -d "$PDL_SRC/.git" ]]; then
   git clone "$PDL_REPO" "$PDL_SRC"
@@ -58,7 +58,6 @@ if ! "$PDL_PREFIX/bin/pdl" --help 2>&1 | grep -q -- "--headless"; then
   exit 1
 fi
 
-mkdir -p "$PDL_ROOT/bin"
 cat > "$PDL_ROOT/bin/pdl-version" <<EOF
 PDL_VERSION=3.2.0
 PDL_UPSTREAM_COMMIT=$PDL_COMMIT
