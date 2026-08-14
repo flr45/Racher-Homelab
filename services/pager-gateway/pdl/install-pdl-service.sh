@@ -25,8 +25,11 @@ sudo install -m 0755 "$SCRIPT_DIR/run-pdl-headless.sh" "$INSTALL_ROOT/run-pdl-he
 if [[ ! -f "$ENV_FILE" ]]; then
   sudo tee "$ENV_FILE" >/dev/null <<'EOF'
 # Primært input: discriminator.nl FSK->USB (FTDI serial bitstream).
-# PDL Linux finder /dev/ttyUSB*, /dev/ttyACM* og /dev/ttyS* og bruger Port=1 som første fundne enhed.
+# Lad PDL_RS232_DEVICE stå tom ved første boot. Wrapperen foretrækker automatisk
+# /dev/serial/by-id/* og falder derefter tilbage til /dev/ttyUSB* /dev/ttyACM*.
+# Når den konkrete FTDI-enhed er kendt, kan vi pinne dens by-id sti her.
 PDL_INPUT_MODE=fsk-usb
+PDL_RS232_DEVICE=
 PDL_RS232_PORT=1
 PDL_RS232_BITRATE=19200
 PDL_RS232_DECODE_MODE=2
