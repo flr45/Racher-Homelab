@@ -9,13 +9,15 @@ INTEGRATION_DIR="${PAGER_INTEGRATION_DIR:-/opt/racher-pager/integration}"
 BACKUP_DIR="${PAGER_BACKUP_DIR:-/var/backups/racher-pager}"
 RUNTIME_REPO="${PAGER_RUNTIME_REPO:-/opt/racher-pager/runtime-repo}"
 UNIT_PATH="/etc/systemd/system/racher-pager-system-agent.service"
+FSK_UNIT_PATH="/etc/systemd/system/racher-pager-fsk-status.service"
+FSK_TIMER_PATH="/etc/systemd/system/racher-pager-fsk-status.timer"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "System-agenten installeres kun på Linux/Raspberry Pi." >&2
   exit 1
 fi
 
-for required in system_agent.py storage.py; do
+for required in system_agent.py fsk_status_agent.py storage.py; do
   [[ -f "$SERVICE_DIR/$required" ]] || { echo "Mangler $SERVICE_DIR/$required" >&2; exit 1; }
 done
 for required in backup-pager.sh restore-pager.sh update-pager.sh rollback-pager.sh pager-compose.sh; do
@@ -28,6 +30,7 @@ sudo chmod 0750 "$DATA_DIR"
 sudo chmod 0700 "$BACKUP_DIR"
 
 sudo install -m 0755 "$SERVICE_DIR/system_agent.py" "$AGENT_DIR/system_agent.py"
+sudo install -m 0755 "$SERVICE_DIR/fsk_status_agent.py" "$AGENT_DIR/fsk_status_agent.py"
 sudo install -m 0644 "$SERVICE_DIR/storage.py" "$AGENT_DIR/storage.py"
 for helper in backup-pager.sh restore-pager.sh update-pager.sh rollback-pager.sh pager-compose.sh; do
   sudo install -m 0755 "$SERVICE_DIR/pdl/$helper" "$INTEGRATION_DIR/$helper"
@@ -65,10 +68,46 @@ ReadWritePaths=$DATA_DIR $BACKUP_DIR $RUNTIME_REPO $AGENT_DIR $INTEGRATION_DIR /
 WantedBy=multi-user.target
 EOF
 
+sudo tee "$FSK_UNIT_PATH" >/dev/null <<EOF
+[Unit]
+Description=Racher Pager FSK-USB hardware status probe
+After=local-fs.target racher-pdl.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=$AGENT_DIR
+Environment=PAGER_DB_PATH=$DATA_DIR/pager.db
+Environment=PDL_CONFIG_PATH=$DATA_DIR/pdl/pdl.ini
+EnvironmentFile=-/etc/racher-pager/pdl.env
+ExecStart=/usr/bin/python3 $AGENT_DIR/fsk_status_agent.py
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=$DATA_DIR
+EOF
+
+sudo tee "$FSK_TIMER_PATH" >/dev/null <<'EOF'
+[Unit]
+Description=Poll Racher Pager FSK-USB hardware status
+
+[Timer]
+OnBootSec=5s
+OnUnitActiveSec=10s
+AccuracySec=1s
+Unit=racher-pager-fsk-status.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
 sudo systemctl daemon-reload
 sudo systemctl enable --now racher-pager-system-agent.service
+sudo systemctl enable --now racher-pager-fsk-status.timer
 
 echo "Racher Pager system-agent er installeret."
 echo "Agentkode: $AGENT_DIR"
 echo "Helpers:   $INTEGRATION_DIR"
+echo "FSK probe: racher-pager-fsk-status.timer (10 sek.)"
 echo "Status: sudo systemctl status racher-pager-system-agent --no-pager"
