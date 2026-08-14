@@ -113,6 +113,19 @@
           </article>
         </div>
 
+        <article class="card readiness-card">
+          <div class="card-head">
+            <div>
+              <span class="label">Systemklargøring</span>
+              <h2>Raspberry Pi-status</h2>
+            </div>
+            <span id="runtime-meta" class="muted">Afventer host-agent</span>
+          </div>
+          <p class="hint">Grøn betyder klar. Punkter der afventer USB-lydkort eller scanner er normale, mens Pi'en klargøres hjemme.</p>
+          <div id="readiness-list" class="readiness-list"><p class="muted">Henter systemstatus…</p></div>
+          <div id="host-metrics" class="host-metrics"></div>
+        </article>
+
         <article class="card">
           <span class="label">Simulator</span>
           <h2>Test hele alarmflowet uden scanner</h2>
