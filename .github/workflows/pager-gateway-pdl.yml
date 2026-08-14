@@ -28,8 +28,11 @@ jobs:
         run: |
           python -m py_compile \
             services/pager-gateway/app.py \
+            services/pager-gateway/app_core.py \
             services/pager-gateway/storage.py \
             services/pager-gateway/routing.py \
+            services/pager-gateway/adaptive.py \
+            services/pager-gateway/adaptive_routes.py \
             services/pager-gateway/system_agent.py \
             services/pager-gateway/fsk_status_agent.py \
             services/pager-gateway/network_portal.py
