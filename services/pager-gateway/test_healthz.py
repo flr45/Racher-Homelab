@@ -12,6 +12,7 @@ from unittest.mock import patch
 os.environ["PAGER_COOKIE_SECURE"] = "0"
 
 import app  # noqa: E402
+import app_core  # noqa: E402
 from storage import Storage  # noqa: E402
 
 
@@ -19,14 +20,18 @@ class HealthcheckTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory()
-        cls._original_storage = app.storage
-        app.storage = Storage(str(Path(cls._tmp.name) / "pager-health-test.db"))
+        cls._original_app_storage = app.storage
+        cls._original_core_storage = app_core.storage
+        cls._storage = Storage(str(Path(cls._tmp.name) / "pager-health-test.db"))
+        app.storage = cls._storage
+        app_core.storage = cls._storage
         app.app.config.update(TESTING=True)
         cls.client = app.app.test_client()
 
     @classmethod
     def tearDownClass(cls):
-        app.storage = cls._original_storage
+        app.storage = cls._original_app_storage
+        app_core.storage = cls._original_core_storage
         cls._tmp.cleanup()
 
     def test_healthz_accepts_waiting_or_running_tailer_in_pdl_mode(self):
