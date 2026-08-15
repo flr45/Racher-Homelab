@@ -8,6 +8,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="${1:-racher-pi2}"
+MONITOR_KEY="${PAGER_MONITOR_KEY:-${2:-}}"
 BASE_URL="${PAGER_MONITOR_URL:-http://$TARGET:8088}"
 INSTALL_DIR="/opt/racher-pager-monitor"
 STATE_DIR="/var/lib/racher-pager-monitor"
@@ -18,22 +19,20 @@ TIMER_FILE="/etc/systemd/system/racher-pager-external-monitor.timer"
 
 command -v tailscale >/dev/null 2>&1 || { echo "Tailscale mangler på denne Pi." >&2; exit 1; }
 [[ -f "$SCRIPT_DIR/external_monitor.py" ]] || { echo "Mangler external_monitor.py" >&2; exit 1; }
+[[ ${#MONITOR_KEY} -ge 24 ]] || { echo "PAGER_MONITOR_KEY mangler eller er for kort (mindst 24 tegn)." >&2; exit 1; }
 
 sudo mkdir -p "$INSTALL_DIR" "$STATE_DIR" "$ENV_DIR"
 sudo install -m 0755 "$SCRIPT_DIR/external_monitor.py" "$INSTALL_DIR/external_monitor.py"
 sudo chmod 0750 "$STATE_DIR"
 
-if [[ ! -f "$ENV_FILE" ]]; then
-  sudo tee "$ENV_FILE" >/dev/null <<EOF
+sudo tee "$ENV_FILE" >/dev/null <<EOF
 PAGER_MONITOR_TARGET=$TARGET
 PAGER_MONITOR_URL=$BASE_URL
 PAGER_MONITOR_SMS_GATEWAY=http://127.0.0.1:8090
 PAGER_MONITOR_STATE_FILE=$STATE_DIR/state.json
+PAGER_MONITOR_KEY=$MONITOR_KEY
 EOF
-  sudo chmod 0640 "$ENV_FILE"
-else
-  echo "Beholder eksisterende konfiguration: $ENV_FILE"
-fi
+sudo chmod 0640 "$ENV_FILE"
 
 sudo tee "$UNIT_FILE" >/dev/null <<EOF
 [Unit]
@@ -76,5 +75,6 @@ echo "Ekstern Pager-monitor installeret."
 echo "Target: $TARGET"
 echo "Gateway: $BASE_URL"
 echo "SMS gateway: http://127.0.0.1:8090"
+echo "Monitor-key: konfigureret"
 echo "Timer: hvert 2. minut"
 echo "Status: sudo systemctl status racher-pager-external-monitor.timer --no-pager"
