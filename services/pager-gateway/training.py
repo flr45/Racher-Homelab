@@ -34,6 +34,21 @@ class TrainingStore:
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
+    @staticmethod
+    def _timestamp_delta_seconds(current_value: Any, previous_value: Any) -> float | None:
+        if not current_value or not previous_value:
+            return None
+        try:
+            current = datetime.fromisoformat(str(current_value).replace("Z", "+00:00"))
+            previous = datetime.fromisoformat(str(previous_value).replace("Z", "+00:00"))
+            if current.tzinfo is None:
+                current = current.replace(tzinfo=timezone.utc)
+            if previous.tzinfo is None:
+                previous = previous.replace(tzinfo=timezone.utc)
+            return (current.astimezone(timezone.utc) - previous.astimezone(timezone.utc)).total_seconds()
+        except (TypeError, ValueError):
+            return None
+
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
@@ -70,6 +85,7 @@ class TrainingStore:
                     message TEXT NOT NULL,
                     ric TEXT,
                     station TEXT,
+                    received_at TEXT,
                     routing_source TEXT NOT NULL DEFAULT 'unknown',
                     relevance_class TEXT NOT NULL DEFAULT 'unknown',
                     relevance_score REAL NOT NULL DEFAULT 0.75,
@@ -104,6 +120,11 @@ class TrainingStore:
                 );
                 """
             )
+            event_columns = {
+                str(row["name"]) for row in conn.execute("PRAGMA table_info(training_events)").fetchall()
+            }
+            if "received_at" not in event_columns:
+                conn.execute("ALTER TABLE training_events ADD COLUMN received_at TEXT")
             conn.commit()
 
     def _preview_classification(self, ric: str, fallback_station: str, message: str) -> dict[str, Any]:
@@ -135,13 +156,23 @@ class TrainingStore:
             return {"station": None, "source": "training-candidate", "candidate": candidate}
         return {"station": None, "source": "unknown", "candidate": None}
 
-    def create_replay(self, name: Any, raw_text: Any, created_by: int = None) -> dict[str, Any]:
+    def create_replay(
+        self,
+        name: Any,
+        raw_text: Any,
+        created_by: int = None,
+        duplicate_window_seconds: int = 30,
+    ) -> dict[str, Any]:
         run_name = " ".join(str(name or "Træningskørsel").strip().split())[:120] or "Træningskørsel"
         lines = [line.rstrip("\r") for line in str(raw_text or "").splitlines() if line.strip()]
         if not lines:
             raise ValueError("Indsæt mindst én melding/loglinje")
         if len(lines) > self.MAX_REPLAY_LINES:
             raise ValueError("For mange linjer i én replay-kørsel")
+        try:
+            duplicate_window = max(1, min(int(duplicate_window_seconds), 300))
+        except (TypeError, ValueError):
+            duplicate_window = 30
 
         now = self._now()
         with self._lock, self.connect() as conn:
@@ -154,6 +185,7 @@ class TrainingStore:
 
         previous_fingerprint = None
         previous_event_id = None
+        previous_received_at = None
         parsed_count = 0
         real_count = 0
         duplicate_count = 0
@@ -175,7 +207,14 @@ class TrainingStore:
             parsed_count += 1
             learned = self.adaptive.learned_relevance(message)
             fingerprint = self.adaptive.exact_signature(message)
-            duplicate_of = previous_event_id if previous_fingerprint == fingerprint else None
+            delta = self._timestamp_delta_seconds(event.received_at, previous_received_at)
+            is_immediate_duplicate = (
+                previous_fingerprint == fingerprint
+                and previous_event_id is not None
+                and delta is not None
+                and 0 <= delta <= duplicate_window
+            )
+            duplicate_of = previous_event_id if is_immediate_duplicate else None
             suppressed_reason = "duplicate" if duplicate_of else ("noise" if learned["classification"] == "noise" else None)
             if suppressed_reason == "duplicate":
                 duplicate_count += 1
@@ -204,17 +243,18 @@ class TrainingStore:
             with self._lock, self.connect() as conn:
                 cur = conn.execute(
                     """INSERT INTO training_events(
-                           run_id, line_no, raw_line, message, ric, station, routing_source,
+                           run_id, line_no, raw_line, message, ric, station, received_at, routing_source,
                            relevance_class, relevance_score, suppressed_reason,
                            duplicate_of_event_id, decision_reason
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         run_id, line_no, raw_line, message, ric or None, preview.get("station"),
-                        preview.get("source") or "unknown", learned["classification"],
-                        float(learned["score"]), suppressed_reason, duplicate_of,
+                        event.received_at or None, preview.get("source") or "unknown",
+                        learned["classification"], float(learned["score"]), suppressed_reason,
+                        duplicate_of,
                         (
-                            "identisk med forrige replay-melding"
-                            if duplicate_of else learned["reason"]
+                            f"identisk med forrige replay-melding · {delta:.0f}s inden for {duplicate_window}s"
+                            if duplicate_of and delta is not None else learned["reason"]
                         ),
                     ),
                 )
@@ -222,6 +262,7 @@ class TrainingStore:
                 conn.commit()
             previous_fingerprint = fingerprint
             previous_event_id = event_id
+            previous_received_at = event.received_at or None
 
         with self._lock, self.connect() as conn:
             for station_name, count in station_counts.items():
