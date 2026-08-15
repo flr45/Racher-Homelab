@@ -200,7 +200,19 @@ def collect_status() -> dict[str, str]:
 def main() -> int:
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     storage = Storage(DB_PATH)
-    storage.update_runtime_status(collect_status())
+    status = collect_status()
+    previous = storage.get_runtime_status()
+    previous_ever_seen = str(previous.get("fsk_usb_ever_seen", {}).get("value") or "0") == "1"
+    previous_last_seen = str(previous.get("fsk_usb_last_seen", {}).get("value") or "")
+
+    if status.get("fsk_usb_connected") == "1":
+        status["fsk_usb_ever_seen"] = "1"
+    else:
+        status["fsk_usb_ever_seen"] = "1" if previous_ever_seen else "0"
+        if previous_ever_seen and previous_last_seen:
+            status["fsk_usb_last_seen"] = previous_last_seen
+
+    storage.update_runtime_status(status)
     return 0
 
 
