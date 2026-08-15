@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 import unittest
 
@@ -40,6 +41,95 @@ class TrainingStoreTests(unittest.TestCase):
         self.assertEqual(run["events"][1]["suppressed_reason"], "duplicate")
         self.assertEqual(run["events"][0]["message"], run["events"][1]["message"])
         self.assertNotEqual(run["events"][0]["ric"], run["events"][1]["ric"])
+        self.assertEqual(run["events"][0]["received_at"], "2026-08-14T12:00:00")
+        self.assertEqual(run["events"][1]["received_at"], "2026-08-14T12:00:05")
+
+    def test_replay_same_text_outside_window_is_not_duplicate(self):
+        message = "Næstved Brandvæsen BRANDALARM Industrivej 1"
+        text = "\n".join([
+            self.pdw("1111111", message, "12:00:00"),
+            self.pdw("2222222", message, "12:05:00"),
+        ])
+        run = self.training.create_replay("Ikke dublet", text, self.admin_id, 30)
+        self.assertEqual(run["parsed_count"], 2)
+        self.assertEqual(run["real_count"], 2)
+        self.assertEqual(run["duplicate_count"], 0)
+        self.assertIsNone(run["events"][1]["suppressed_reason"])
+        self.assertIsNone(run["events"][1]["duplicate_of_event_id"])
+
+    def test_replay_uses_configurable_duplicate_window(self):
+        message = "Næstved Brandvæsen BRANDALARM Industrivej 2"
+        text = "\n".join([
+            self.pdw("1111111", message, "12:00:00"),
+            self.pdw("2222222", message, "12:00:45"),
+        ])
+        normal = self.training.create_replay("30 sek", text, self.admin_id, 30)
+        wider = self.training.create_replay("60 sek", text, self.admin_id, 60)
+        self.assertEqual(normal["duplicate_count"], 0)
+        self.assertEqual(wider["duplicate_count"], 1)
+
+    def test_replay_without_timestamps_is_not_falsely_suppressed_as_duplicate(self):
+        text = "\n".join([
+            "RIC: 1111111 MESSAGE: SYSTEMTEST FAST TEKST",
+            "RIC: 2222222 MESSAGE: SYSTEMTEST FAST TEKST",
+        ])
+        run = self.training.create_replay("Ingen tid", text, self.admin_id)
+        self.assertEqual(run["parsed_count"], 2)
+        self.assertEqual(run["duplicate_count"], 0)
+        self.assertEqual(run["real_count"], 2)
+
+    def test_existing_training_table_is_migrated_with_received_at(self):
+        legacy_tmp = tempfile.TemporaryDirectory()
+        try:
+            legacy_db = os.path.join(legacy_tmp.name, "legacy.db")
+            legacy_storage = Storage(legacy_db)
+            legacy_admin = legacy_storage.create_user("legacy", "Legacy", "hash", "admin", None)
+            legacy_routing = RoutingStore(legacy_db)
+            legacy_adaptive = AdaptiveFilter(legacy_db)
+            with sqlite3.connect(legacy_db) as conn:
+                conn.executescript(
+                    """
+                    CREATE TABLE training_runs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        created_by INTEGER,
+                        created_at TEXT NOT NULL,
+                        total_lines INTEGER NOT NULL DEFAULT 0,
+                        parsed_count INTEGER NOT NULL DEFAULT 0,
+                        real_count INTEGER NOT NULL DEFAULT 0,
+                        duplicate_count INTEGER NOT NULL DEFAULT 0,
+                        noise_count INTEGER NOT NULL DEFAULT 0,
+                        unknown_count INTEGER NOT NULL DEFAULT 0,
+                        unclassified_count INTEGER NOT NULL DEFAULT 0,
+                        station_candidate_count INTEGER NOT NULL DEFAULT 0,
+                        ric_candidate_count INTEGER NOT NULL DEFAULT 0,
+                        applied_at TEXT
+                    );
+                    CREATE TABLE training_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id INTEGER NOT NULL,
+                        line_no INTEGER NOT NULL,
+                        raw_line TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        ric TEXT,
+                        station TEXT,
+                        routing_source TEXT NOT NULL DEFAULT 'unknown',
+                        relevance_class TEXT NOT NULL DEFAULT 'unknown',
+                        relevance_score REAL NOT NULL DEFAULT 0.75,
+                        suppressed_reason TEXT,
+                        duplicate_of_event_id INTEGER,
+                        decision_reason TEXT NOT NULL DEFAULT '',
+                        feedback TEXT
+                    );
+                    """
+                )
+            TrainingStore(legacy_db, legacy_routing, legacy_adaptive)
+            with sqlite3.connect(legacy_db) as conn:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(training_events)").fetchall()}
+            self.assertIn("received_at", columns)
+            self.assertIsNotNone(legacy_admin)
+        finally:
+            legacy_tmp.cleanup()
 
     def test_replay_builds_station_and_ric_candidates_without_mutating_live_routing(self):
         text = "\n".join([
