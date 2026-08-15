@@ -14,6 +14,9 @@ class SecurityHardeningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             script = textwrap.dedent(
                 """
+                import time
+                from collections import deque
+
                 import app
 
                 app.app.config.update(TESTING=True)
@@ -79,6 +82,17 @@ class SecurityHardeningTests(unittest.TestCase):
                 api = other.get('/api/status', base_url=base_url)
                 assert api.status_code == 200, api.get_data(as_text=True)
                 assert api.headers['Cache-Control'] == 'no-store'
+
+                # Randomized usernames/IPs must not create unbounded in-memory
+                # throttle bookkeeping on the small appliance.
+                now = time.monotonic()
+                with app._login_lock:
+                    app._login_failures.clear()
+                    app._login_blocked_until.clear()
+                    for index in range(app._LOGIN_STATE_MAX_KEYS + 50):
+                        app._login_failures[f'noise:{index}'] = deque([now])
+                    app._trim_login_state_locked(now, force=True)
+                    assert len(app._login_failures) <= app._LOGIN_STATE_MAX_KEYS
 
                 app.source.stop()
                 """
