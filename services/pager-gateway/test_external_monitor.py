@@ -13,6 +13,21 @@ class ExternalMonitorTests(unittest.TestCase):
             monitor.write_state({"enabled": True, "failure_count": 2}, path)
             self.assertEqual(monitor.read_state(path)["failure_count"], 2)
 
+    def test_health_uses_shared_key_protected_appliance_endpoint(self):
+        with patch.object(monitor, "MONITOR_KEY", "monitor-secret"), \
+             patch.object(monitor, "BASE_URL", "http://pager.test:8088"), \
+             patch.object(monitor, "get_json", return_value={"ok": True, "database": "ok"}) as get:
+            self.assertTrue(monitor.health_ok())
+        get.assert_called_once_with(
+            "http://pager.test:8088/api/external-monitor/health",
+            headers={"X-Pager-Monitor-Key": "monitor-secret"},
+        )
+
+    def test_health_without_monitor_key_is_not_accepted(self):
+        with patch.object(monitor, "MONITOR_KEY", ""), patch.object(monitor, "get_json") as get:
+            self.assertFalse(monitor.health_ok())
+        get.assert_not_called()
+
     def test_three_failures_send_one_alarm_and_cache_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             state_file = Path(tmp) / "state.json"
