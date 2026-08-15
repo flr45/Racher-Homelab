@@ -601,12 +601,21 @@ def main() -> int:
         if now >= next_status:
             try:
                 runtime = collect_runtime_status()
+                # Maintenance may have started while status collection was doing
+                # network/systemctl probes. Never write the now-stale snapshot into
+                # a database that a restore has already started replacing.
+                if _maintenance_in_progress():
+                    time.sleep(POLL_SECONDS)
+                    continue
                 storage.update_runtime_status(runtime)
                 maybe_manage_hotspot(runtime, network_state)
             except Exception as exc:
                 print(f"Kunne ikke gemme/runtime-styre status: {exc}", flush=True)
             next_status = now + STATUS_INTERVAL
 
+        if _maintenance_in_progress():
+            time.sleep(POLL_SECONDS)
+            continue
         command = storage.claim_next_system_command()
         if command:
             run_command(storage, command)
