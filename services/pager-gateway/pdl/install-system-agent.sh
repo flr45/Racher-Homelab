@@ -14,6 +14,7 @@ FSK_TIMER_PATH="/etc/systemd/system/racher-pager-fsk-status.timer"
 WATCHDOG_UNIT_PATH="/etc/systemd/system/racher-pager-gateway-watchdog.service"
 WATCHDOG_TIMER_PATH="/etc/systemd/system/racher-pager-gateway-watchdog.timer"
 HARDWARE_WATCHDOG_CONF="/etc/systemd/system.conf.d/racher-pager-watchdog.conf"
+WATCHDOG_RUNTIME_DIR="/run/racher-pager"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "System-agenten installeres kun på Linux/Raspberry Pi." >&2
@@ -27,10 +28,11 @@ for required in backup-pager.sh restore-pager.sh update-pager.sh rollback-pager.
   [[ -f "$SERVICE_DIR/pdl/$required" ]] || { echo "Mangler $SERVICE_DIR/pdl/$required" >&2; exit 1; }
 done
 
-sudo mkdir -p "$DATA_DIR" "$AGENT_DIR" "$INTEGRATION_DIR" "$BACKUP_DIR" "$DATA_DIR/update"
+sudo mkdir -p "$DATA_DIR" "$AGENT_DIR" "$INTEGRATION_DIR" "$BACKUP_DIR" "$DATA_DIR/update" "$WATCHDOG_RUNTIME_DIR"
 sudo touch "$DATA_DIR/pager.db"
 sudo chmod 0750 "$DATA_DIR"
 sudo chmod 0700 "$BACKUP_DIR"
+sudo chmod 0755 "$WATCHDOG_RUNTIME_DIR"
 
 sudo install -m 0755 "$SERVICE_DIR/system_agent.py" "$AGENT_DIR/system_agent.py"
 sudo install -m 0755 "$SERVICE_DIR/fsk_status_agent.py" "$AGENT_DIR/fsk_status_agent.py"
@@ -120,14 +122,20 @@ Wants=docker.service
 Type=oneshot
 User=root
 WorkingDirectory=$AGENT_DIR
+RuntimeDirectory=racher-pager
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+Environment=PAGER_RUNTIME_DIR=$WATCHDOG_RUNTIME_DIR
+Environment=PAGER_WATCHDOG_STATE_FILE=$WATCHDOG_RUNTIME_DIR/gateway-watchdog.failures
+Environment=PAGER_MAINTENANCE_LOCK=$WATCHDOG_RUNTIME_DIR/maintenance.lock
 Environment=PAGER_WATCHDOG_FAILURE_THRESHOLD=3
-Environment=PAGER_MAINTENANCE_LOCK=/run/racher-pager-update.lock
 EnvironmentFile=-/etc/racher-pager/gateway.env
 ExecStart=/usr/bin/python3 $AGENT_DIR/gateway_watchdog.py
 NoNewPrivileges=true
 ProtectHome=true
 PrivateTmp=true
 ProtectSystem=strict
+ReadWritePaths=$WATCHDOG_RUNTIME_DIR
 EOF
 
 sudo tee "$WATCHDOG_TIMER_PATH" >/dev/null <<'EOF'
