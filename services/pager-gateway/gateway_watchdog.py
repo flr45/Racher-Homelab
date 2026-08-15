@@ -14,8 +14,9 @@ GATEWAY_PORT = int(os.getenv("PAGER_GATEWAY_PORT", "8088"))
 HEALTH_URL = os.getenv("PAGER_GATEWAY_HEALTH_URL", f"http://127.0.0.1:{GATEWAY_PORT}/healthz")
 CONTAINER_NAME = os.getenv("PAGER_GATEWAY_CONTAINER", "racher-pager-gateway")
 FAILURE_THRESHOLD = max(1, int(os.getenv("PAGER_WATCHDOG_FAILURE_THRESHOLD", "3")))
-STATE_FILE = Path(os.getenv("PAGER_WATCHDOG_STATE_FILE", "/run/racher-pager-gateway-watchdog.failures"))
-MAINTENANCE_LOCK = Path(os.getenv("PAGER_MAINTENANCE_LOCK", "/run/racher-pager-update.lock"))
+RUNTIME_DIR = Path(os.getenv("PAGER_RUNTIME_DIR", "/run/racher-pager"))
+STATE_FILE = Path(os.getenv("PAGER_WATCHDOG_STATE_FILE", str(RUNTIME_DIR / "gateway-watchdog.failures")))
+MAINTENANCE_LOCK = Path(os.getenv("PAGER_MAINTENANCE_LOCK", str(RUNTIME_DIR / "maintenance.lock")))
 
 
 def health_ok(url: str = HEALTH_URL, timeout: float = 3.0) -> bool:
