@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent
+PDL = ROOT / "pdl"
+
+
+class RuntimeDeploymentTests(unittest.TestCase):
+    def test_system_agent_installer_refreshes_host_executed_files(self):
+        script = (PDL / "install-system-agent.sh").read_text(encoding="utf-8")
+        self.assertIn("configure-pdl.sh run-pdl-headless.sh", script)
+        self.assertIn('network_portal.py" "$NETWORK_DIR/network_portal.py', script)
+        self.assertIn("TimeoutStartSec=150s", script)
+        self.assertIn("systemctl reset-failed racher-pdl.service", script)
+        self.assertIn("systemctl restart racher-pdl.service", script)
+
+    def test_update_validates_recovery_layers_and_restores_host_files(self):
+        script = (PDL / "update-pager.sh").read_text(encoding="utf-8")
+        self.assertIn("restore_host_runtime_from_checkout", script)
+        self.assertIn("gateway_watchdog.py", script)
+        self.assertIn("fsk_status_agent.py", script)
+        self.assertIn("external_monitor.py", script)
+        self.assertIn("systemctl is-active --quiet racher-pager-system-agent.service", script)
+        self.assertIn("systemctl is-active --quiet racher-pager-gateway-watchdog.timer", script)
+        self.assertIn("systemctl is-active --quiet racher-pdl.service", script)
+
+    def test_manual_rollback_restores_non_container_runtime(self):
+        script = (PDL / "rollback-pager.sh").read_text(encoding="utf-8")
+        self.assertIn("configure-pdl.sh", script)
+        self.assertIn("run-pdl-headless.sh", script)
+        self.assertIn("network_portal.py", script)
+        self.assertIn("install-system-agent.sh", script)
+
+    def test_pdl_wrapper_waits_for_pinned_or_ftdi_device(self):
+        script = (PDL / "run-pdl-headless.sh").read_text(encoding="utf-8")
+        self.assertIn("select_fsk_device", script)
+        self.assertIn("pinnede enhed", script)
+        self.assertIn("*ftdi*", script)
+        self.assertIn("*ft232*", script)
+        self.assertIn("venter roligt på hardware", script)
+        self.assertIn('sleep "$DEVICE_WAIT_SECONDS"', script)
+
+
+if __name__ == "__main__":
+    unittest.main()
