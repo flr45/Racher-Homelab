@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 class ExternalMonitorConfigTests(unittest.TestCase):
-    def test_config_is_admin_managed_and_tailscale_only(self):
+    def test_config_is_admin_managed_and_shared_key_protected(self):
         with tempfile.TemporaryDirectory() as tmp:
             script = textwrap.dedent(
                 """
@@ -39,24 +39,28 @@ class ExternalMonitorConfigTests(unittest.TestCase):
                     'external_monitor_failure_threshold': 3,
                 }, headers={'X-CSRF-Token': csrf})
                 assert saved.status_code == 200, saved.get_data(as_text=True)
+                app.storage.update_settings({'external_monitor_access_key': 'test-monitor-key-abcdefghijklmnopqrstuvwxyz'})
 
                 settings = client.get('/api/settings').get_json()
                 assert settings['external_monitor_enabled'] == '1'
                 assert settings['external_monitor_sms_to'] == '+4512345678'
                 assert settings['external_monitor_failure_threshold'] == '3'
 
-                lan = client.get(
-                    '/api/external-monitor/config',
-                    environ_base={'REMOTE_ADDR': '192.168.1.10'},
-                )
-                assert lan.status_code == 403, lan.get_data(as_text=True)
+                missing = client.get('/api/external-monitor/config')
+                assert missing.status_code == 403, missing.get_data(as_text=True)
 
-                tailscale = client.get(
+                wrong = client.get(
                     '/api/external-monitor/config',
-                    environ_base={'REMOTE_ADDR': '100.111.28.12'},
+                    headers={'X-Pager-Monitor-Key': 'wrong-key'},
                 )
-                assert tailscale.status_code == 200, tailscale.get_data(as_text=True)
-                config = tailscale.get_json()
+                assert wrong.status_code == 403, wrong.get_data(as_text=True)
+
+                allowed = client.get(
+                    '/api/external-monitor/config',
+                    headers={'X-Pager-Monitor-Key': 'test-monitor-key-abcdefghijklmnopqrstuvwxyz'},
+                )
+                assert allowed.status_code == 200, allowed.get_data(as_text=True)
+                config = allowed.get_json()
                 assert config['enabled'] is True
                 assert config['sms_to'] == '+4512345678'
                 assert config['failure_threshold'] == 3
