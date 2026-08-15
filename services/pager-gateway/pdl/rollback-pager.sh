@@ -9,7 +9,7 @@ UPDATE_DIR="$STATE_ROOT/update"
 INTEGRATION_DIR="${PAGER_INTEGRATION_DIR:-/opt/racher-pager/integration}"
 COMPOSE_SCRIPT="$INTEGRATION_DIR/pager-compose.sh"
 BACKUP_SCRIPT="$INTEGRATION_DIR/backup-pager.sh"
-LOCK_FILE="/run/racher-pager-update.lock"
+LOCK_FILE="${PAGER_MAINTENANCE_LOCK:-/run/racher-pager/maintenance.lock}"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "rollback-pager.sh skal køre som root via host-agenten." >&2
@@ -26,8 +26,9 @@ if [[ ! "$TARGET" =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 
+mkdir -p "$(dirname "$LOCK_FILE")"
 exec 9>"$LOCK_FILE"
-flock -n 9 || { echo "En update/rollback kører allerede." >&2; exit 1; }
+flock -n 9 || { echo "En update/rollback/restore kører allerede." >&2; exit 1; }
 CURRENT="$(git -C "$RUNTIME_REPO" rev-parse HEAD)"
 git -C "$RUNTIME_REPO" cat-file -e "$TARGET^{commit}"
 [[ -x "$BACKUP_SCRIPT" ]] && "$BACKUP_SCRIPT"
