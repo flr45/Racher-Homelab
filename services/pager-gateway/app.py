@@ -202,6 +202,11 @@ app.view_functions["healthz"] = robust_healthz
 # the original Tailscale source address from Flask, so the private config endpoint
 # uses a dedicated shared monitor key rather than trusting request.remote_addr.
 _MONITOR_PHONE_RE = re.compile(r"^\+?[1-9]\d{6,14}$")
+_MONITOR_SETTING_KEYS = {
+    "external_monitor_enabled",
+    "external_monitor_sms_to",
+    "external_monitor_failure_threshold",
+}
 
 
 def normalize_monitor_phone(value: str) -> str:
@@ -221,6 +226,26 @@ def monitor_request_allowed() -> bool:
     return bool(expected and supplied and hmac.compare_digest(expected, supplied))
 
 
+# The shared monitor key is a machine credential, not a browser-editable setting.
+# Even an authenticated admin UI only needs to know whether the key exists.
+_original_settings_get = app.view_functions["api_settings_get"]
+
+
+def monitor_safe_settings_get(*args, **kwargs):
+    response = _original_settings_get(*args, **kwargs)
+    if isinstance(response, tuple) or getattr(response, "status_code", 200) >= 400:
+        return response
+    payload = response.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return response
+    payload["external_monitor_access_key_set"] = bool(payload.get("external_monitor_access_key"))
+    payload["external_monitor_access_key"] = ""
+    return jsonify(payload)
+
+
+app.view_functions["api_settings_get"] = monitor_safe_settings_get
+
+
 _original_settings_post = app.view_functions["api_settings_post"]
 
 
@@ -231,25 +256,50 @@ def monitor_validated_settings_post(*args, **kwargs):
         return jsonify({"ok": False, "error": "admin required"}), 403
 
     payload = request.get_json(silent=True) or {}
-    try:
-        phone = normalize_monitor_phone(payload.get("external_monitor_sms_to", ""))
-        threshold = max(1, min(int(payload.get("external_monitor_failure_threshold", "3")), 10))
-    except (TypeError, ValueError) as exc:
-        return jsonify({"ok": False, "error": str(exc) or "Ugyldig monitor-indstilling."}), 400
+    if not isinstance(payload, dict):
+        payload = {}
 
-    enabled = as_bool(payload.get("external_monitor_enabled"), False)
-    if enabled and not phone:
-        return jsonify({"ok": False, "error": "Indtast et telefonnummer før ekstern overvågning aktiveres."}), 400
+    # Never allow the normal settings API to rotate or erase the machine key.
+    # request.get_json() is cached by Flask, so mutating this dict also protects
+    # the original settings handler that reads the same request body afterwards.
+    payload.pop("external_monitor_access_key", None)
 
-    response = _original_settings_post(*args, **kwargs)
-    status_code = response[1] if isinstance(response, tuple) and len(response) > 1 else getattr(response, "status_code", 200)
-    if int(status_code) < 400:
-        storage.update_settings({
-            "external_monitor_enabled": "1" if enabled else "0",
-            "external_monitor_sms_to": phone,
-            "external_monitor_failure_threshold": str(threshold),
-        })
-    return response
+    # Partial settings updates must leave monitor state untouched. The browser
+    # normally submits the full form, but API clients are allowed to change just
+    # one unrelated setting without accidentally disabling the external alarm.
+    if any(key in payload for key in _MONITOR_SETTING_KEYS):
+        current = storage.get_settings()
+        try:
+            phone = normalize_monitor_phone(
+                payload.get("external_monitor_sms_to", current.get("external_monitor_sms_to", ""))
+            )
+            threshold = max(
+                1,
+                min(
+                    int(
+                        payload.get(
+                            "external_monitor_failure_threshold",
+                            current.get("external_monitor_failure_threshold", "3"),
+                        )
+                    ),
+                    10,
+                ),
+            )
+        except (TypeError, ValueError) as exc:
+            return jsonify({"ok": False, "error": str(exc) or "Ugyldig monitor-indstilling."}), 400
+
+        enabled = as_bool(
+            payload.get("external_monitor_enabled", current.get("external_monitor_enabled", "0")),
+            current.get("external_monitor_enabled", "0") == "1",
+        )
+        if enabled and not phone:
+            return jsonify({"ok": False, "error": "Indtast et telefonnummer før ekstern overvågning aktiveres."}), 400
+
+        payload["external_monitor_enabled"] = "1" if enabled else "0"
+        payload["external_monitor_sms_to"] = phone
+        payload["external_monitor_failure_threshold"] = str(threshold)
+
+    return _original_settings_post(*args, **kwargs)
 
 
 app.view_functions["api_settings_post"] = monitor_validated_settings_post
