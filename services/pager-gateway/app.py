@@ -4,6 +4,7 @@ import re
 import threading
 import time
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 
 from gateway import FileTailSource
 
@@ -216,9 +217,8 @@ source.start()
 
 # A process can remain alive while an internal dependency has failed. Docker's
 # restart policy alone cannot recover that state, so make /healthz reflect the two
-# dependencies required for live alarm ingestion: SQLite and the logfile tailer.
-# "waiting" is healthy for PDL mode because missing hardware/log data is a valid
-# state while the appliance is waiting for the scanner.
+# dependencies required by the web ingestion process itself. Host/PDL/FSK health
+# is intentionally exposed separately to the external monitor below.
 def robust_healthz():
     try:
         with storage.connect() as conn:
@@ -241,8 +241,8 @@ app.view_functions["healthz"] = robust_healthz
 # External monitor settings live in the Pager database and are edited only by an
 # authenticated admin. The monitoring Pi caches the last known recipient so a
 # complete pager power/network failure can still trigger an SMS. Docker NAT hides
-# the original Tailscale source address from Flask, so the private config endpoint
-# uses a dedicated shared monitor key rather than trusting request.remote_addr.
+# the original Tailscale source address from Flask, so the private endpoints use a
+# dedicated shared monitor key rather than trusting request.remote_addr.
 _MONITOR_PHONE_RE = re.compile(r"^\+?[1-9]\d{6,14}$")
 _MONITOR_SETTING_KEYS = {
     "external_monitor_enabled",
@@ -266,6 +266,23 @@ def monitor_request_allowed() -> bool:
     expected = str(storage.get_setting("external_monitor_access_key", "") or "").strip()
     supplied = str(request.headers.get("X-Pager-Monitor-Key", "") or "").strip()
     return bool(expected and supplied and hmac.compare_digest(expected, supplied))
+
+
+def _runtime_values() -> dict[str, str]:
+    rows = storage.get_runtime_status()
+    return {key: str(item.get("value") or "") for key, item in rows.items()}
+
+
+def _timestamp_age_seconds(value: str) -> float | None:
+    if not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - moment.astimezone(timezone.utc)).total_seconds())
+    except ValueError:
+        return None
 
 
 # The shared monitor key is a machine credential, not a browser-editable setting.
@@ -359,6 +376,54 @@ def external_monitor_config():
         "failure_threshold": int(settings.get("external_monitor_failure_threshold", "3") or 3),
         "gateway_name": settings.get("gateway_name", "Racher Pager Gateway"),
     })
+
+
+@app.get("/api/external-monitor/health")
+def external_monitor_health():
+    if not monitor_request_allowed():
+        return jsonify({"ok": False, "error": "monitor key required"}), 403
+
+    issues: list[str] = []
+    try:
+        with storage.connect() as conn:
+            conn.execute("SELECT 1").fetchone()
+        database_state = "ok"
+    except Exception:
+        database_state = "error"
+        issues.append("database")
+
+    source_state = str(source.status.get("state") or "unknown")
+    if setting("source_mode", "mock") == "pdl-file" and source_state not in {"waiting", "running"}:
+        issues.append("gateway-source")
+
+    runtime = _runtime_values()
+    if setting("source_mode", "mock") == "pdl-file":
+        heartbeat_age = _timestamp_age_seconds(runtime.get("agent_heartbeat", ""))
+        if heartbeat_age is None or heartbeat_age > 60:
+            issues.append("host-agent")
+        if runtime.get("pdl_service") != "active":
+            issues.append("pdl-service")
+
+        # Before commissioning, missing FSK hardware is expected. Once the probe
+        # has seen the interface once, a later disconnect or loss of PDL ownership
+        # is an outage-worthy condition for the external SMS monitor.
+        if runtime.get("fsk_usb_ever_seen") == "1":
+            if runtime.get("fsk_usb_connected") != "1":
+                issues.append("fsk-usb")
+            elif runtime.get("fsk_usb_pdl_in_use") != "1":
+                issues.append("fsk-pdl-ownership")
+
+    payload = {
+        "ok": not issues,
+        "database": database_state,
+        "source": source_state,
+        "host_agent": runtime.get("agent_heartbeat", ""),
+        "pdl_service": runtime.get("pdl_service", ""),
+        "fsk_commissioned": runtime.get("fsk_usb_ever_seen", "0") == "1",
+        "fsk_connected": runtime.get("fsk_usb_connected", "0") == "1",
+        "issues": issues,
+    }
+    return jsonify(payload), (200 if not issues else 503)
 
 
 training = TrainingStore(DB_PATH, routing, adaptive)
