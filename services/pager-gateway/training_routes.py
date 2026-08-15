@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable
 
 from flask import g, jsonify, request
+
+
+_TRAINING_APPLY_LOCK = threading.Lock()
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -80,10 +84,16 @@ def register_training_routes(app: Any, storage: Any, training: Any, auth_require
     @app.post("/api/training/runs/<int:run_id>/apply")
     @auth_required(admin=True)
     def api_training_apply(run_id: int):
-        try:
-            result = training.apply_run(run_id)
-        except ValueError as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 400
+        # Applying a run mutates several learning/routing tables before the run is
+        # finally marked as applied. Gunicorn deliberately runs one web worker for
+        # this appliance, but requests are threaded; two near-simultaneous apply
+        # requests could otherwise both pass the applied_at check and count the
+        # same feedback twice. Serialize this critical section at the HTTP edge.
+        with _TRAINING_APPLY_LOCK:
+            try:
+                result = training.apply_run(run_id)
+            except ValueError as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 400
         storage.add_audit(
             g.user["id"], "training-apply",
             (
