@@ -52,8 +52,13 @@ def get_json(url: str, timeout: float = HTTP_TIMEOUT, headers: dict[str, str] | 
 
 
 def health_ok() -> bool:
+    if not MONITOR_KEY:
+        return False
     try:
-        payload = get_json(f"{BASE_URL}/healthz")
+        payload = get_json(
+            f"{BASE_URL}/api/external-monitor/health",
+            headers={"X-Pager-Monitor-Key": MONITOR_KEY},
+        )
         return payload.get("ok") is True and payload.get("database") == "ok"
     except Exception:
         return False
@@ -152,7 +157,7 @@ def main() -> int:
         return 0
 
     reachable = tailscale_reachable()
-    reason = "gateway svarer ikke" if reachable else "Pi/netvaerk kan ikke naas via Tailscale"
+    reason = "pager-kæden svarer ikke korrekt" if reachable else "Pi/netvaerk kan ikke naas via Tailscale"
     state["last_error"] = reason
     state["failure_count"] = int(state.get("failure_count") or 0) + 1
     if not state.get("outage_started_at"):
