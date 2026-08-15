@@ -1,3 +1,4 @@
+import fcntl
 import tempfile
 import unittest
 from pathlib import Path
@@ -60,6 +61,24 @@ class FskStatusTests(unittest.TestCase):
             self.assertEqual(runtime["fsk_usb_ever_seen"]["value"], "1")
             self.assertEqual(runtime["fsk_usb_connected"]["value"], "0")
             self.assertEqual(runtime["fsk_usb_last_seen"]["value"], "2026-08-15T10:00:00+00:00")
+
+    def test_maintenance_lock_detects_active_holder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "maintenance.lock"
+            handle = path.open("a+")
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.assertTrue(fsk.maintenance_in_progress(path))
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                handle.close()
+            self.assertFalse(fsk.maintenance_in_progress(path))
+
+    def test_probe_does_not_touch_hardware_or_database_during_maintenance(self):
+        with patch.object(fsk, "maintenance_in_progress", return_value=True), \
+             patch.object(fsk, "collect_status") as collect:
+            self.assertEqual(fsk.main(), 0)
+        collect.assert_not_called()
 
 
 if __name__ == "__main__":
