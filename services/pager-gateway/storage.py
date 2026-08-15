@@ -22,6 +22,9 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "vapid_subject": "mailto:admin@racher.local",
     "duplicate_window_seconds": "30",
     "adaptive_filter_enabled": "1",
+    "external_monitor_enabled": "0",
+    "external_monitor_sms_to": "",
+    "external_monitor_failure_threshold": "3",
 }
 
 SYSTEM_ACTIONS = {
