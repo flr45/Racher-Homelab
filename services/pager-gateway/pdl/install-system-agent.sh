@@ -6,6 +6,7 @@ SERVICE_DIR="$REPO_ROOT/services/pager-gateway"
 DATA_DIR="${PAGER_DATA_HOST_PATH:-/var/lib/racher-pager}"
 AGENT_DIR="${PAGER_SYSTEM_AGENT_INSTALL_DIR:-/opt/racher-pager/system-agent}"
 INTEGRATION_DIR="${PAGER_INTEGRATION_DIR:-/opt/racher-pager/integration}"
+NETWORK_DIR="${PAGER_NETWORK_INSTALL_DIR:-/opt/racher-pager/network}"
 BACKUP_DIR="${PAGER_BACKUP_DIR:-/var/backups/racher-pager}"
 RUNTIME_REPO="${PAGER_RUNTIME_REPO:-/opt/racher-pager/runtime-repo}"
 UNIT_PATH="/etc/systemd/system/racher-pager-system-agent.service"
@@ -21,14 +22,14 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   exit 1
 fi
 
-for required in system_agent.py fsk_status_agent.py gateway_watchdog.py storage.py; do
+for required in system_agent.py fsk_status_agent.py gateway_watchdog.py storage.py network_portal.py; do
   [[ -f "$SERVICE_DIR/$required" ]] || { echo "Mangler $SERVICE_DIR/$required" >&2; exit 1; }
 done
-for required in backup-pager.sh restore-pager.sh update-pager.sh rollback-pager.sh pager-compose.sh; do
+for required in backup-pager.sh restore-pager.sh update-pager.sh rollback-pager.sh pager-compose.sh configure-pdl.sh run-pdl-headless.sh; do
   [[ -f "$SERVICE_DIR/pdl/$required" ]] || { echo "Mangler $SERVICE_DIR/pdl/$required" >&2; exit 1; }
 done
 
-sudo mkdir -p "$DATA_DIR" "$AGENT_DIR" "$INTEGRATION_DIR" "$BACKUP_DIR" "$DATA_DIR/update" "$WATCHDOG_RUNTIME_DIR"
+sudo mkdir -p "$DATA_DIR" "$AGENT_DIR" "$INTEGRATION_DIR" "$NETWORK_DIR" "$BACKUP_DIR" "$DATA_DIR/update" "$WATCHDOG_RUNTIME_DIR"
 sudo touch "$DATA_DIR/pager.db"
 sudo chmod 0750 "$DATA_DIR"
 sudo chmod 0700 "$BACKUP_DIR"
@@ -38,9 +39,16 @@ sudo install -m 0755 "$SERVICE_DIR/system_agent.py" "$AGENT_DIR/system_agent.py"
 sudo install -m 0755 "$SERVICE_DIR/fsk_status_agent.py" "$AGENT_DIR/fsk_status_agent.py"
 sudo install -m 0755 "$SERVICE_DIR/gateway_watchdog.py" "$AGENT_DIR/gateway_watchdog.py"
 sudo install -m 0644 "$SERVICE_DIR/storage.py" "$AGENT_DIR/storage.py"
-for helper in backup-pager.sh restore-pager.sh update-pager.sh rollback-pager.sh pager-compose.sh; do
+
+# These files are executed from /opt rather than directly from the git checkout.
+# Refresh them on every gateway update so the reported runtime commit and the
+# actually-running host code cannot drift apart.
+for helper in \
+  backup-pager.sh restore-pager.sh update-pager.sh rollback-pager.sh pager-compose.sh \
+  configure-pdl.sh run-pdl-headless.sh; do
   sudo install -m 0755 "$SERVICE_DIR/pdl/$helper" "$INTEGRATION_DIR/$helper"
 done
+sudo install -m 0755 "$SERVICE_DIR/network_portal.py" "$NETWORK_DIR/network_portal.py"
 
 sudo tee "$UNIT_PATH" >/dev/null <<EOF
 [Unit]
@@ -110,8 +118,8 @@ EOF
 
 # Docker's restart policy handles process exits, but not a wedged Gunicorn process
 # that remains alive. This independent root-owned watchdog probes /healthz and
-# restarts only after three consecutive failures. It shares the update/restore
-# maintenance lock, so planned downtime never triggers an accidental restart.
+# restarts only after three consecutive failures. If dockerd itself is unavailable
+# the watchdog escalates to restarting docker.service before retrying the container.
 sudo tee "$WATCHDOG_UNIT_PATH" >/dev/null <<EOF
 [Unit]
 Description=Racher Pager Gateway health watchdog
@@ -131,6 +139,7 @@ Environment=PAGER_MAINTENANCE_LOCK=$WATCHDOG_RUNTIME_DIR/maintenance.lock
 Environment=PAGER_WATCHDOG_FAILURE_THRESHOLD=3
 EnvironmentFile=-/etc/racher-pager/gateway.env
 ExecStart=/usr/bin/python3 $AGENT_DIR/gateway_watchdog.py
+TimeoutStartSec=150s
 NoNewPrivileges=true
 ProtectHome=true
 PrivateTmp=true
@@ -156,6 +165,11 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now racher-pager-system-agent.service
 sudo systemctl enable --now racher-pager-fsk-status.timer
 sudo systemctl enable --now racher-pager-gateway-watchdog.timer
+
+# Apply refreshed host-side code immediately. try-restart leaves a deliberately
+# inactive optional service alone while updating a service that is already active.
+sudo systemctl try-restart racher-pdl.service >/dev/null 2>&1 || true
+sudo systemctl try-restart racher-pager-network-portal.service >/dev/null 2>&1 || true
 
 # A process-level watchdog cannot recover a completely frozen Linux userspace or
 # kernel. Raspberry Pi exposes a hardware watchdog on supported installations.
