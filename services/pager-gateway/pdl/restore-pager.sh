@@ -50,6 +50,14 @@ if [[ ! -f "$TMP_DIR/data/pager.db" ]]; then
 fi
 sqlite3 "$TMP_DIR/data/pager.db" "PRAGMA integrity_check;" | grep -qx 'ok'
 
+# Machine credentials/configuration belong to the currently running appliance.
+# Preserve the monitor key when restoring application data on the same Pi; a
+# fresh Pi has no current key and therefore simply receives the backup value.
+CURRENT_MONITOR_KEY=""
+if [[ -f "$STATE_ROOT/pager.db" ]]; then
+  CURRENT_MONITOR_KEY="$(sqlite3 "$STATE_ROOT/pager.db" "SELECT value FROM settings WHERE key='external_monitor_access_key' LIMIT 1;" 2>/dev/null || true)"
+fi
+
 # Safety-backup af den nuværende tilstand før restore.
 if [[ -x "$BACKUP_SCRIPT" ]]; then
   "$BACKUP_SCRIPT"
@@ -62,6 +70,23 @@ else
 fi
 
 install -m 0640 "$TMP_DIR/data/pager.db" "$STATE_ROOT/pager.db"
+if [[ -n "$CURRENT_MONITOR_KEY" ]]; then
+  PAGER_RESTORE_DB="$STATE_ROOT/pager.db" PAGER_RESTORE_MONITOR_KEY="$CURRENT_MONITOR_KEY" python3 - <<'PY'
+import os
+import sqlite3
+
+path = os.environ["PAGER_RESTORE_DB"]
+key = os.environ["PAGER_RESTORE_MONITOR_KEY"]
+with sqlite3.connect(path) as conn:
+    conn.execute(
+        "INSERT INTO settings(key, value) VALUES ('external_monitor_access_key', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key,),
+    )
+PY
+fi
+unset CURRENT_MONITOR_KEY
+
 for file in session-secret vapid-private.pem; do
   if [[ -f "$TMP_DIR/data/$file" ]]; then
     install -m 0600 "$TMP_DIR/data/$file" "$STATE_ROOT/$file"
@@ -74,10 +99,15 @@ fi
 
 mkdir -p /etc/racher-pager
 for file in pdl.env gateway.env network.env cloudflared.token; do
-  if [[ -f "$TMP_DIR/etc/$file" ]]; then
+  destination="/etc/racher-pager/$file"
+  # Do not roll a working Pi's deployment path, Secure-cookie flag, Wi-Fi,
+  # hotspot PIN, pinned FSK device or tunnel credential back to an older value.
+  # On bare-metal disaster recovery the destination is absent, so the backup
+  # still supplies the complete machine configuration.
+  if [[ -f "$TMP_DIR/etc/$file" && ! -e "$destination" ]]; then
     mode=0640
     [[ "$file" == "network.env" || "$file" == "cloudflared.token" ]] && mode=0600
-    install -m "$mode" "$TMP_DIR/etc/$file" "/etc/racher-pager/$file"
+    install -m "$mode" "$TMP_DIR/etc/$file" "$destination"
   fi
 done
 
@@ -86,6 +116,7 @@ if [[ -x "$COMPOSE_SCRIPT" ]]; then
 else
   docker start racher-pager-gateway >/dev/null
 fi
+systemctl reset-failed racher-pdl.service >/dev/null 2>&1 || true
 systemctl restart racher-pdl.service >/dev/null 2>&1 || true
 systemctl restart cloudflared.service >/dev/null 2>&1 || true
 
