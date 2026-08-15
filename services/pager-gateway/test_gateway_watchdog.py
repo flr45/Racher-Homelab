@@ -7,6 +7,22 @@ import gateway_watchdog as watchdog
 
 
 class GatewayWatchdogTests(unittest.TestCase):
+    def test_runtime_state_stays_in_dedicated_run_directory(self):
+        self.assertEqual(watchdog.RUNTIME_DIR, Path("/run/racher-pager"))
+        self.assertEqual(watchdog.STATE_FILE.parent, watchdog.RUNTIME_DIR)
+        self.assertEqual(watchdog.MAINTENANCE_LOCK.parent, watchdog.RUNTIME_DIR)
+
+        root = Path(__file__).resolve().parent
+        installer = (root / "pdl" / "install-system-agent.sh").read_text(encoding="utf-8")
+        self.assertIn("RuntimeDirectory=racher-pager", installer)
+        self.assertIn("ReadWritePaths=$WATCHDOG_RUNTIME_DIR", installer)
+        self.assertNotIn("/run/racher-pager-update.lock", installer)
+
+        for name in ("update-pager.sh", "rollback-pager.sh", "restore-pager.sh"):
+            script = (root / "pdl" / name).read_text(encoding="utf-8")
+            self.assertIn("/run/racher-pager/maintenance.lock", script, msg=name)
+            self.assertNotIn("/run/racher-pager-update.lock", script, msg=name)
+
     def test_failure_counter_is_persistent_and_resettable(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "failures"
