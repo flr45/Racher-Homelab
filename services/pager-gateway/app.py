@@ -1,3 +1,5 @@
+import threading
+
 from gateway import FileTailSource
 
 
@@ -14,6 +16,22 @@ finally:
 
 from training import TrainingStore
 from training_routes import register_training_routes
+
+
+# The first-admin setup route checks whether any users exist before creating the
+# initial administrator. Gunicorn runs this appliance with one worker and several
+# threads, so serialize that whole check-and-create flow to prevent two concurrent
+# setup requests from both becoming administrators.
+_setup_lock = threading.Lock()
+_original_setup_view = app.view_functions["setup"]
+
+
+def serialized_setup(*args, **kwargs):
+    with _setup_lock:
+        return _original_setup_view(*args, **kwargs)
+
+
+app.view_functions["setup"] = serialized_setup
 
 
 # The PDL tailer deliberately keeps following the logfile in every mode so its
