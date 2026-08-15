@@ -25,13 +25,11 @@ class BackupScriptTests(unittest.TestCase):
 
         sqlite = self.bin / "sqlite3"
         sqlite.write_text(
-            "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            "dest=${3#.backup \' }\n"
-            "dest=${dest#\'}\n"
-            "dest=${dest%\'}\n"
-            "sleep \"${FAKE_SQLITE_SLEEP:-0}\"\n"
-            "cp \"$1\" \"$dest\"\n",
+            "#!/usr/bin/env python3\n"
+            "import os, shutil, sys, time\n"
+            "target = sys.argv[3].removeprefix('.backup ').strip().strip(chr(39))\n"
+            "time.sleep(float(os.environ.get('FAKE_SQLITE_SLEEP', '0')))\n"
+            "shutil.copyfile(sys.argv[1], target)\n",
             encoding="utf-8",
         )
         sqlite.chmod(0o755)
