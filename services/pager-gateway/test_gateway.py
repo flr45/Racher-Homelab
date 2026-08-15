@@ -1,6 +1,9 @@
+import os
+import tempfile
 import unittest
+from pathlib import Path
 
-from gateway import detect_station, parse_pdl_line, public_message
+from gateway import FileTailSource, detect_station, parse_pdl_line, public_message
 
 
 class PagerParsingTests(unittest.TestCase):
@@ -62,6 +65,17 @@ class PagerParsingTests(unittest.TestCase):
         text = public_message("RIC: 1234567 MESSAGE: BRANDALARM Testvej 1")
         self.assertEqual(text, "BRANDALARM Testvej 1")
         self.assertNotIn("1234567", text)
+
+    def test_file_tail_detects_replaced_log_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "pdl.log"
+            path.write_text("old\n", encoding="utf-8")
+            with path.open("r", encoding="utf-8") as handle:
+                self.assertTrue(FileTailSource._same_file(path, handle))
+                replacement = Path(tmp) / "pdl.log.new"
+                replacement.write_text("new\n", encoding="utf-8")
+                os.replace(replacement, path)
+                self.assertFalse(FileTailSource._same_file(path, handle))
 
 
 if __name__ == "__main__":
