@@ -24,14 +24,30 @@ if [[ ! -f "$ARCHIVE" ]]; then
   exit 1
 fi
 
-# Restore, update og rollback må aldrig køre samtidig. Gateway-watchdoggen prøver
-# samme lock non-blocking og springer health/restart over under planlagt nedetid.
+# Restore, update og rollback må aldrig køre samtidig. Gateway-watchdoggen,
+# system-agenten og FSK-proben respekterer samme lock og undgår DB-skrivning/restart
+# mens pager.db udskiftes.
 mkdir -p "$(dirname "$LOCK_FILE")"
 exec 9>"$LOCK_FILE"
 flock -n 9 || { echo "En update/rollback/restore kører allerede." >&2; exit 1; }
 
 TMP_DIR="$(mktemp -d)"
-cleanup() { rm -rf "$TMP_DIR"; }
+RUNTIME_PAUSED=0
+cleanup() {
+  local rc=$?
+  trap - EXIT
+  set +e
+  if [[ "$RUNTIME_PAUSED" == "1" ]]; then
+    if [[ -x "$COMPOSE_SCRIPT" ]]; then
+      "$COMPOSE_SCRIPT" up -d --remove-orphans >/dev/null 2>&1 || true
+    else
+      docker start racher-pager-gateway >/dev/null 2>&1 || true
+    fi
+    systemctl start racher-pager-fsk-status.timer >/dev/null 2>&1 || true
+  fi
+  rm -rf "$TMP_DIR"
+  exit "$rc"
+}
 trap cleanup EXIT
 
 # Afvis arkiver med absolutte stier eller traversal før extraction.
@@ -63,13 +79,25 @@ if [[ -x "$BACKUP_SCRIPT" ]]; then
   "$BACKUP_SCRIPT"
 fi
 
+# Stop all writers we can stop independently. The long-running host-agent cannot
+# be stopped here because this restore may have been spawned by that systemd
+# service; it instead observes the maintenance flock and skips DB access. The FSK
+# timer/service is safe to stop and systemctl waits for any active oneshot to exit.
 if [[ -x "$COMPOSE_SCRIPT" ]]; then
   "$COMPOSE_SCRIPT" stop pager-gateway >/dev/null 2>&1 || true
 else
   docker stop racher-pager-gateway >/dev/null 2>&1 || true
 fi
+systemctl stop racher-pager-fsk-status.timer >/dev/null 2>&1 || true
+systemctl stop racher-pager-fsk-status.service >/dev/null 2>&1 || true
+RUNTIME_PAUSED=1
 
+# Give an already-started short SQLite write from the host agent time to commit.
+# New writes are suppressed by the maintenance lock before the database swap.
+sleep 2
+rm -f "$STATE_ROOT/pager.db-wal" "$STATE_ROOT/pager.db-shm"
 install -m 0640 "$TMP_DIR/data/pager.db" "$STATE_ROOT/pager.db"
+
 if [[ -n "$CURRENT_MONITOR_KEY" ]]; then
   PAGER_RESTORE_DB="$STATE_ROOT/pager.db" PAGER_RESTORE_MONITOR_KEY="$CURRENT_MONITOR_KEY" python3 - <<'PY'
 import os
@@ -119,8 +147,11 @@ fi
 systemctl reset-failed racher-pdl.service >/dev/null 2>&1 || true
 systemctl restart racher-pdl.service >/dev/null 2>&1 || true
 systemctl restart cloudflared.service >/dev/null 2>&1 || true
+systemctl start racher-pager-fsk-status.timer >/dev/null 2>&1 || true
+RUNTIME_PAUSED=0
 
-# Agenten kan have fået ny DB/config. Genstart den efter dette script er afsluttet.
+# Agenten kan have cached timing/state around the old DB. Restart it just after
+# this script releases the maintenance lock.
 if command -v systemd-run >/dev/null 2>&1; then
   systemd-run --unit=racher-pager-agent-restart --on-active=3s \
     /usr/bin/systemctl restart racher-pager-system-agent.service >/dev/null 2>&1 || true
