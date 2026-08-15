@@ -110,6 +110,8 @@ class ExternalMonitorConfigTests(unittest.TestCase):
                     'fsk_usb_ever_seen': '0',
                     'fsk_usb_connected': '0',
                     'fsk_usb_pdl_in_use': '0',
+                    'tunnel_installed': '1',
+                    'tunnel_service': 'active',
                 })
                 healthy = client.get(
                     '/api/external-monitor/health',
@@ -117,6 +119,24 @@ class ExternalMonitorConfigTests(unittest.TestCase):
                 )
                 assert healthy.status_code == 200, healthy.get_data(as_text=True)
                 assert healthy.get_json()['ok'] is True
+
+                # If cloudflared is installed, losing its service must be visible
+                # even while the decoder and private Tailscale path still work.
+                app.storage.update_runtime_status({
+                    'agent_heartbeat': datetime.now(timezone.utc).isoformat(),
+                    'pdl_service': 'active',
+                    'fsk_usb_ever_seen': '0',
+                    'fsk_usb_connected': '0',
+                    'fsk_usb_pdl_in_use': '0',
+                    'tunnel_installed': '1',
+                    'tunnel_service': 'inactive',
+                })
+                tunnel_down = client.get(
+                    '/api/external-monitor/health',
+                    headers={'X-Pager-Monitor-Key': monitor_key},
+                )
+                assert tunnel_down.status_code == 503, tunnel_down.get_data(as_text=True)
+                assert 'cloudflare-tunnel' in tunnel_down.get_json()['issues']
 
                 # Once commissioned, losing the FSK interface becomes an outage
                 # even though missing hardware was acceptable before commissioning.
@@ -126,6 +146,8 @@ class ExternalMonitorConfigTests(unittest.TestCase):
                     'fsk_usb_ever_seen': '1',
                     'fsk_usb_connected': '0',
                     'fsk_usb_pdl_in_use': '0',
+                    'tunnel_installed': '1',
+                    'tunnel_service': 'active',
                 })
                 unplugged = client.get(
                     '/api/external-monitor/health',
