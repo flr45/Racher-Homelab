@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -23,19 +22,21 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def read_state(path: Path = STATE_FILE) -> dict[str, Any]:
+def read_state(path: Path | None = None) -> dict[str, Any]:
+    target = path or STATE_FILE
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(target.read_text(encoding="utf-8"))
         return value if isinstance(value, dict) else {}
     except (FileNotFoundError, OSError, json.JSONDecodeError):
         return {}
 
 
-def write_state(state: dict[str, Any], path: Path = STATE_FILE) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+def write_state(state: dict[str, Any], path: Path | None = None) -> None:
+    target = path or STATE_FILE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False, sort_keys=True), encoding="utf-8")
-    os.replace(tmp, path)
+    os.replace(tmp, target)
 
 
 def get_json(url: str, timeout: float = HTTP_TIMEOUT) -> dict[str, Any]:
@@ -123,6 +124,7 @@ def main() -> int:
             state["failure_threshold"] = max(1, min(int(config.get("failure_threshold") or 3), 10))
             state["gateway_name"] = str(config.get("gateway_name") or "Racher Pager Gateway")[:80]
             state["config_cached_at"] = now_iso()
+            state["last_config_error"] = ""
         except Exception as exc:
             state["last_config_error"] = str(exc)[:300]
 
