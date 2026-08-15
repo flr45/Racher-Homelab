@@ -1,4 +1,4 @@
-import ipaddress
+import hmac
 import re
 import threading
 
@@ -74,12 +74,11 @@ app.view_functions["healthz"] = robust_healthz
 
 
 # External monitor settings live in the Pager database and are edited only by an
-# authenticated admin. The monitoring Pi needs the last known recipient even when
-# this appliance later loses power, so it refreshes a local cache while the pager
-# is healthy. The config endpoint is intentionally reachable only over Tailscale's
-# CGNAT range; Cloudflare/public traffic cannot retrieve the SMS recipient.
+# authenticated admin. The monitoring Pi caches the last known recipient so a
+# complete pager power/network failure can still trigger an SMS. Docker NAT hides
+# the original Tailscale source address from Flask, so the private config endpoint
+# uses a dedicated shared monitor key rather than trusting request.remote_addr.
 _MONITOR_PHONE_RE = re.compile(r"^\+?[1-9]\d{6,14}$")
-_TAILSCALE_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 
 
 def normalize_monitor_phone(value: str) -> str:
@@ -94,12 +93,9 @@ def normalize_monitor_phone(value: str) -> str:
 
 
 def monitor_request_allowed() -> bool:
-    if os.getenv("PAGER_MONITOR_ALLOW_LOCAL", "0") == "1" and request.remote_addr in {"127.0.0.1", "::1"}:
-        return True
-    try:
-        return ipaddress.ip_address(request.remote_addr or "") in _TAILSCALE_NETWORK
-    except ValueError:
-        return False
+    expected = str(storage.get_setting("external_monitor_access_key", "") or "").strip()
+    supplied = str(request.headers.get("X-Pager-Monitor-Key", "") or "").strip()
+    return bool(expected and supplied and hmac.compare_digest(expected, supplied))
 
 
 _original_settings_post = app.view_functions["api_settings_post"]
@@ -139,7 +135,7 @@ app.view_functions["api_settings_post"] = monitor_validated_settings_post
 @app.get("/api/external-monitor/config")
 def external_monitor_config():
     if not monitor_request_allowed():
-        return jsonify({"ok": False, "error": "Tailscale access required"}), 403
+        return jsonify({"ok": False, "error": "monitor key required"}), 403
     settings = storage.get_settings()
     return jsonify({
         "ok": True,
