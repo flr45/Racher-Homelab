@@ -1,6 +1,9 @@
 import hmac
+import os
 import re
 import threading
+import time
+from collections import defaultdict, deque
 
 from gateway import FileTailSource
 
@@ -34,6 +37,126 @@ def serialized_setup(*args, **kwargs):
 
 
 app.view_functions["setup"] = serialized_setup
+
+
+# The public hostname is exposed through Cloudflare while the origin remains HTTP.
+# Add browser-side hardening without forcing a CSP that would break the existing
+# inline application code. HSTS is emitted only when the request arrived as HTTPS
+# according to Flask or the proxy header supplied by Cloudflare.
+@app.after_request
+def security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
+    forwarded_proto = str(request.headers.get("X-Forwarded-Proto", "")).split(",", 1)[0].strip().lower()
+    if request.is_secure or forwarded_proto == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    if request.path == "/login" or request.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+# Rate-limit failed logins in-process. The appliance intentionally runs one
+# Gunicorn worker with threads, so this covers every web request on the device.
+# Three buckets avoid both easy brute force and easy account-lockout attacks:
+# client+username (strict), username across clients (looser), and client globally.
+_LOGIN_WINDOW_SECONDS = max(60, int(os.getenv("PAGER_LOGIN_WINDOW_SECONDS", "900")))
+_LOGIN_BLOCK_SECONDS = max(60, int(os.getenv("PAGER_LOGIN_BLOCK_SECONDS", "900")))
+_LOGIN_PAIR_LIMIT = max(3, int(os.getenv("PAGER_LOGIN_PAIR_LIMIT", "5")))
+_LOGIN_USER_LIMIT = max(_LOGIN_PAIR_LIMIT, int(os.getenv("PAGER_LOGIN_USER_LIMIT", "20")))
+_LOGIN_CLIENT_LIMIT = max(_LOGIN_PAIR_LIMIT, int(os.getenv("PAGER_LOGIN_CLIENT_LIMIT", "30")))
+_login_lock = threading.Lock()
+_login_failures = defaultdict(deque)
+_login_blocked_until = {}
+_original_login_view = app.view_functions["login"]
+
+
+def _login_client_id() -> str:
+    # Cloudflare Tunnel supplies CF-Connecting-IP. Direct LAN/Tailscale requests
+    # fall back to Flask's peer address.
+    value = str(request.headers.get("CF-Connecting-IP") or request.remote_addr or "unknown").strip()
+    return value[:80]
+
+
+def _login_keys(username: str) -> list[tuple[str, int]]:
+    client = _login_client_id()
+    user = str(username or "").strip().lower()[:80] or "<empty>"
+    return [
+        (f"pair:{client}:{user}", _LOGIN_PAIR_LIMIT),
+        (f"user:{user}", _LOGIN_USER_LIMIT),
+        (f"client:{client}", _LOGIN_CLIENT_LIMIT),
+    ]
+
+
+def _prune_login_bucket(key: str, now: float) -> deque:
+    bucket = _login_failures[key]
+    cutoff = now - _LOGIN_WINDOW_SECONDS
+    while bucket and bucket[0] <= cutoff:
+        bucket.popleft()
+    return bucket
+
+
+def _login_retry_after(username: str) -> int:
+    now = time.monotonic()
+    retry_after = 0
+    with _login_lock:
+        for key, limit in _login_keys(username):
+            blocked_until = float(_login_blocked_until.get(key) or 0)
+            if blocked_until > now:
+                retry_after = max(retry_after, int(blocked_until - now) + 1)
+                continue
+            if blocked_until:
+                _login_blocked_until.pop(key, None)
+            bucket = _prune_login_bucket(key, now)
+            if len(bucket) >= limit:
+                _login_blocked_until[key] = now + _LOGIN_BLOCK_SECONDS
+                retry_after = max(retry_after, _LOGIN_BLOCK_SECONDS)
+    return retry_after
+
+
+def _register_login_failure(username: str) -> None:
+    now = time.monotonic()
+    with _login_lock:
+        for key, limit in _login_keys(username):
+            bucket = _prune_login_bucket(key, now)
+            bucket.append(now)
+            if len(bucket) >= limit:
+                _login_blocked_until[key] = now + _LOGIN_BLOCK_SECONDS
+
+
+def _clear_successful_login(username: str) -> None:
+    client = _login_client_id()
+    user = str(username or "").strip().lower()[:80] or "<empty>"
+    with _login_lock:
+        for key in (f"pair:{client}:{user}", f"user:{user}"):
+            _login_failures.pop(key, None)
+            _login_blocked_until.pop(key, None)
+
+
+def rate_limited_login(*args, **kwargs):
+    if request.method != "POST":
+        return _original_login_view(*args, **kwargs)
+
+    username = request.form.get("username", "")
+    retry_after = _login_retry_after(username)
+    if retry_after:
+        return (
+            render_template("login.html", error="For mange mislykkede loginforsøg. Prøv igen senere."),
+            429,
+            {"Retry-After": str(retry_after)},
+        )
+
+    response = _original_login_view(*args, **kwargs)
+    if session.get("user_id"):
+        _clear_successful_login(username)
+    else:
+        _register_login_failure(username)
+    return response
+
+
+app.view_functions["login"] = rate_limited_login
 
 
 # The PDL tailer deliberately keeps following the logfile in every mode so its
