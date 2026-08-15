@@ -7,6 +7,7 @@ RUNTIME_REPO="${PAGER_RUNTIME_REPO:-/opt/racher-pager/runtime-repo}"
 STATE_ROOT="${PAGER_DATA_HOST_PATH:-/var/lib/racher-pager}"
 UPDATE_DIR="$STATE_ROOT/update"
 INTEGRATION_DIR="${PAGER_INTEGRATION_DIR:-/opt/racher-pager/integration}"
+NETWORK_DIR="${PAGER_NETWORK_INSTALL_DIR:-/opt/racher-pager/network}"
 COMPOSE_SCRIPT="$INTEGRATION_DIR/pager-compose.sh"
 BACKUP_SCRIPT="$INTEGRATION_DIR/backup-pager.sh"
 LOCK_FILE="${PAGER_MAINTENANCE_LOCK:-/run/racher-pager/maintenance.lock}"
@@ -51,14 +52,30 @@ if [[ "$READY" != "1" ]]; then
   exit 1
 fi
 
+# A rollback must restore host-executed code as well as the container. This is
+# explicit because older install-system-agent versions did not deploy the PDL
+# wrapper or network portal from the selected git checkout.
+SERVICE_DIR="$RUNTIME_REPO/services/pager-gateway"
+PDL_DIR="$SERVICE_DIR/pdl"
+[[ -f "$PDL_DIR/configure-pdl.sh" ]] && install -m 0755 "$PDL_DIR/configure-pdl.sh" "$INTEGRATION_DIR/configure-pdl.sh"
+[[ -f "$PDL_DIR/run-pdl-headless.sh" ]] && install -m 0755 "$PDL_DIR/run-pdl-headless.sh" "$INTEGRATION_DIR/run-pdl-headless.sh"
+if [[ -f "$SERVICE_DIR/network_portal.py" && -d "$NETWORK_DIR" ]]; then
+  install -m 0755 "$SERVICE_DIR/network_portal.py" "$NETWORK_DIR/network_portal.py"
+fi
+
+REPO_ROOT="$RUNTIME_REPO" \
+PAGER_RUNTIME_REPO="$RUNTIME_REPO" \
+PAGER_DATA_HOST_PATH="$STATE_ROOT" \
+PAGER_BACKUP_DIR="${PAGER_BACKUP_DIR:-/var/backups/racher-pager}" \
+  bash "$PDL_DIR/install-system-agent.sh"
+
+curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null
+systemctl is-active --quiet racher-pager-system-agent.service
+systemctl is-active --quiet racher-pager-gateway-watchdog.timer
+
 printf '%s\n' "$CURRENT" > "$UPDATE_DIR/previous-sha"
 printf '%s\n' "$TARGET" > "$UPDATE_DIR/current-sha"
 date -u +%Y-%m-%dT%H:%M:%SZ > "$UPDATE_DIR/last-rollback"
-
-REPO_ROOT="$RUNTIME_REPO" \
-PAGER_DATA_HOST_PATH="$STATE_ROOT" \
-PAGER_BACKUP_DIR="${PAGER_BACKUP_DIR:-/var/backups/racher-pager}" \
-  bash "$RUNTIME_REPO/services/pager-gateway/pdl/install-system-agent.sh"
 
 if command -v systemd-run >/dev/null 2>&1; then
   systemd-run --unit=racher-pager-agent-rollback-restart --on-active=3s \
