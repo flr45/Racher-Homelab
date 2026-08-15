@@ -85,6 +85,26 @@ class AdaptiveFilterTests(unittest.TestCase):
         learned = self.adaptive.learned_relevance("TVETYDIG MELDING")
         self.assertNotEqual(learned["classification"], "noise")
 
+    def test_feedback_on_legacy_message_creates_missing_patterns(self):
+        text = "ÆLDRE HISTORISK TESTMELDING"
+        message_id = self.storage.add_message({
+            "received_at": datetime.now(timezone.utc).isoformat(),
+            "protocol": "POCSAG",
+            "ric": "5555555",
+            "message": text,
+            "raw_line": text,
+            "source": "legacy-test",
+        })
+        # Simulate a message that predates adaptive.observe()/adaptive_patterns.
+        self.adaptive.record_feedback(message_id, "relevant", None)
+        exact = self.adaptive._pattern("exact", self.adaptive.exact_signature(text))
+        template = self.adaptive._pattern("template", self.adaptive.template_signature(text))
+        self.assertIsNotNone(exact)
+        self.assertIsNotNone(template)
+        self.assertEqual(exact["relevant_votes"], 1)
+        self.assertEqual(template["relevant_votes"], 1)
+        self.assertEqual(self.adaptive.learned_relevance(text)["classification"], "relevant")
+
 
 if __name__ == "__main__":
     unittest.main()
