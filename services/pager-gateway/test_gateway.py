@@ -31,7 +31,7 @@ class PagerParsingTests(unittest.TestCase):
         self.assertIsNone(event.station)
         self.assertEqual(event.message, text)
 
-    def test_documented_pdw_pocsag_format_extracts_ric_and_message(self):
+    def test_documented_pdw_pocsag_format_extracts_ric_message_and_timestamp(self):
         line = "1234567 14:13:33 17-08-09 POCSAG-1 ALPHA 1200 (A) Please call ASAP"
         event = parse_pdl_line(line)
         self.assertIsNotNone(event)
@@ -40,8 +40,15 @@ class PagerParsingTests(unittest.TestCase):
         self.assertEqual(event.baud, 1200)
         self.assertEqual(event.message, "(A) Please call ASAP")
         self.assertEqual(event.station, "Slagelse")
+        self.assertEqual(event.received_at, "2009-08-17T14:13:33")
         self.assertEqual(event.raw_line, line)
         self.assertNotIn("1234567", event.message)
+
+    def test_pdw_four_digit_year_timestamp_is_preserved(self):
+        line = "7654321 01:02:03 14-08-2026 POCSAG ALPHA 2400 test"
+        event = parse_pdl_line(line)
+        self.assertIsNotNone(event)
+        self.assertEqual(event.received_at, "2026-08-14T01:02:03")
 
     def test_labeled_address_is_accepted_as_ric_but_not_public_text(self):
         event = parse_pdl_line("Address: 7654321 POCSAG 512 MESSAGE: test")
