@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import configparser
+import fcntl
 import hashlib
 import json
 import os
@@ -36,6 +37,7 @@ HOTSPOT_CYCLE_SECONDS = max(300, int(os.getenv("PAGER_HOTSPOT_CYCLE_SECONDS", "9
 POLL_SECONDS = max(1, int(os.getenv("PAGER_SYSTEM_AGENT_POLL_SECONDS", "2")))
 STATUS_INTERVAL = max(5, int(os.getenv("PAGER_SYSTEM_STATUS_INTERVAL", "10")))
 AUTO_HOTSPOT_MARKER = Path("/run/racher-pager-hotspot-auto")
+MAINTENANCE_LOCK = Path(os.getenv("PAGER_MAINTENANCE_LOCK", "/run/racher-pager/maintenance.lock"))
 
 BACKUP_SCRIPT = INTEGRATION_DIR / "backup-pager.sh"
 RESTORE_SCRIPT = INTEGRATION_DIR / "restore-pager.sh"
@@ -84,6 +86,26 @@ def _service_state(service_name: str) -> str:
         return "unknown"
     state = (result.stdout or result.stderr or "").strip()
     return state or ("inactive" if result.returncode else "active")
+
+
+def _maintenance_in_progress(path: Path = MAINTENANCE_LOCK) -> bool:
+    # Update/rollback/restore own this flock exclusively. The long-running agent
+    # must not write SQLite runtime state while a restore is replacing pager.db.
+    if not path.exists():
+        return False
+    try:
+        handle = path.open("a+")
+    except OSError:
+        return False
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return False
+    finally:
+        handle.close()
 
 
 def _gateway_container_state() -> str:
@@ -162,11 +184,16 @@ def _backup_catalog() -> list[dict[str, Any]]:
 
 
 def _internet_online() -> bool:
-    try:
-        with socket.create_connection(("1.1.1.1", 443), timeout=3):
-            return True
-    except OSError:
-        return False
+    # Do not trigger the recovery hotspot just because one public endpoint is
+    # filtered by the local network. Try independent IP and DNS-based HTTPS paths.
+    probes = (("1.1.1.1", 443), ("8.8.8.8", 443), ("github.com", 443))
+    for host, port in probes:
+        try:
+            with socket.create_connection((host, port), timeout=1.5):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _nmcli() -> str | None:
@@ -566,6 +593,10 @@ def main() -> int:
     next_status = 0.0
     network_state: dict[str, float | None] = {"offline_since": None}
     while True:
+        if _maintenance_in_progress():
+            time.sleep(POLL_SECONDS)
+            continue
+
         now = time.monotonic()
         if now >= next_status:
             try:
