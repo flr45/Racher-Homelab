@@ -15,6 +15,8 @@ class ExternalMonitorConfigTests(unittest.TestCase):
             script = textwrap.dedent(
                 """
                 import os
+                from datetime import datetime, timezone
+
                 os.environ['PAGER_COOKIE_SECURE'] = '0'
                 import app
 
@@ -47,7 +49,10 @@ class ExternalMonitorConfigTests(unittest.TestCase):
                 }, headers={'X-CSRF-Token': csrf})
                 assert saved.status_code == 200, saved.get_data(as_text=True)
                 monitor_key = 'test-monitor-key-abcdefghijklmnopqrstuvwxyz'
-                app.storage.update_settings({'external_monitor_access_key': monitor_key})
+                app.storage.update_settings({
+                    'external_monitor_access_key': monitor_key,
+                    'source_mode': 'pdl-file',
+                })
 
                 settings_response = client.get('/api/settings')
                 assert settings_response.status_code == 200
@@ -79,6 +84,8 @@ class ExternalMonitorConfigTests(unittest.TestCase):
 
                 missing = client.get('/api/external-monitor/config')
                 assert missing.status_code == 403, missing.get_data(as_text=True)
+                missing_health = client.get('/api/external-monitor/health')
+                assert missing_health.status_code == 403
 
                 wrong = client.get(
                     '/api/external-monitor/config',
@@ -96,6 +103,36 @@ class ExternalMonitorConfigTests(unittest.TestCase):
                 assert config['sms_to'] == '+4512345678'
                 assert config['failure_threshold'] == 3
                 assert config['gateway_name'] == 'Pager efter flytning'
+
+                app.storage.update_runtime_status({
+                    'agent_heartbeat': datetime.now(timezone.utc).isoformat(),
+                    'pdl_service': 'active',
+                    'fsk_usb_ever_seen': '0',
+                    'fsk_usb_connected': '0',
+                    'fsk_usb_pdl_in_use': '0',
+                })
+                healthy = client.get(
+                    '/api/external-monitor/health',
+                    headers={'X-Pager-Monitor-Key': monitor_key},
+                )
+                assert healthy.status_code == 200, healthy.get_data(as_text=True)
+                assert healthy.get_json()['ok'] is True
+
+                # Once commissioned, losing the FSK interface becomes an outage
+                # even though missing hardware was acceptable before commissioning.
+                app.storage.update_runtime_status({
+                    'agent_heartbeat': datetime.now(timezone.utc).isoformat(),
+                    'pdl_service': 'active',
+                    'fsk_usb_ever_seen': '1',
+                    'fsk_usb_connected': '0',
+                    'fsk_usb_pdl_in_use': '0',
+                })
+                unplugged = client.get(
+                    '/api/external-monitor/health',
+                    headers={'X-Pager-Monitor-Key': monitor_key},
+                )
+                assert unplugged.status_code == 503, unplugged.get_data(as_text=True)
+                assert 'fsk-usb' in unplugged.get_json()['issues']
 
                 bad = client.post('/api/settings', json={
                     'external_monitor_enabled': True,
