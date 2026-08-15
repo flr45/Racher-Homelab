@@ -1,10 +1,18 @@
 import configparser
+import fcntl
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from storage import Storage, validate_system_command
-from system_agent import COMMANDS, _wifi_profile_name, sync_pdl_settings
+from system_agent import (
+    COMMANDS,
+    _internet_online,
+    _maintenance_in_progress,
+    _wifi_profile_name,
+    sync_pdl_settings,
+)
 
 
 class SystemAgentTests(unittest.TestCase):
@@ -117,6 +125,37 @@ class SystemAgentTests(unittest.TestCase):
             self.assertEqual(parser.get("Audio", "Invert"), "0")
             self.assertEqual(parser.get("Audio", "CaptureDevice"), "default")
             self.assertEqual(parser.get("Audio", "SampleRate"), "48000")
+
+    def test_maintenance_lock_detects_restore_or_update_holder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "maintenance.lock"
+            handle = path.open("a+")
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.assertTrue(_maintenance_in_progress(path))
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                handle.close()
+            self.assertFalse(_maintenance_in_progress(path))
+
+    def test_internet_probe_falls_back_when_one_endpoint_is_filtered(self):
+        usable = MagicMock()
+        usable.__enter__.return_value = usable
+        usable.__exit__.return_value = False
+        with patch(
+            "system_agent.socket.create_connection",
+            side_effect=[OSError("filtered"), usable],
+        ) as connect:
+            self.assertTrue(_internet_online())
+        self.assertEqual(connect.call_count, 2)
+
+    def test_internet_probe_returns_false_only_when_all_paths_fail(self):
+        with patch(
+            "system_agent.socket.create_connection",
+            side_effect=OSError("offline"),
+        ) as connect:
+            self.assertFalse(_internet_online())
+        self.assertEqual(connect.call_count, 3)
 
 
 if __name__ == "__main__":
