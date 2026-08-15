@@ -1,3 +1,4 @@
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -40,6 +41,46 @@ class GatewayWatchdogTests(unittest.TestCase):
         self.assertEqual(argv, ["/usr/bin/docker", "restart", "racher-pager-gateway"])
         self.assertNotIn("sh", argv)
         self.assertNotIn("-c", argv)
+
+    def test_recovery_escalates_to_fixed_systemctl_when_docker_is_down(self):
+        run = Mock()
+        run.side_effect = [
+            Mock(returncode=1),
+            Mock(returncode=0),
+            Mock(returncode=0),
+        ]
+        sleeper = Mock()
+
+        recovered, method = watchdog.recover_gateway(run=run, sleeper=sleeper)
+
+        self.assertTrue(recovered)
+        self.assertEqual(method, "docker-service+container")
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(
+            run.call_args_list[0].args[0],
+            ["/usr/bin/docker", "restart", "racher-pager-gateway"],
+        )
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            ["/usr/bin/systemctl", "restart", "docker.service"],
+        )
+        self.assertEqual(
+            run.call_args_list[2].args[0],
+            ["/usr/bin/docker", "restart", "racher-pager-gateway"],
+        )
+        sleeper.assert_called_once_with(3)
+
+    def test_recovery_stops_if_docker_service_cannot_restart(self):
+        run = Mock()
+        run.side_effect = [Mock(returncode=1), Mock(returncode=1)]
+        recovered, method = watchdog.recover_gateway(run=run, sleeper=Mock())
+        self.assertFalse(recovered)
+        self.assertEqual(method, "docker-service")
+        self.assertEqual(run.call_count, 2)
+
+    def test_fixed_runner_treats_timeout_as_failure(self):
+        run = Mock(side_effect=subprocess.TimeoutExpired(cmd="docker", timeout=1))
+        self.assertFalse(watchdog.restart_gateway(run))
 
     def test_maintenance_lock_detects_an_active_holder(self):
         import fcntl
