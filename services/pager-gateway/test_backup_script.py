@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
+import tarfile
 import tempfile
 import time
 import unittest
@@ -95,6 +97,33 @@ class BackupScriptTests(unittest.TestCase):
         archives = sorted(self.backups.glob("racher-pager-*.tar.gz"))
         self.assertEqual(len(archives), 2)
         self.assertNotEqual(archives[0].name, archives[1].name)
+
+    def test_backup_contains_recovery_secrets_but_not_live_pdl_log(self) -> None:
+        (self.state / "session-secret").write_text("session-secret", encoding="utf-8")
+        (self.state / "vapid-private.pem").write_text("vapid-private", encoding="utf-8")
+        (self.state / "pdl").mkdir()
+        (self.state / "pdl" / "pdl.ini").write_text("[POCSAG]\nEnable=1\n", encoding="utf-8")
+        (self.state / "pdl.log").write_text("large live decoder log", encoding="utf-8")
+        for name in ("pdl.env", "gateway.env", "network.env", "cloudflared.token"):
+            (self.config / name).write_text(f"secret-{name}", encoding="utf-8")
+
+        result = self.run_backup()
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+        archive = next(self.backups.glob("racher-pager-*.tar.gz"))
+        self.assertEqual(stat.S_IMODE(archive.stat().st_mode), 0o600)
+
+        with tarfile.open(archive, "r:gz") as tar:
+            names = {name.removeprefix("./") for name in tar.getnames()}
+
+        self.assertIn("data/pager.db", names)
+        self.assertIn("data/session-secret", names)
+        self.assertIn("data/vapid-private.pem", names)
+        self.assertIn("data/pdl/pdl.ini", names)
+        self.assertIn("etc/pdl.env", names)
+        self.assertIn("etc/gateway.env", names)
+        self.assertIn("etc/network.env", names)
+        self.assertIn("etc/cloudflared.token", names)
+        self.assertNotIn("data/pdl.log", names)
 
 
 if __name__ == "__main__":
