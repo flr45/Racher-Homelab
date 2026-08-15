@@ -38,6 +38,7 @@ jobs:
             services/pager-gateway/system_agent.py \
             services/pager-gateway/fsk_status_agent.py \
             services/pager-gateway/gateway_watchdog.py \
+            services/pager-gateway/external_monitor.py \
             services/pager-gateway/network_portal.py
       - name: Validate browser JavaScript syntax
         run: |
@@ -47,8 +48,7 @@ jobs:
           node --check services/pager-gateway/static/adaptive-admin.js
       - name: Validate shell syntax
         run: |
-          bash -n services/pager-gateway/install-pager-gateway.sh
-          for script in services/pager-gateway/pdl/*.sh; do
+          for script in services/pager-gateway/*.sh services/pager-gateway/pdl/*.sh; do
             bash -n "$script"
           done
 
