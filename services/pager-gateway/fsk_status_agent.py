@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import configparser
+import fcntl
 import glob
 import os
 import subprocess
@@ -18,6 +19,25 @@ INPUT_MODE = os.getenv("PDL_INPUT_MODE", "fsk-usb").strip().lower()
 EXPLICIT_DEVICE = os.getenv("PDL_RS232_DEVICE", "").strip()
 SERIAL_BITRATE = os.getenv("PDL_RS232_BITRATE", "19200").strip() or "19200"
 SERIAL_FORMAT = "8N1"
+MAINTENANCE_LOCK = Path(os.getenv("PAGER_MAINTENANCE_LOCK", "/run/racher-pager/maintenance.lock"))
+
+
+def maintenance_in_progress(path: Path = MAINTENANCE_LOCK) -> bool:
+    if not path.exists():
+        return False
+    try:
+        handle = path.open("a+")
+    except OSError:
+        return False
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return False
+    finally:
+        handle.close()
 
 
 def parse_udev_properties(text: str) -> dict[str, str]:
@@ -198,6 +218,9 @@ def collect_status() -> dict[str, str]:
 
 
 def main() -> int:
+    if maintenance_in_progress():
+        return 0
+
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     storage = Storage(DB_PATH)
     status = collect_status()
