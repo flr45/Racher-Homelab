@@ -78,6 +78,22 @@ def detect_station(text: str) -> str | None:
     return None
 
 
+def _pdw_received_at(date_value: str, time_value: str) -> str:
+    """Preserve the local timestamp carried by PDW output.
+
+    PDW logs do not include a timezone. Returning a timezone-naive ISO timestamp
+    preserves the decoder's local wall-clock value for history/replay while still
+    allowing reliable time deltas between two PDW rows from the same log.
+    """
+    raw = f"{date_value} {time_value}"
+    for date_format in ("%d-%m-%y %H:%M:%S", "%d-%m-%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(raw, date_format).isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
 def parse_pdl_line(line: str, source: str = "pdl") -> PagerEvent | None:
     raw = line.strip()
     if not raw:
@@ -95,6 +111,7 @@ def parse_pdl_line(line: str, source: str = "pdl") -> PagerEvent | None:
             ric=pdw_match.group("ric"),
             function=pdw_match.group("function"),
             station=detect_station(message),
+            received_at=_pdw_received_at(pdw_match.group("date"), pdw_match.group("time")),
         )
 
     ric_match = RIC_RE.search(raw)
