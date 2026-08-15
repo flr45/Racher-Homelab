@@ -415,6 +415,12 @@ def external_monitor_health():
             elif runtime.get("fsk_usb_pdl_in_use") != "1":
                 issues.append("fsk-pdl-ownership")
 
+    # A dead Cloudflare service leaves the decoder healthy but makes the public
+    # pager hostname unavailable. Only require it on appliances where cloudflared
+    # is actually installed, so local/test installations remain valid.
+    if runtime.get("tunnel_installed") == "1" and runtime.get("tunnel_service") != "active":
+        issues.append("cloudflare-tunnel")
+
     payload = {
         "ok": not issues,
         "database": database_state,
@@ -423,6 +429,7 @@ def external_monitor_health():
         "pdl_service": runtime.get("pdl_service", ""),
         "fsk_commissioned": runtime.get("fsk_usb_ever_seen", "0") == "1",
         "fsk_connected": runtime.get("fsk_usb_connected", "0") == "1",
+        "tunnel_service": runtime.get("tunnel_service", ""),
         "issues": issues,
     }
     return jsonify(payload), (200 if not issues else 503)
