@@ -52,18 +52,58 @@ def maintenance_in_progress(path: Path = MAINTENANCE_LOCK) -> tuple[bool, object
         return True, None
 
 
-def restart_gateway(run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> bool:
+def _run_fixed(
+    argv: list[str],
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    timeout: int = 30,
+) -> bool:
     try:
         result = run(
-            ["/usr/bin/docker", "restart", CONTAINER_NAME],
+            argv,
             capture_output=True,
             text=True,
-            timeout=45,
+            timeout=timeout,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0
+
+
+def restart_gateway(run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> bool:
+    return _run_fixed(
+        ["/usr/bin/docker", "restart", CONTAINER_NAME],
+        run=run,
+        timeout=30,
+    )
+
+
+def restart_docker_service(run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> bool:
+    return _run_fixed(
+        ["/usr/bin/systemctl", "restart", "docker.service"],
+        run=run,
+        timeout=35,
+    )
+
+
+def recover_gateway(
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> tuple[bool, str]:
+    """Recover the container, escalating to Docker itself only when required."""
+    if restart_gateway(run):
+        return True, "container"
+
+    if not restart_docker_service(run):
+        return False, "docker-service"
+
+    # restart=unless-stopped normally brings the container back automatically
+    # when dockerd returns. An explicit restart is harmless if it is already up
+    # and also covers a container that did not get auto-started.
+    sleeper(3)
+    if restart_gateway(run):
+        return True, "docker-service+container"
+    return False, "container-after-docker"
 
 
 def main() -> int:
@@ -85,18 +125,21 @@ def main() -> int:
         if failures < FAILURE_THRESHOLD:
             return 0
 
-        print("Pager watchdog: gateway svarer ikke; genstarter containeren.", flush=True)
-        if not restart_gateway():
-            print("Pager watchdog: container-genstart fejlede.", flush=True)
+        print("Pager watchdog: gateway svarer ikke; starter automatisk recovery.", flush=True)
+        recovered, method = recover_gateway()
+        if not recovered:
+            print(f"Pager watchdog: recovery fejlede ved {method}.", flush=True)
             return 1
+        if method != "container":
+            print("Pager watchdog: Docker-servicen blev også genstartet.", flush=True)
 
         write_failures(0)
         for _ in range(10):
             time.sleep(2)
             if health_ok():
-                print("Pager watchdog: gateway er healthy efter automatisk genstart.", flush=True)
+                print("Pager watchdog: gateway er healthy efter automatisk recovery.", flush=True)
                 return 0
-        print("Pager watchdog: gateway er stadig unhealthy efter automatisk genstart.", flush=True)
+        print("Pager watchdog: gateway er stadig unhealthy efter automatisk recovery.", flush=True)
         return 1
     finally:
         if lock_handle is not None:
