@@ -34,6 +34,15 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn("network_portal.py", script)
         self.assertIn("install-system-agent.sh", script)
 
+    def test_restore_preserves_machine_identity_on_existing_pi(self):
+        script = (PDL / "restore-pager.sh").read_text(encoding="utf-8")
+        self.assertIn("CURRENT_MONITOR_KEY", script)
+        self.assertIn("PAGER_RESTORE_MONITOR_KEY", script)
+        self.assertIn("ON CONFLICT(key) DO UPDATE", script)
+        self.assertIn('! -e "$destination"', script)
+        self.assertIn("pdl.env gateway.env network.env cloudflared.token", script)
+        self.assertIn("systemctl reset-failed racher-pdl.service", script)
+
     def test_pdl_wrapper_waits_for_pinned_or_ftdi_device(self):
         script = (PDL / "run-pdl-headless.sh").read_text(encoding="utf-8")
         self.assertIn("select_fsk_device", script)
