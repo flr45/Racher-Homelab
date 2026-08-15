@@ -6,6 +6,7 @@ BACKUP_DIR="${PAGER_BACKUP_DIR:-/var/backups/racher-pager}"
 INTEGRATION_DIR="${PAGER_INTEGRATION_DIR:-/opt/racher-pager/integration}"
 BACKUP_SCRIPT="$INTEGRATION_DIR/backup-pager.sh"
 COMPOSE_SCRIPT="$INTEGRATION_DIR/pager-compose.sh"
+LOCK_FILE="${PAGER_MAINTENANCE_LOCK:-/run/racher-pager-update.lock}"
 NAME="${1:-}"
 
 if [[ "$EUID" -ne 0 ]]; then
@@ -22,6 +23,11 @@ if [[ ! -f "$ARCHIVE" ]]; then
   echo "Backup findes ikke: $NAME" >&2
   exit 1
 fi
+
+# Restore, update og rollback må aldrig køre samtidig. Gateway-watchdoggen prøver
+# samme lock non-blocking og springer health/restart over under planlagt nedetid.
+exec 9>"$LOCK_FILE"
+flock -n 9 || { echo "En update/rollback/restore kører allerede." >&2; exit 1; }
 
 TMP_DIR="$(mktemp -d)"
 cleanup() { rm -rf "$TMP_DIR"; }
