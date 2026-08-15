@@ -52,6 +52,16 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn("venter roligt på hardware", script)
         self.assertIn('sleep "$DEVICE_WAIT_SECONDS"', script)
 
+    def test_external_monitor_update_reuses_saved_secret_without_printing_it(self):
+        script = (ROOT / "install-external-monitor.sh").read_text(encoding="utf-8")
+        self.assertIn("SAVED_KEY", script)
+        self.assertIn("existing_value PAGER_MONITOR_KEY", script)
+        self.assertIn('unset SAVED_KEY', script)
+        self.assertIn('unset MONITOR_KEY', script)
+        self.assertIn("Monitor-key: konfigureret (ikke vist)", script)
+        self.assertNotIn('echo "Monitor-key: $MONITOR_KEY"', script)
+        self.assertIn("systemctl start racher-pager-external-monitor.service", script)
+
 
 if __name__ == "__main__":
     unittest.main()
