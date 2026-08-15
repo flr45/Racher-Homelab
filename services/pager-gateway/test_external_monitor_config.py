@@ -33,6 +33,13 @@ class ExternalMonitorConfigTests(unittest.TestCase):
                 with client.session_transaction() as sess:
                     csrf = sess['csrf_token']
 
+                bad_shape = client.post(
+                    '/api/settings',
+                    json=['not', 'an', 'object'],
+                    headers={'X-CSRF-Token': csrf},
+                )
+                assert bad_shape.status_code == 400, bad_shape.get_data(as_text=True)
+
                 saved = client.post('/api/settings', json={
                     'external_monitor_enabled': True,
                     'external_monitor_sms_to': '12 34 56 78',
