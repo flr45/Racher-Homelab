@@ -1,3 +1,5 @@
+import ipaddress
+import re
 import threading
 
 from gateway import FileTailSource
@@ -69,6 +71,79 @@ def robust_healthz():
 
 
 app.view_functions["healthz"] = robust_healthz
+
+
+# External monitor settings live in the Pager database and are edited only by an
+# authenticated admin. The monitoring Pi needs the last known recipient even when
+# this appliance later loses power, so it refreshes a local cache while the pager
+# is healthy. The config endpoint is intentionally reachable only over Tailscale's
+# CGNAT range; Cloudflare/public traffic cannot retrieve the SMS recipient.
+_MONITOR_PHONE_RE = re.compile(r"^\+?[1-9]\d{6,14}$")
+_TAILSCALE_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+
+
+def normalize_monitor_phone(value: str) -> str:
+    phone = re.sub(r"[\s()-]", "", str(value or ""))
+    if phone.startswith("00"):
+        phone = "+" + phone[2:]
+    if phone.isdigit() and len(phone) == 8:
+        phone = "+45" + phone
+    if phone and not _MONITOR_PHONE_RE.fullmatch(phone):
+        raise ValueError("Fejl-SMS nummeret er ugyldigt.")
+    return phone
+
+
+def monitor_request_allowed() -> bool:
+    if os.getenv("PAGER_MONITOR_ALLOW_LOCAL", "0") == "1" and request.remote_addr in {"127.0.0.1", "::1"}:
+        return True
+    try:
+        return ipaddress.ip_address(request.remote_addr or "") in _TAILSCALE_NETWORK
+    except ValueError:
+        return False
+
+
+_original_settings_post = app.view_functions["api_settings_post"]
+
+
+def monitor_validated_settings_post(*args, **kwargs):
+    payload = request.get_json(silent=True) or {}
+    try:
+        phone = normalize_monitor_phone(payload.get("external_monitor_sms_to", ""))
+        threshold = max(1, min(int(payload.get("external_monitor_failure_threshold", "3")), 10))
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc) or "Ugyldig monitor-indstilling."}), 400
+
+    enabled = as_bool(payload.get("external_monitor_enabled"), False)
+    if enabled and not phone:
+        return jsonify({"ok": False, "error": "Indtast et telefonnummer før ekstern overvågning aktiveres."}), 400
+
+    response = _original_settings_post(*args, **kwargs)
+    status_code = response[1] if isinstance(response, tuple) and len(response) > 1 else getattr(response, "status_code", 200)
+    if int(status_code) < 400:
+        storage.update_settings({
+            "external_monitor_enabled": "1" if enabled else "0",
+            "external_monitor_sms_to": phone,
+            "external_monitor_failure_threshold": str(threshold),
+        })
+    return response
+
+
+app.view_functions["api_settings_post"] = monitor_validated_settings_post
+
+
+@app.get("/api/external-monitor/config")
+def external_monitor_config():
+    if not monitor_request_allowed():
+        return jsonify({"ok": False, "error": "Tailscale access required"}), 403
+    settings = storage.get_settings()
+    return jsonify({
+        "ok": True,
+        "enabled": settings.get("external_monitor_enabled", "0") == "1",
+        "sms_to": settings.get("external_monitor_sms_to", ""),
+        "failure_threshold": int(settings.get("external_monitor_failure_threshold", "3") or 3),
+        "gateway_name": settings.get("gateway_name", "Racher Pager Gateway"),
+    })
+
 
 training = TrainingStore(DB_PATH, routing, adaptive)
 register_training_routes(app, storage, training, auth_required)
