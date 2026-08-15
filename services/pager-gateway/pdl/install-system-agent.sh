@@ -166,9 +166,12 @@ sudo systemctl enable --now racher-pager-system-agent.service
 sudo systemctl enable --now racher-pager-fsk-status.timer
 sudo systemctl enable --now racher-pager-gateway-watchdog.timer
 
-# Apply refreshed host-side code immediately. try-restart leaves a deliberately
-# inactive optional service alone while updating a service that is already active.
-sudo systemctl try-restart racher-pdl.service >/dev/null 2>&1 || true
+# The previous wrapper could exit repeatedly while FSK-USB was absent and may
+# therefore have reached systemd's failed/start-limit state. Clear that state and
+# start the refreshed wrapper explicitly; it now remains active while waiting for
+# hardware instead of entering a restart loop.
+sudo systemctl reset-failed racher-pdl.service >/dev/null 2>&1 || true
+sudo systemctl restart racher-pdl.service >/dev/null 2>&1 || true
 sudo systemctl try-restart racher-pager-network-portal.service >/dev/null 2>&1 || true
 
 # A process-level watchdog cannot recover a completely frozen Linux userspace or
