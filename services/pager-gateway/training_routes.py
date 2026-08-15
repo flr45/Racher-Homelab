@@ -15,6 +15,13 @@ def _as_bool(value: Any, default: bool = False) -> bool:
     return str(value).strip().casefold() in {"1", "true", "yes", "ja", "on"}
 
 
+def _duplicate_window_seconds(storage: Any) -> int:
+    try:
+        return max(1, min(int(storage.get_setting("duplicate_window_seconds", "30")), 300))
+    except (TypeError, ValueError):
+        return 30
+
+
 def register_training_routes(app: Any, storage: Any, training: Any, auth_required: Callable) -> None:
     @app.get("/api/training/runs")
     @auth_required(admin=True)
@@ -27,7 +34,10 @@ def register_training_routes(app: Any, storage: Any, training: Any, auth_require
         body = request.get_json(silent=True) or {}
         try:
             run = training.create_replay(
-                body.get("name"), body.get("text"), int(g.user["id"]),
+                body.get("name"),
+                body.get("text"),
+                int(g.user["id"]),
+                _duplicate_window_seconds(storage),
             )
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
