@@ -21,7 +21,7 @@ class SecurityHardeningTests(unittest.TestCase):
 
                 setup_client = app.app.test_client()
                 setup_client.get('/setup', base_url=base_url)
-                with setup_client.session_transaction() as sess:
+                with setup_client.session_transaction(base_url=base_url) as sess:
                     csrf = sess['csrf_token']
                 created = setup_client.post('/setup', base_url=base_url, data={
                     'csrf_token': csrf,
@@ -42,7 +42,7 @@ class SecurityHardeningTests(unittest.TestCase):
                 assert login_page.headers['Cache-Control'] == 'no-store'
                 assert 'Secure' in login_page.headers.get('Set-Cookie', '')
 
-                with client.session_transaction() as sess:
+                with client.session_transaction(base_url=base_url) as sess:
                     csrf = sess['csrf_token']
                 headers = {'CF-Connecting-IP': '203.0.113.10'}
                 for attempt in range(5):
@@ -66,7 +66,7 @@ class SecurityHardeningTests(unittest.TestCase):
                 # the username-wide bucket has a deliberately higher threshold.
                 other = app.app.test_client()
                 other.get('/login', base_url=base_url)
-                with other.session_transaction() as sess:
+                with other.session_transaction(base_url=base_url) as sess:
                     other_csrf = sess['csrf_token']
                 success = other.post('/login', base_url=base_url, data={
                     'csrf_token': other_csrf,
