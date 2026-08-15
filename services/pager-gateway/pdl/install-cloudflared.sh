@@ -52,8 +52,11 @@ WantedBy=multi-user.target
 EOF
 
 if [[ -n "$PUBLIC_HOSTNAME" && -f "$GATEWAY_ENV" ]]; then
-  sudo sed -i '/^PAGER_PUBLIC_HOSTNAME=/d' "$GATEWAY_ENV"
-  echo "PAGER_PUBLIC_HOSTNAME=$PUBLIC_HOSTNAME" | sudo tee -a "$GATEWAY_ENV" >/dev/null
+  sudo sed -i '/^PAGER_PUBLIC_HOSTNAME=/d; /^PAGER_COOKIE_SECURE=/d' "$GATEWAY_ENV"
+  {
+    echo "PAGER_PUBLIC_HOSTNAME=$PUBLIC_HOSTNAME"
+    echo "PAGER_COOKIE_SECURE=1"
+  } | sudo tee -a "$GATEWAY_ENV" >/dev/null
 fi
 
 sudo systemctl daemon-reload
@@ -63,5 +66,6 @@ echo "Cloudflare Tunnel er installeret som systemd-service."
 echo "Status: sudo systemctl status cloudflared --no-pager"
 if [[ -n "$PUBLIC_HOSTNAME" ]]; then
   echo "Offentligt hostname registreret lokalt: $PUBLIC_HOSTNAME"
+  echo "Secure session-cookies er aktiveret; genstart/redeploy gatewayen for at tage ændringen i brug."
 fi
 echo "I Cloudflare skal tunnelens public hostname pege på http://localhost:8088."
