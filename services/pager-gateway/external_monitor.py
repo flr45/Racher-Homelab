@@ -14,6 +14,7 @@ from typing import Any
 TARGET = os.getenv("PAGER_MONITOR_TARGET", "racher-pi2").strip()
 BASE_URL = os.getenv("PAGER_MONITOR_URL", f"http://{TARGET}:8088").rstrip("/")
 SMS_GATEWAY_URL = os.getenv("PAGER_MONITOR_SMS_GATEWAY", "http://127.0.0.1:8090").rstrip("/")
+MONITOR_KEY = os.getenv("PAGER_MONITOR_KEY", "").strip()
 STATE_FILE = Path(os.getenv("PAGER_MONITOR_STATE_FILE", "/var/lib/racher-pager-monitor/state.json"))
 HTTP_TIMEOUT = max(1.0, float(os.getenv("PAGER_MONITOR_HTTP_TIMEOUT", "5")))
 
@@ -39,8 +40,9 @@ def write_state(state: dict[str, Any], path: Path | None = None) -> None:
     os.replace(tmp, target)
 
 
-def get_json(url: str, timeout: float = HTTP_TIMEOUT) -> dict[str, Any]:
-    with urllib.request.urlopen(url, timeout=timeout) as response:
+def get_json(url: str, timeout: float = HTTP_TIMEOUT, headers: dict[str, str] | None = None) -> dict[str, Any]:
+    request = urllib.request.Request(url, headers=headers or {}, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         if response.status != 200:
             raise RuntimeError(f"HTTP {response.status}")
         payload = json.loads(response.read().decode("utf-8"))
@@ -58,7 +60,12 @@ def health_ok() -> bool:
 
 
 def fetch_config() -> dict[str, Any]:
-    payload = get_json(f"{BASE_URL}/api/external-monitor/config")
+    if not MONITOR_KEY:
+        raise RuntimeError("PAGER_MONITOR_KEY mangler")
+    payload = get_json(
+        f"{BASE_URL}/api/external-monitor/config",
+        headers={"X-Pager-Monitor-Key": MONITOR_KEY},
+    )
     if payload.get("ok") is not True:
         raise RuntimeError("Monitor-konfiguration blev afvist")
     return payload
