@@ -46,6 +46,30 @@ def selected_pdl_line(line: str) -> None:
 source.on_line = selected_pdl_line
 source.start()
 
+
+# A process can remain alive while an internal dependency has failed. Docker's
+# restart policy alone cannot recover that state, so make /healthz reflect the two
+# dependencies required for live alarm ingestion: SQLite and the logfile tailer.
+# "waiting" is healthy for PDL mode because missing hardware/log data is a valid
+# state while the appliance is waiting for the scanner.
+def robust_healthz():
+    try:
+        with storage.connect() as conn:
+            conn.execute("SELECT 1").fetchone()
+    except Exception:
+        app.logger.exception("Gateway healthcheck: database unavailable")
+        return jsonify({"ok": False, "database": "error"}), 503
+
+    source_state = str(source.status.get("state") or "unknown")
+    if setting("source_mode", "mock") == "pdl-file" and source_state not in {"waiting", "running"}:
+        app.logger.error("Gateway healthcheck: PDL tailer state=%s", source_state)
+        return jsonify({"ok": False, "database": "ok", "source": source_state}), 503
+
+    return jsonify({"ok": True, "database": "ok", "source": source_state})
+
+
+app.view_functions["healthz"] = robust_healthz
+
 training = TrainingStore(DB_PATH, routing, adaptive)
 register_training_routes(app, storage, training, auth_required)
 
