@@ -106,6 +106,11 @@ _original_settings_post = app.view_functions["api_settings_post"]
 
 
 def monitor_validated_settings_post(*args, **kwargs):
+    if not g.user:
+        return jsonify({"ok": False, "error": "login required"}), 401
+    if g.user.get("role") != "admin":
+        return jsonify({"ok": False, "error": "admin required"}), 403
+
     payload = request.get_json(silent=True) or {}
     try:
         phone = normalize_monitor_phone(payload.get("external_monitor_sms_to", ""))
