@@ -67,9 +67,12 @@ _LOGIN_BLOCK_SECONDS = max(60, int(os.getenv("PAGER_LOGIN_BLOCK_SECONDS", "900")
 _LOGIN_PAIR_LIMIT = max(3, int(os.getenv("PAGER_LOGIN_PAIR_LIMIT", "5")))
 _LOGIN_USER_LIMIT = max(_LOGIN_PAIR_LIMIT, int(os.getenv("PAGER_LOGIN_USER_LIMIT", "20")))
 _LOGIN_CLIENT_LIMIT = max(_LOGIN_PAIR_LIMIT, int(os.getenv("PAGER_LOGIN_CLIENT_LIMIT", "30")))
+_LOGIN_STATE_MAX_KEYS = max(100, int(os.getenv("PAGER_LOGIN_STATE_MAX_KEYS", "5000")))
+_LOGIN_CLEANUP_INTERVAL_SECONDS = 60
 _login_lock = threading.Lock()
 _login_failures = defaultdict(deque)
 _login_blocked_until = {}
+_login_last_cleanup = 0.0
 _original_login_view = app.view_functions["login"]
 
 
@@ -90,6 +93,41 @@ def _login_keys(username: str) -> list[tuple[str, int]]:
     ]
 
 
+def _trim_login_state_locked(now: float, *, force: bool = False) -> None:
+    global _login_last_cleanup
+    if not force and now - _login_last_cleanup < _LOGIN_CLEANUP_INTERVAL_SECONDS and len(_login_failures) <= _LOGIN_STATE_MAX_KEYS:
+        return
+
+    cutoff = now - _LOGIN_WINDOW_SECONDS
+    for key in list(_login_failures):
+        bucket = _login_failures.get(key)
+        if bucket is None:
+            continue
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+        blocked_until = float(_login_blocked_until.get(key) or 0)
+        if not bucket and blocked_until <= now:
+            _login_failures.pop(key, None)
+            _login_blocked_until.pop(key, None)
+
+    # A hostile client can vary usernames/IPs and otherwise create an unbounded
+    # number of buckets. Keep the newest activity and evict the oldest bookkeeping
+    # entries once the fixed appliance budget is reached.
+    overflow = len(_login_failures) - _LOGIN_STATE_MAX_KEYS
+    if overflow > 0:
+        oldest = sorted(
+            _login_failures,
+            key=lambda key: max(
+                _login_failures[key][-1] if _login_failures[key] else 0.0,
+                float(_login_blocked_until.get(key) or 0),
+            ),
+        )[:overflow]
+        for key in oldest:
+            _login_failures.pop(key, None)
+            _login_blocked_until.pop(key, None)
+    _login_last_cleanup = now
+
+
 def _prune_login_bucket(key: str, now: float) -> deque:
     bucket = _login_failures[key]
     cutoff = now - _LOGIN_WINDOW_SECONDS
@@ -102,6 +140,7 @@ def _login_retry_after(username: str) -> int:
     now = time.monotonic()
     retry_after = 0
     with _login_lock:
+        _trim_login_state_locked(now)
         for key, limit in _login_keys(username):
             blocked_until = float(_login_blocked_until.get(key) or 0)
             if blocked_until > now:
@@ -119,11 +158,14 @@ def _login_retry_after(username: str) -> int:
 def _register_login_failure(username: str) -> None:
     now = time.monotonic()
     with _login_lock:
+        _trim_login_state_locked(now)
         for key, limit in _login_keys(username):
             bucket = _prune_login_bucket(key, now)
             bucket.append(now)
             if len(bucket) >= limit:
                 _login_blocked_until[key] = now + _LOGIN_BLOCK_SECONDS
+        if len(_login_failures) > _LOGIN_STATE_MAX_KEYS:
+            _trim_login_state_locked(now, force=True)
 
 
 def _clear_successful_login(username: str) -> None:
@@ -255,9 +297,9 @@ def monitor_validated_settings_post(*args, **kwargs):
     if g.user.get("role") != "admin":
         return jsonify({"ok": False, "error": "admin required"}), 403
 
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
-        payload = {}
+        return jsonify({"ok": False, "error": "Indstillinger skal sendes som et JSON-objekt."}), 400
 
     # Never allow the normal settings API to rotate or erase the machine key.
     # request.get_json() is cached by Flask, so mutating this dict also protects
