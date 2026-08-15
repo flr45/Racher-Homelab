@@ -223,6 +223,22 @@ class AdaptiveFilter:
             exact = self.exact_signature(text)
             template = self.template_signature(text)
 
+            # Older databases can contain messages created before adaptive.observe()
+            # existed. Ensure their pattern rows are present before vote updates so
+            # admin feedback on historical messages is never silently discarded.
+            now = self._now()
+            for kind, signature, sample in (
+                ("exact", exact, self.normalized_text(text)),
+                ("template", template, self.template_text(text)),
+            ):
+                conn.execute(
+                    """INSERT OR IGNORE INTO adaptive_patterns(
+                           kind, signature, sample_text, seen_count, relevant_votes,
+                           noise_votes, last_seen_at
+                       ) VALUES (?, ?, ?, 0, 0, 0, ?)""",
+                    (kind, signature, sample[:500], now),
+                )
+
             if previous:
                 old = str(previous["verdict"])
                 old_col = "relevant_votes" if old == "relevant" else "noise_votes"
@@ -237,7 +253,7 @@ class AdaptiveFilter:
                    VALUES (?, ?, ?, ?)
                    ON CONFLICT(message_id) DO UPDATE SET
                        verdict=excluded.verdict, user_id=excluded.user_id, created_at=excluded.created_at""",
-                (message_id, verdict, user_id, self._now()),
+                (message_id, verdict, user_id, now),
             )
             new_col = "relevant_votes" if verdict == "relevant" else "noise_votes"
             for kind, signature in (("exact", exact), ("template", template)):
