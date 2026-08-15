@@ -43,6 +43,16 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn("pdl.env gateway.env network.env cloudflared.token", script)
         self.assertIn("systemctl reset-failed racher-pdl.service", script)
 
+    def test_restore_quiesces_sqlite_writers_and_removes_wal_sidecars(self):
+        script = (PDL / "restore-pager.sh").read_text(encoding="utf-8")
+        self.assertIn("systemctl stop racher-pager-fsk-status.timer", script)
+        self.assertIn("systemctl stop racher-pager-fsk-status.service", script)
+        self.assertIn('rm -f "$STATE_ROOT/pager.db-wal" "$STATE_ROOT/pager.db-shm"', script)
+        self.assertIn("RUNTIME_PAUSED=1", script)
+        self.assertIn("RUNTIME_PAUSED=0", script)
+        self.assertIn("systemctl start racher-pager-fsk-status.timer", script)
+        self.assertIn("maintenance flock", script)
+
     def test_pdl_wrapper_waits_for_pinned_or_ftdi_device(self):
         script = (PDL / "run-pdl-headless.sh").read_text(encoding="utf-8")
         self.assertIn("select_fsk_device", script)
