@@ -171,6 +171,21 @@ class FileTailSource:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2)
 
+    @staticmethod
+    def _same_file(path: Path, handle) -> bool:
+        """Return whether ``path`` still names the file currently held open.
+
+        A normal log rotation can replace the path with a new inode whose size is
+        larger than the old file. Size-only truncation detection would then leave
+        the tailer stuck on the unlinked old inode forever.
+        """
+        try:
+            path_stat = path.stat()
+            open_stat = os.fstat(handle.fileno())
+        except (FileNotFoundError, OSError, ValueError):
+            return False
+        return path_stat.st_dev == open_stat.st_dev and path_stat.st_ino == open_stat.st_ino
+
     def _run(self) -> None:
         self._status = "waiting"
         current_path = None
@@ -203,7 +218,7 @@ class FileTailSource:
                     continue
 
                 try:
-                    if path.stat().st_size < handle.tell():
+                    if not self._same_file(path, handle) or path.stat().st_size < handle.tell():
                         handle.close()
                         handle = None
                 except FileNotFoundError:
