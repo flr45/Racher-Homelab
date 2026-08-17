@@ -37,6 +37,7 @@ jobs:
             services/pager-gateway/training_routes.py \
             services/pager-gateway/operations.py \
             services/pager-gateway/rss_updates.py \
+            services/pager-gateway/alarm_rules.py \
             services/pager-gateway/wsgi.py \
             services/pager-gateway/system_agent.py \
             services/pager-gateway/fsk_status_agent.py \
