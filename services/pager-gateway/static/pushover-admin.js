@@ -3,6 +3,7 @@
   if (!isAdmin) return;
 
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  let boundAddButton = null;
 
   async function request(url, options = {}) {
     const method = String(options.method || 'GET').toUpperCase();
@@ -31,40 +32,41 @@
     const card = findPushoverCard();
     if (!card) return null;
 
-    // The old single-key field is retained in the template only for backwards
-    // compatibility. Managed destinations below replace it in the visible UI.
     const legacyField = card.querySelector('input[name="pushover_user_key"]');
-    if (legacyField) {
-      const label = legacyField.closest('label');
-      if (label) label.hidden = true;
-    }
+    const legacyLabel = legacyField?.closest('label');
+    if (legacyLabel) legacyLabel.hidden = true;
 
     let section = card.querySelector('#pushover-destination-manager');
-    if (section) return section;
-
-    section = document.createElement('div');
-    section.id = 'pushover-destination-manager';
-    section.className = 'split-section';
-    section.innerHTML = `
-      <div>
-        <h3>Pushover-modtagere</h3>
-        <p class="hint">Her kan du se de Pushover user/group keys, der er tilføjet. Nøgler vises maskeret efter de er gemt.</p>
-        <div id="pushover-destination-list" class="command-list"><p class="muted">Henter modtagere…</p></div>
-      </div>
-      <div>
-        <h3>Tilføj modtager</h3>
-        <div class="form-grid compact-form">
-          <label>Navn<input id="pushover-destination-label" maxlength="80" autocomplete="off" placeholder="fx Frederik"></label>
-          <label>User/group key<input id="pushover-destination-key" type="password" minlength="20" maxlength="80" autocomplete="off" placeholder="Pushover user/group key"></label>
+    if (!section) {
+      // Development fallback. Production renders the manager directly in the
+      // template so it remains visible even if this script cannot execute.
+      section = document.createElement('div');
+      section.id = 'pushover-destination-manager';
+      section.className = 'split-section';
+      section.innerHTML = `
+        <div>
+          <h3>Pushover-modtagere</h3>
+          <p class="hint">Her kan du se de Pushover user/group keys, der er tilføjet. Nøgler vises maskeret efter de er gemt.</p>
+          <div id="pushover-destination-list" class="command-list"><p class="muted">Henter modtagere…</p></div>
         </div>
-        <div class="actions"><button id="pushover-destination-add" type="button" class="primary">Tilføj modtager</button><span id="pushover-destination-status" class="muted"></span></div>
-      </div>`;
+        <div>
+          <h3>Tilføj modtager</h3>
+          <div class="form-grid compact-form">
+            <label>Navn<input id="pushover-destination-label" maxlength="80" autocomplete="off" placeholder="fx Frederik"></label>
+            <label>User/group key<input id="pushover-destination-key" type="password" minlength="20" maxlength="80" autocomplete="off" placeholder="Pushover user/group key"></label>
+          </div>
+          <div class="actions"><button id="pushover-destination-add" type="button" class="primary">Tilføj modtager</button><span id="pushover-destination-status" class="muted"></span></div>
+        </div>`;
+      const hint = card.querySelector('.hint');
+      if (hint) hint.insertAdjacentElement('afterend', section);
+      else card.appendChild(section);
+    }
 
-    const hint = card.querySelector('.hint');
-    if (hint) hint.insertAdjacentElement('afterend', section);
-    else card.appendChild(section);
-
-    section.querySelector('#pushover-destination-add')?.addEventListener('click', addDestination);
+    const addButton = section.querySelector('#pushover-destination-add');
+    if (addButton && addButton !== boundAddButton) {
+      addButton.addEventListener('click', addDestination);
+      boundAddButton = addButton;
+    }
     return section;
   }
 
