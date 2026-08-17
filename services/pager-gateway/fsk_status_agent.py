@@ -5,6 +5,7 @@ import configparser
 import fcntl
 import glob
 import os
+import sqlite3
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +39,45 @@ def maintenance_in_progress(path: Path = MAINTENANCE_LOCK) -> bool:
         return False
     finally:
         handle.close()
+
+
+def read_runtime_status(db_path: str | None = None) -> dict[str, dict[str, str]] | None:
+    """Read only the runtime table without running the full Storage migrations.
+
+    The FSK probe is a systemd oneshot every ten seconds. Constructing Storage on
+    every run used to execute the entire schema/migration path each time, creating
+    avoidable SQLite schema locks. Return None only when the gateway schema has not
+    been initialized yet; the caller then bootstraps it once through Storage.
+    """
+    path = str(db_path or DB_PATH)
+    try:
+        with sqlite3.connect(path, timeout=5) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT key, value, updated_at FROM runtime_status ORDER BY key"
+            ).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return None
+        raise
+    return {
+        str(row["key"]): {
+            "value": str(row["value"]),
+            "updated_at": str(row["updated_at"]),
+        }
+        for row in rows
+    }
+
+
+def write_runtime_status(values: dict[str, Any], db_path: str | None = None) -> None:
+    path = str(db_path or DB_PATH)
+    updated_at = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(path, timeout=5) as conn:
+        conn.executemany(
+            """INSERT INTO runtime_status(key, value, updated_at) VALUES (?, ?, ?)
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+            [(str(key), str(value), updated_at) for key, value in values.items()],
+        )
 
 
 def parse_udev_properties(text: str) -> dict[str, str]:
@@ -222,9 +262,15 @@ def main() -> int:
         return 0
 
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    storage = Storage(DB_PATH)
+    previous = read_runtime_status(DB_PATH)
+    bootstrap_storage: Storage | None = None
+    if previous is None:
+        # First boot / disaster recovery only. Normal ten-second probes never run
+        # the full schema path after runtime_status exists.
+        bootstrap_storage = Storage(DB_PATH)
+        previous = bootstrap_storage.get_runtime_status()
+
     status = collect_status()
-    previous = storage.get_runtime_status()
     previous_ever_seen = str(previous.get("fsk_usb_ever_seen", {}).get("value") or "0") == "1"
     previous_last_seen = str(previous.get("fsk_usb_last_seen", {}).get("value") or "")
 
@@ -235,7 +281,10 @@ def main() -> int:
         if previous_ever_seen and previous_last_seen:
             status["fsk_usb_last_seen"] = previous_last_seen
 
-    storage.update_runtime_status(status)
+    if bootstrap_storage is not None:
+        bootstrap_storage.update_runtime_status(status)
+    else:
+        write_runtime_status(status, DB_PATH)
     return 0
 
 
