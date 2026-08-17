@@ -61,20 +61,25 @@ function messageRow(row) {
 }
 
 async function refreshAlarms() {
-  const rows = await api('/api/messages?limit=20');
+  const rows = await api('/api/messages?scope=feed&limit=20');
   const latest = rows[0];
   if (latest) {
     $('#latest-title').textContent = latest.station || 'Pager-melding';
     $('#latest-time').textContent = formatDate(latest.received_at);
     $('#latest-message').textContent = latest.message;
     $('#latest-meta').textContent = [latest.protocol, latest.ric && `RIC ${latest.ric}`, latest.baud && `${latest.baud} baud`, latest.source].filter(Boolean).join(' · ');
+  } else {
+    $('#latest-title').textContent = 'Ingen aktuelle alarmer';
+    $('#latest-time').textContent = '';
+    $('#latest-message').textContent = 'Afventer en alarm, der er godkendt til videresendelse.';
+    $('#latest-meta').textContent = '';
   }
-  $('#alarm-list').innerHTML = rows.length ? rows.map(messageRow).join('') : '<p class="muted">Ingen alarmer endnu.</p>';
+  $('#alarm-list').innerHTML = rows.length ? rows.map(messageRow).join('') : '<p class="muted">Ingen aktuelle alarmer endnu.</p>';
 }
 
 async function refreshHistory() {
-  const rows = await api('/api/messages?limit=100');
-  $('#history-list').innerHTML = rows.length ? rows.map(messageRow).join('') : '<p class="muted">Ingen alarmer endnu.</p>';
+  const rows = await api('/api/messages?scope=history&limit=100');
+  $('#history-list').innerHTML = rows.length ? rows.map(messageRow).join('') : '<p class="muted">Ingen historik endnu.</p>';
 }
 
 $$('.tab').forEach((button) => button.addEventListener('click', async () => {
