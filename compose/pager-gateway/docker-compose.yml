@@ -4,6 +4,12 @@ services:
       context: ../../services/pager-gateway
     container_name: racher-pager-gateway
     restart: unless-stopped
+    init: true
+    user: "${PAGER_RUNTIME_UID:-1000}:${PAGER_RUNTIME_GID:-1000}"
+    read_only: true
+    cap_drop:
+      - ALL
+    pids_limit: 256
     environment:
       PAGER_DATA_DIR: /data
       PORT: 8088
@@ -13,6 +19,8 @@ services:
       # På den dedikerede Pi sættes PAGER_DATA_HOST_PATH=/var/lib/racher-pager,
       # så den native PDL-service, host-agenten og webgatewayen deler data.
       - ${PAGER_DATA_HOST_PATH:-../../data/pager-gateway}:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
     ports:
       - "${PAGER_GATEWAY_PORT:-8088}:8088"
     healthcheck:
@@ -23,3 +31,8 @@ services:
       start_period: 15s
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
