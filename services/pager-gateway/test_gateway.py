@@ -86,6 +86,12 @@ class PagerParsingTests(unittest.TestCase):
         self.assertEqual(event.message, line)
         self.assertEqual(event.decoder_noise_reason, "decoder-code")
 
+    def test_tone_only_decoder_status_is_marked_noise(self):
+        event = parse_pdl_line("TONE ONLY", source="pdl-file")
+        self.assertIsNotNone(event)
+        self.assertEqual(event.message, "TONE ONLY")
+        self.assertEqual(event.decoder_noise_reason, "decoder-mode")
+
     def test_short_lowercase_suffix_is_marked_fragment(self):
         event = parse_pdl_line("førerhus, spredt sig", source="pdl-file")
         self.assertIsNotNone(event)
