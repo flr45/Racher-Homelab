@@ -3,6 +3,7 @@
   if (!isAdmin) return;
 
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  let boundButton = null;
 
   async function request(url, options = {}) {
     const method = String(options.method || 'GET').toUpperCase();
@@ -20,6 +21,9 @@
     let card = document.querySelector('#alarm-filter-card');
     if (card) return card;
 
+    // Fallback for development entrypoints that render the raw template without
+    // wsgi.py. Production inserts this card server-side, so JavaScript is no longer
+    // responsible for whether the filter is visible at all.
     const form = document.querySelector('#settings-form');
     if (!form) return null;
 
@@ -41,17 +45,26 @@
         <span id="alarm-filter-status" class="muted">Henter…</span>
       </div>`;
 
-    const adaptiveCard = [...form.querySelectorAll(':scope > article.card')]
+    const adaptiveCard = [...form.querySelectorAll('article.card')]
       .find((item) => item.textContent?.includes('Støj og dubletter'));
     if (adaptiveCard) adaptiveCard.insertAdjacentElement('afterend', card);
     else form.querySelector('.savebar')?.insertAdjacentElement('beforebegin', card);
+    return card;
+  }
 
-    card.querySelector('#save-alarm-filters')?.addEventListener('click', save);
+  function bindCard() {
+    const card = ensureCard();
+    if (!card) return null;
+    const button = card.querySelector('#save-alarm-filters');
+    if (button && button !== boundButton) {
+      button.addEventListener('click', save);
+      boundButton = button;
+    }
     return card;
   }
 
   async function load() {
-    const card = ensureCard();
+    const card = bindCard();
     if (!card) return;
     const field = card.querySelector('#alarm-filter-terms');
     const status = card.querySelector('#alarm-filter-status');
@@ -65,12 +78,12 @@
         ? `${terms.length} aktiv${terms.length === 1 ? 't' : 'e'} filter${terms.length === 1 ? '' : 'e'}`
         : 'Ingen aktive filtre';
     } catch (error) {
-      status.textContent = error.message;
+      status.textContent = `Kunne ikke hente filter: ${error.message}`;
     }
   }
 
   async function save() {
-    const card = ensureCard();
+    const card = bindCard();
     if (!card) return;
     const field = card.querySelector('#alarm-filter-terms');
     const button = card.querySelector('#save-alarm-filters');
@@ -90,14 +103,14 @@
         ? `Gemt · ${terms.length} aktiv${terms.length === 1 ? 't' : 'e'} filter${terms.length === 1 ? '' : 'e'}`
         : 'Gemt · ingen aktive filtre';
     } catch (error) {
-      status.textContent = error.message;
+      status.textContent = `Kunne ikke gemme: ${error.message}`;
     } finally {
       button.disabled = false;
     }
   }
 
   function boot() {
-    ensureCard();
+    bindCard();
     document.querySelector('[data-tab="settings"]')?.addEventListener('click', () => load().catch(console.error));
     load().catch(console.error);
   }
