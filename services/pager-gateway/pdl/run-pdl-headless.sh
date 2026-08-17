@@ -17,9 +17,10 @@ fi
 
 mkdir -p "$PDL_STATE_DIR" "$STATE_ROOT"
 
-if [[ ! -f "$PDL_STATE_DIR/pdl.ini" ]]; then
-  "$SCRIPT_DIR/configure-pdl.sh"
-fi
+# Rebuild pdl.ini from the root-owned environment on every start. This makes
+# decoder-output hardening take effect after a normal gateway update instead of
+# leaving an old persistent pdl.ini behind indefinitely.
+"$SCRIPT_DIR/configure-pdl.sh"
 
 touch "$PDL_LOG_PATH"
 cd "$PDL_STATE_DIR"
