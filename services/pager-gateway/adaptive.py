@@ -14,6 +14,8 @@ from typing import Any
 _WS_RE = re.compile(r"\s+")
 _DIGIT_RUN_RE = re.compile(r"\d+")
 _DUPLICATE_PUNCT_RE = re.compile(r"[^\wÆØÅæøå]+", re.UNICODE)
+_ALPHA_WORD_RE = re.compile(r"[A-Za-zÆØÅæøå]{2,}")
+_DECODER_CODE_RE = re.compile(r"^[0-9A-Fa-f*+\-?/\\\[\]{}|ÆØÅæøå\s]{3,120}$")
 
 
 class AdaptiveFilter:
@@ -99,6 +101,27 @@ class AdaptiveFilter:
         value = _DUPLICATE_PUNCT_RE.sub(" ", value)
         return _WS_RE.sub(" ", value).strip()
 
+    @staticmethod
+    def automatic_noise_reason(text: Any) -> str | None:
+        """Catch unmistakable decoder artifacts before notification delivery.
+
+        These rows are still stored in the message database by the normal ingest
+        path; only delivery is suppressed. This deliberately avoids broad keyword
+        filtering so an unfamiliar real alarm continues to pass by default.
+        """
+        value = str(text or "").strip()
+        words = _ALPHA_WORD_RE.findall(value)
+        if not words and _DECODER_CODE_RE.fullmatch(value):
+            return "decoder-code"
+        if (
+            len(value) <= 48
+            and value[:1].islower()
+            and len(words) <= 6
+            and not re.search(r"\b(?:BRAND|ALARM|ISL|VSBV|ØF|VCT)\b", value, re.I)
+        ):
+            return "decoder-fragment"
+        return None
+
     def observe(self, message_id: int, text: str) -> None:
         now = self._now()
         exact = self.exact_signature(text)
@@ -141,9 +164,6 @@ class AdaptiveFilter:
         er, en, et, eratio = stats(exact)
         tr, tn, tt, tratio = stats(template)
 
-        # Exact patterns can suppress after three unanimous/almost-unanimous noise
-        # votes. Generalized templates require substantially more evidence and no
-        # contradicting relevant vote.
         if et >= 3 and en >= 3 and eratio >= 0.95:
             return {
                 "classification": "noise",
@@ -187,6 +207,11 @@ class AdaptiveFilter:
 
     @staticmethod
     def _same_signal(candidate: sqlite3.Row, ric: str | None, function: str | None) -> bool:
+        # Older callers did not pass RIC/function into evaluate(). In that case
+        # fall back to text similarity instead of silently disabling fuzzy dedup.
+        if ric is None and function is None:
+            return True
+
         old_ric = str(candidate["ric"] or "").strip()
         new_ric = str(ric or "").strip()
         if bool(old_ric) != bool(new_ric):
@@ -212,8 +237,7 @@ class AdaptiveFilter:
 
         Exact duplicates are searched across recent rows rather than only the
         immediately preceding row, so an interleaved decoder artifact no longer
-        defeats suppression. Near-duplicates use a tighter eight-second window
-        and require the same signal identity when a RIC is available.
+        defeats suppression. Near-duplicates use a tighter eight-second window.
         """
         current = self._parse_moment(received_at)
         if current is None:
@@ -228,22 +252,16 @@ class AdaptiveFilter:
                    FROM messages ORDER BY id DESC LIMIT 80"""
             ).fetchall()
 
-        # First pass: exact duplicates anywhere inside the configured window.
         for row in rows:
             previous = self._parse_moment(row["received_at"])
             if previous is None:
                 continue
             delta = (current - previous).total_seconds()
-            if delta < 0:
-                continue
-            if delta > window:
+            if delta < 0 or delta > window:
                 continue
             if str(row["message_fingerprint"] or "") == fingerprint:
                 return int(row["id"])
 
-        # Second pass: reception variants and suffix fragments from the same burst.
-        # Keep this much tighter than the normal duplicate window to avoid merging
-        # two genuinely different dispatches that happen to share boilerplate.
         fuzzy_window = min(window, 8)
         if len(normalized) < 12:
             return None
@@ -275,6 +293,18 @@ class AdaptiveFilter:
         ric: str | None = None,
         function: str | None = None,
     ) -> dict[str, Any]:
+        automatic_noise = self.automatic_noise_reason(text)
+        if automatic_noise:
+            return {
+                "message_fingerprint": self.exact_signature(text),
+                "relevance_class": "noise",
+                "relevance_score": 0.0,
+                "suppressed_reason": automatic_noise,
+                "duplicate_of": None,
+                "delivery_eligible": False,
+                "decision_reason": "automatisk decoder-rens: rålinjen gemmes, notifikation undertrykkes",
+            }
+
         learned = self.learned_relevance(text)
         duplicate_of = self.immediate_duplicate(
             text,
@@ -319,9 +349,6 @@ class AdaptiveFilter:
             exact = self.exact_signature(text)
             template = self.template_signature(text)
 
-            # Older databases can contain messages created before adaptive.observe()
-            # existed. Ensure their pattern rows are present before vote updates so
-            # admin feedback on historical messages is never silently discarded.
             now = self._now()
             for kind, signature, sample in (
                 ("exact", exact, self.normalized_text(text)),
@@ -378,7 +405,9 @@ class AdaptiveFilter:
         with self._lock, self.connect() as conn:
             messages = conn.execute("SELECT COUNT(*) AS c FROM messages").fetchone()["c"]
             feedback = conn.execute("SELECT COUNT(*) AS c FROM message_feedback").fetchone()["c"]
-            noise = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE suppressed_reason='noise'").fetchone()["c"]
+            noise = conn.execute(
+                "SELECT COUNT(*) AS c FROM messages WHERE suppressed_reason='noise' OR suppressed_reason LIKE 'decoder-%'"
+            ).fetchone()["c"]
             duplicates = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE suppressed_reason='duplicate'").fetchone()["c"]
             learned = conn.execute(
                 """SELECT COUNT(*) AS c FROM adaptive_patterns
