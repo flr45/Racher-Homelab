@@ -147,6 +147,7 @@ python3 -m py_compile \
   "$RUNTIME_REPO/services/pager-gateway/app_core.py" \
   "$RUNTIME_REPO/services/pager-gateway/gateway.py" \
   "$RUNTIME_REPO/services/pager-gateway/push_service.py" \
+  "$RUNTIME_REPO/services/pager-gateway/pushover_destinations.py" \
   "$RUNTIME_REPO/services/pager-gateway/storage.py" \
   "$RUNTIME_REPO/services/pager-gateway/operations.py" \
   "$RUNTIME_REPO/services/pager-gateway/rss_updates.py" \
