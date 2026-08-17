@@ -82,7 +82,6 @@ for required in \
   "$PDL_DIR/install-backup-service.sh" \
   "$PDL_DIR/install-network-mobility.sh" \
   "$PDL_DIR/pager-compose.sh" \
-  "$PDL_DIR/seed-pdl-cursor.py" \
   "$COMPOSE_FILE"; do
   [[ -f "$required" ]] || { echo "Mangler installationsfil: $required" >&2; exit 1; }
 done
@@ -129,9 +128,6 @@ bash "$PDL_DIR/install-pdl.sh"
 step "5/10 PDL-service"
 PAGER_STATE_ROOT="$STATE_ROOT" bash "$PDL_DIR/install-pdl-service.sh"
 sudo systemctl start racher-pdl.service >/dev/null 2>&1 || true
-# Establish a hand-off point before the web image is built. Any PDL line arriving
-# during the remaining installation is then consumed by the first gateway start.
-sudo python3 "$PDL_DIR/seed-pdl-cursor.py" "$STATE_ROOT/pdl.log"
 
 step "6/10 Wi-Fi mobility og fallback-portal"
 REPO_ROOT="$RUNTIME_REPO" bash "$PDL_DIR/install-network-mobility.sh"
