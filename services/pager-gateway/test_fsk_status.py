@@ -62,6 +62,22 @@ class FskStatusTests(unittest.TestCase):
             self.assertEqual(runtime["fsk_usb_connected"]["value"], "0")
             self.assertEqual(runtime["fsk_usb_last_seen"]["value"], "2026-08-15T10:00:00+00:00")
 
+    def test_normal_poll_does_not_run_full_storage_initialization(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "pager.db")
+            Storage(db_path).update_runtime_status({"fsk_usb_ever_seen": "0"})
+            status = {
+                "fsk_usb_connected": "0",
+                "fsk_usb_pdl_in_use": "0",
+                "fsk_usb_last_seen": "",
+            }
+            with patch.object(fsk, "DB_PATH", db_path), \
+                 patch.object(fsk, "collect_status", return_value=status), \
+                 patch.object(fsk, "Storage", side_effect=AssertionError("full migration should not run")):
+                self.assertEqual(fsk.main(), 0)
+            runtime = Storage(db_path).get_runtime_status()
+            self.assertEqual(runtime["fsk_usb_connected"]["value"], "0")
+
     def test_maintenance_lock_detects_active_holder(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "maintenance.lock"
