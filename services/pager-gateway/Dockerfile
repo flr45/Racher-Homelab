@@ -9,7 +9,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py app_core.py gateway.py storage.py routing.py adaptive.py adaptive_routes.py training.py training_routes.py push_service.py ./
+COPY app.py app_core.py gateway.py storage.py routing.py adaptive.py adaptive_routes.py training.py training_routes.py push_service.py operations.py wsgi.py ./
 COPY templates ./templates
 COPY static ./static
 
@@ -19,4 +19,4 @@ EXPOSE 8088
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/healthz', timeout=2)"
 
-CMD ["gunicorn", "--workers", "1", "--threads", "4", "--bind", "0.0.0.0:8088", "--access-logfile", "-", "app:app"]
+CMD ["gunicorn", "--workers", "1", "--threads", "4", "--bind", "0.0.0.0:8088", "--access-logfile", "-", "wsgi:app"]
