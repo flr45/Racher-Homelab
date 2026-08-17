@@ -8,7 +8,8 @@ from storage import Storage
 class AlarmFeedStorageTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.storage = Storage(os.path.join(self.tmp.name, "pager.db"))
+        self.db = os.path.join(self.tmp.name, "pager.db")
+        self.storage = Storage(self.db)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -57,6 +58,36 @@ class AlarmFeedStorageTests(unittest.TestCase):
             self.storage.list_messages(limit=1, delivery_eligible_only=True)[0]["message"],
             "BRANDALARM Testvej 1",
         )
+
+    def test_upgrade_reclassifies_old_decoder_artifacts_without_deleting_history(self):
+        alarm_id = self.storage.add_message({
+            "message": "$6 ISL KA, KB V1 Naturbrand-Mark",
+            "raw_line": "$6 ISL KA, KB V1 Naturbrand-Mark",
+            "source": "pdl-file",
+            "delivery_eligible": True,
+        })
+        tone_id = self.storage.add_message({
+            "message": "TONE ONLY",
+            "raw_line": "TONE ONLY",
+            "source": "pdl-file",
+            "delivery_eligible": True,
+        })
+        code_id = self.storage.add_message({
+            "message": "40Å04",
+            "raw_line": "40]04",
+            "source": "pdl-file",
+            "delivery_eligible": True,
+        })
+
+        upgraded = Storage(self.db)
+        feed_ids = [row["id"] for row in upgraded.list_messages(10, delivery_eligible_only=True)]
+        history = {row["id"]: row for row in upgraded.list_messages(10)}
+
+        self.assertEqual(feed_ids, [alarm_id])
+        self.assertIn(tone_id, history)
+        self.assertIn(code_id, history)
+        self.assertEqual(history[tone_id]["suppressed_reason"], "decoder-mode")
+        self.assertEqual(history[code_id]["suppressed_reason"], "decoder-code")
 
 
 if __name__ == "__main__":
