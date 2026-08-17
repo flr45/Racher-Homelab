@@ -81,7 +81,6 @@ class AlarmFilterStore:
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
     def _initialize(self) -> None:
@@ -91,8 +90,7 @@ class AlarmFilterStore:
                 CREATE TABLE IF NOT EXISTS alarm_filter_terms (
                     term TEXT PRIMARY KEY COLLATE NOCASE,
                     created_at TEXT NOT NULL,
-                    created_by INTEGER,
-                    FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+                    created_by INTEGER
                 )
                 """
             )
