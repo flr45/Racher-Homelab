@@ -25,6 +25,7 @@
 
     <nav class="tabs" aria-label="Navigation">
       <button class="tab active" data-tab="alarms">Alarmer</button>
+      <button class="tab" data-tab="politi">Politi Update</button>
       <button class="tab" data-tab="history">Historik</button>
       {% if is_admin %}
       <button class="tab" data-tab="system">System</button>
@@ -46,6 +47,27 @@
           <div class="actions push-actions"><button id="push-enable" class="primary">Aktivér notifikationer</button><button id="push-test" hidden>Send test</button><button id="push-disable" hidden>Deaktivér</button></div>
         </article>
         <article class="card"><div class="card-head"><div><span class="label">Seneste</span><h2>Alarmfeed</h2></div><button id="refresh-alarms">Opdater</button></div><div id="alarm-list" class="history-list"></div></article>
+      </section>
+
+      <section id="politi" class="panel">
+        <article class="card">
+          <div class="card-head"><div><span class="label">Officielle RSS-meldinger</span><h2>Politi Update</h2></div><div class="actions"><span id="rss-ui-refreshed" class="muted">—</span><button id="rss-refresh">Opdater</button></div></div>
+          <p class="hint">Visningen er helt adskilt fra pageralarmer. Du ser kun de RSS-feeds, der er tildelt din bruger.</p>
+          <div id="rss-feed-summary" class="station-pills"><span class="muted">Henter dine RSS-kilder…</span></div>
+        </article>
+        <article class="card"><div class="card-head"><div><span class="label">Seneste</span><h2>Politi Update-feed</h2></div></div><div id="rss-item-list" class="history-list"><p class="muted">Åbn fanen for at hente Politi Update.</p></div></article>
+        {% if is_admin %}
+        <article class="card">
+          <div class="card-head"><div><span class="label">RSS-kilder</span><h2>Feed-katalog</h2></div><button id="rss-fetch-now">Hent nu</button></div>
+          <p class="hint">De officielle Politi Update-feeds er klar fra start. Du kan også tilføje andre HTTPS RSS-feeds. Kun feeds med mindst én aktiv abonnent bliver hentet.</p>
+          <form id="rss-feed-form" class="form-grid">
+            <label>Navn<input name="name" maxlength="120" required placeholder="fx Kommunalt beredskab"></label>
+            <label>HTTPS RSS-feed<input name="url" type="url" required placeholder="https://example.dk/feed.xml"></label>
+            <div class="wide actions"><button class="primary" type="submit">Tilføj RSS-feed</button></div>
+          </form>
+          <div id="rss-admin-feed-list" class="command-list"><p class="muted">Henter RSS-katalog…</p></div>
+        </article>
+        {% endif %}
       </section>
 
       <section id="history" class="panel">
@@ -96,6 +118,7 @@
         </article>
         <article class="card"><div class="card-head"><div><span class="label">Konti</span><h2>Brugere</h2></div><button id="refresh-users">Opdater</button></div><div id="user-list" class="user-list"></div></article>
         <article class="card"><div class="card-head"><div><span class="label">Alarmrouting</span><h2>Områder pr. bruger</h2></div><button id="refresh-user-routing">Opdater</button></div><p class="hint">Alle meldinger overstyrer områdevalgene. Admin har fortsat adgang til hele råhistorikken.</p><div id="user-routing-list"><p class="muted">Åbn fanen for at hente brugere.</p></div></article>
+        <article class="card"><div class="card-head"><div><span class="label">RSS-routing</span><h2>Politi Update pr. bruger</h2></div><button id="refresh-user-rss-routing">Opdater</button></div><p class="hint">Vælg præcis hvilke RSS-feeds hver bruger må se. RSS Web Push er et separat valg og er slået fra som standard.</p><div id="user-rss-routing-list"><p class="muted">Åbn fanen for at hente RSS-routing.</p></div></article>
       </section>
 
       <section id="ric" class="panel">
@@ -147,5 +170,6 @@
   <script src="/static/fsk-status.js" defer></script>
   <script src="/static/ric-admin.js" defer></script>
   <script src="/static/adaptive-admin.js" defer></script>
+  <script src="/static/rss-updates.js" defer></script>
 </body>
 </html>
