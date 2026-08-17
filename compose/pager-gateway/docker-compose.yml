@@ -5,7 +5,11 @@ services:
     container_name: racher-pager-gateway
     restart: unless-stopped
     init: true
-    user: "${PAGER_RUNTIME_UID:-1000}:${PAGER_RUNTIME_GID:-1000}"
+    # Normal appliance starts go through pager-compose.sh, which supplies the
+    # state-directory uid/gid. Root is only the compatibility fallback for the
+    # one upgrade where the previously-installed helper does not know these vars;
+    # install-system-agent.sh immediately recreates the container unprivileged.
+    user: "${PAGER_RUNTIME_UID:-0}:${PAGER_RUNTIME_GID:-0}"
     read_only: true
     cap_drop:
       - ALL
