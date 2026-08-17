@@ -25,6 +25,7 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn("PAGER_RUNTIME_UID", compose_helper)
         self.assertIn("PAGER_RUNTIME_GID", compose_helper)
         self.assertIn("vapid-private.pem", compose_helper)
+        self.assertIn("pdl.log.racher-cursor", compose_helper)
         self.assertIn("Afviser usikker symlink", compose_helper)
 
     def test_update_validates_recovery_layers_and_restores_host_files(self):
@@ -36,7 +37,8 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn("systemctl is-active --quiet racher-pager-system-agent.service", script)
         self.assertIn("systemctl is-active --quiet racher-pager-gateway-watchdog.timer", script)
         self.assertIn("systemctl is-active --quiet racher-pdl.service", script)
-        self.assertIn("racher-pager-agent-update-restart", script)
+        self.assertIn("racher-pager-post-update", script)
+        self.assertIn("--force-recreate pager-gateway", script)
 
     def test_manual_rollback_restores_non_container_runtime(self):
         script = (PDL / "rollback-pager.sh").read_text(encoding="utf-8")
