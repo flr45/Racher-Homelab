@@ -38,7 +38,10 @@ Baud512=$BAUD_512
 Baud1200=$BAUD_1200
 Baud2400=$BAUD_2400
 FNU=0
-ShowBoth=1
+# Alarmflowet er alfanumerisk. Undgå at PDL samtidig viser den samme bitstrøm
+# som numeric/tone-varianter; gatewayen beholder stadig rå ALPHA-decodes til
+# diagnostik og udfører sin egen korte dubletkontrol før notifikation.
+ShowBoth=0
 
 [Audio]
 SampleRate=$SAMPLE_RATE
@@ -62,9 +65,11 @@ MOBITEX=0
 ERMES=0
 
 [General]
-ShowTone=1
-ShowNumeric=1
-ShowMisc=1
+ShowTone=0
+ShowNumeric=0
+ShowMisc=0
+# Behold gentagne ALPHA-decodes i råloggen. Racher Pager filtrerer dem efter
+# modtagelse, så en mellemkommende støjlinje ikke kan omgå dubletkontrollen.
 BlockDuplicate=0
 
 [Log]
@@ -80,4 +85,4 @@ if [[ "$RS232_ENABLED" == "1" ]]; then
 else
   echo "ALSA capture device: $CAPTURE_DEVICE @ $SAMPLE_RATE Hz"
 fi
-echo "POCSAG decoder: 512=$BAUD_512 1200=$BAUD_1200 2400=$BAUD_2400"
+echo "POCSAG decoder: 512=$BAUD_512 1200=$BAUD_1200 2400=$BAUD_2400 · kun ALPHA-output"
