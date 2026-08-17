@@ -7,9 +7,9 @@ from pathlib import Path
 from gateway import FileTailSource
 
 
-# Hold the live PDL tailer until the operations, alarm rules and RSS layers have
-# installed their tracking/routes. This removes startup races where the first alarm
-# after a container restart could otherwise be delivered before policy is ready.
+# Hold the live PDL tailer until the operations, notification policy and RSS layers
+# have installed their tracking/routes. This removes startup races where the first
+# alarm after a container restart could otherwise be delivered before policy is ready.
 _real_file_tail_start = FileTailSource.start
 FileTailSource.start = lambda self: None
 try:
@@ -20,9 +20,14 @@ finally:
 
 from alarm_rules import install_alarm_rules
 from operations import install_operations
+from pushover_destinations import install_pushover_destinations
 from rss_updates import install_rss_updates
 
 
+# Pushover destination management must wrap the core sender before alarm_rules
+# adds its alarm-time decoration. The resulting call chain is therefore:
+# alarm time -> managed recipients -> Pushover API.
+pushover_destinations = install_pushover_destinations(core)
 alarm_rules = install_alarm_rules(core)
 operations = install_operations(core)
 rss_updates = install_rss_updates(core)
@@ -32,14 +37,33 @@ app = app_module.app
 
 
 # Browsers may keep an older copy of CSS/JavaScript even though the HTML itself is
-# deliberately no-store. That made UI deployments look unchanged until the local
-# browser cache was manually cleared. Build a deterministic version from the
-# actual static files and append it to every CSS/JS asset referenced by HTML.
-# The URL therefore changes automatically whenever any frontend asset changes.
+# deliberately no-store. Build a deterministic version from the actual static files
+# and append it to every CSS/JS asset referenced by HTML.
 _STATIC_ROOT = Path(app.static_folder or "/app/static")
 _STATIC_ASSET_RE = re.compile(r'(/static/[A-Za-z0-9._-]+\.(?:css|js))(?!\?v=)')
+_ADAPTIVE_CARD_RE = re.compile(
+    r'(<article class="card"><span class="label">Adaptiv filtrering</span>.*?</article>)',
+    re.DOTALL,
+)
 _ALARM_MAP_SCRIPT = '<script src="/static/alarm-map.js" defer></script>'
 _ALARM_FILTER_SCRIPT = '<script src="/static/alarm-filter-ui.js" defer></script>'
+_PUSHOVER_ADMIN_SCRIPT = '<script src="/static/pushover-admin.js" defer></script>'
+_ALARM_FILTER_CARD = """
+          <article class="card" id="alarm-filter-card">
+            <span class="label">Manuelt alarmfilter</span>
+            <h2>Filtrer alarmord</h2>
+            <p class="hint">Hvis en pageralarm indeholder et af ordene eller fraserne herunder, gemmes råmeldingen stadig i adminhistorikken, men den vises ikke i Alarmfeed og sendes ikke som Web Push eller Pushover.</p>
+            <div class="form-grid">
+              <label class="wide">Ord eller fraser
+                <input id="alarm-filter-terms" type="text" maxlength="4000" autocomplete="off" placeholder="fx TEST, ØVELSE, servicebesked">
+              </label>
+            </div>
+            <p class="hint">Adskil flere filtre med komma eller semikolon. Store og små bogstaver behandles ens.</p>
+            <div class="actions">
+              <button id="save-alarm-filters" class="primary" type="button">Gem alarmfilter</button>
+              <span id="alarm-filter-status" class="muted">Henter…</span>
+            </div>
+          </article>""".strip()
 
 
 def _static_asset_version() -> str:
@@ -57,10 +81,32 @@ def _static_asset_version() -> str:
 STATIC_ASSET_VERSION = _static_asset_version()
 
 
+def _enhance_home_html(body: str) -> str:
+    # The manual filter is now inserted server-side. It therefore exists in the
+    # HTML response even if a browser extension, stale script, or JavaScript error
+    # prevents the helper module from running. The helper only loads/saves data.
+    if 'id="alarm-filter-card"' not in body:
+        body, _ = _ADAPTIVE_CARD_RE.subn(
+            lambda match: f"{match.group(1)}\n{_ALARM_FILTER_CARD}",
+            body,
+            count=1,
+        )
+
+    if "</body>" in body:
+        helpers: list[str] = []
+        if "alarm-filter-ui.js" not in body:
+            helpers.append(_ALARM_FILTER_SCRIPT)
+        if "pushover-admin.js" not in body:
+            helpers.append(_PUSHOVER_ADMIN_SCRIPT)
+        if "alarm-map.js" not in body:
+            helpers.append(_ALARM_MAP_SCRIPT)
+        if helpers:
+            body = body.replace("</body>", "  " + "\n  ".join(helpers) + "\n</body>")
+    return body
+
+
 @app.after_request
 def version_static_assets(response):
-    # New static responses must always revalidate. The query-string fingerprint
-    # below handles clients that still possess a previously fresh cached object.
     if core.request.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
         return response
@@ -68,17 +114,8 @@ def version_static_assets(response):
     content_type = str(response.headers.get("Content-Type") or "")
     if response.status_code == 200 and content_type.startswith("text/html"):
         body = response.get_data(as_text=True)
-        # Keep optional UI helpers isolated from alarm ingestion/routing. The
-        # server injects them on the authenticated home page so they are loaded
-        # reliably even when the main template has not yet been refactored.
-        if core.request.path == "/" and "</body>" in body:
-            helpers: list[str] = []
-            if "alarm-filter-ui.js" not in body:
-                helpers.append(_ALARM_FILTER_SCRIPT)
-            if "alarm-map.js" not in body:
-                helpers.append(_ALARM_MAP_SCRIPT)
-            if helpers:
-                body = body.replace("</body>", "  " + "\n  ".join(helpers) + "\n</body>")
+        if core.request.path == "/":
+            body = _enhance_home_html(body)
         body = _STATIC_ASSET_RE.sub(rf"\1?v={STATIC_ASSET_VERSION}", body)
         response.set_data(body)
         response.headers["Content-Length"] = str(len(response.get_data()))
