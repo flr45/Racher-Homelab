@@ -14,6 +14,20 @@ function formatDate(value) {
   return new Date(value).toLocaleString('da-DK');
 }
 
+function formatAlarmTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleTimeString('da-DK', {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+}
+
+function formatAlarmDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('da-DK');
+}
+
 function formatUptime(seconds) {
   const total = Number(seconds || 0);
   const d = Math.floor(total / 86400);
@@ -56,8 +70,11 @@ async function api(url, options = {}) {
 }
 
 function messageRow(row) {
-  const meta = [row.protocol, row.ric && `RIC ${row.ric}`, row.baud && `${row.baud} baud`, row.source, row.notification_sent ? 'Pushover ✓' : ''].filter(Boolean).join(' · ');
-  return `<div class="history-row"><div class="history-time">${formatDate(row.received_at)}</div><div><strong>${escapeHtml(row.station || 'Pager-melding')}</strong><p>${escapeHtml(row.message)}</p><small>${escapeHtml(meta)}</small></div></div>`;
+  const wordFilter = String(row.suppressed_reason || '').startsWith('word-filter:')
+    ? `Filtreret: ${String(row.suppressed_reason).slice('word-filter:'.length)}`
+    : '';
+  const meta = [row.protocol, row.ric && `RIC ${row.ric}`, row.baud && `${row.baud} baud`, row.source, wordFilter, row.notification_sent ? 'Pushover ✓' : ''].filter(Boolean).join(' · ');
+  return `<div class="history-row"><div class="history-time"><strong>Alarmtid ${escapeHtml(formatAlarmTime(row.received_at))}</strong><br>${escapeHtml(formatAlarmDate(row.received_at))}</div><div><strong>${escapeHtml(row.station || 'Pager-melding')}</strong><p>${escapeHtml(row.message)}</p><small>${escapeHtml(meta)}</small></div></div>`;
 }
 
 async function refreshAlarms() {
@@ -65,7 +82,7 @@ async function refreshAlarms() {
   const latest = rows[0];
   if (latest) {
     $('#latest-title').textContent = latest.station || 'Pager-melding';
-    $('#latest-time').textContent = formatDate(latest.received_at);
+    $('#latest-time').textContent = `Alarmtid ${formatAlarmTime(latest.received_at)}`;
     $('#latest-message').textContent = latest.message;
     $('#latest-meta').textContent = [latest.protocol, latest.ric && `RIC ${latest.ric}`, latest.baud && `${latest.baud} baud`, latest.source].filter(Boolean).join(' · ');
   } else {
@@ -90,7 +107,7 @@ $$('.tab').forEach((button) => button.addEventListener('click', async () => {
   if (button.dataset.tab === 'history') await refreshHistory();
   if (button.dataset.tab === 'system' && isAdmin) { await refreshAdminStatus(); await refreshAudit(); }
   if (button.dataset.tab === 'users' && isAdmin) await refreshUsers();
-  if (button.dataset.tab === 'settings' && isAdmin) await loadSettings();
+  if (button.dataset.tab === 'settings' && isAdmin) { await loadSettings(); await loadAlarmFilters(); }
 }));
 
 $('#refresh-alarms')?.addEventListener('click', refreshAlarms);
@@ -349,6 +366,67 @@ $('#create-user-form')?.addEventListener('submit', async (event) => {
   catch (error) { alert(error.message); }
 });
 
+function installAlarmFilterUi() {
+  if (!isAdmin || $('#alarm-filter-card')) return;
+  const form = $('#settings-form');
+  const savebar = form?.querySelector('.savebar');
+  if (!form || !savebar) return;
+  const card = document.createElement('article');
+  card.className = 'card';
+  card.id = 'alarm-filter-card';
+  card.innerHTML = `
+    <span class="label">Manuelt alarmfilter</span>
+    <h2>Ord og fraser</h2>
+    <p class="hint">Hvis en pageralarm indeholder et af disse ord eller fraser, gemmes råmeldingen i adminhistorikken, men den vises ikke i Alarmfeed og sendes ikke som Web Push eller Pushover. Match er ikke forskel på store og små bogstaver.</p>
+    <div class="form-grid">
+      <label class="wide">Filtrer på
+        <input id="alarm-filter-terms" type="text" maxlength="4000" autocomplete="off" placeholder="fx TEST, ØVELSE, servicebesked">
+      </label>
+    </div>
+    <p class="hint">Adskil flere filtre med komma eller semikolon. Hele fraser kan også bruges.</p>
+    <div class="actions"><button id="save-alarm-filters" class="primary" type="button">Gem alarmfilter</button><span id="alarm-filter-status" class="muted"></span></div>`;
+  form.insertBefore(card, savebar);
+  $('#save-alarm-filters')?.addEventListener('click', saveAlarmFilters);
+}
+
+async function loadAlarmFilters() {
+  if (!isAdmin) return;
+  installAlarmFilterUi();
+  const field = $('#alarm-filter-terms');
+  const status = $('#alarm-filter-status');
+  if (!field) return;
+  try {
+    const data = await api('/api/alarm-filters');
+    const terms = Array.isArray(data.terms) ? data.terms : [];
+    field.value = terms.join(', ');
+    if (status) status.textContent = terms.length ? `${terms.length} aktiv${terms.length === 1 ? 't' : 'e'} filter${terms.length === 1 ? '' : 'e'}` : 'Ingen aktive filtre';
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function saveAlarmFilters() {
+  const button = $('#save-alarm-filters');
+  const field = $('#alarm-filter-terms');
+  const status = $('#alarm-filter-status');
+  if (!button || !field) return;
+  button.disabled = true;
+  if (status) status.textContent = 'Gemmer…';
+  try {
+    const result = await api('/api/alarm-filters', {
+      method: 'PUT',
+      body: JSON.stringify({terms: field.value}),
+    });
+    const terms = Array.isArray(result.terms) ? result.terms : [];
+    field.value = terms.join(', ');
+    if (status) status.textContent = terms.length ? `Gemt · ${terms.length} aktiv${terms.length === 1 ? 't' : 'e'} filter${terms.length === 1 ? '' : 'e'}` : 'Gemt · filteret er tomt';
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function loadSettings() {
   if (!isAdmin) return;
   const data = await api('/api/settings'); const form = $('#settings-form');
@@ -375,6 +453,7 @@ $('#test-pushover')?.addEventListener('click', async () => {
 
 (async function start() {
   try {
+    if (isAdmin) installAlarmFilterUi();
     await refreshAlarms(); await refreshPushState();
     if (isAdmin) { await refreshAdminStatus(); await refreshAudit(); }
   } catch (error) { console.error(error); }
