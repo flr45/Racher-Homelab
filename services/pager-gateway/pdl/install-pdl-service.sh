@@ -6,9 +6,11 @@ RUN_USER="${PDL_RUN_USER:-$(id -un)}"
 RUN_GROUP="${PDL_RUN_GROUP:-$(id -gn)}"
 STATE_ROOT="${PAGER_STATE_ROOT:-/var/lib/racher-pager}"
 PDL_STATE_DIR="${PDL_STATE_DIR:-$STATE_ROOT/pdl}"
+PDL_LOG_PATH="${PDL_LOG_PATH:-$STATE_ROOT/pdl.log}"
 ENV_DIR="/etc/racher-pager"
 ENV_FILE="$ENV_DIR/pdl.env"
 UNIT_FILE="/etc/systemd/system/racher-pdl.service"
+LOGROTATE_FILE="/etc/logrotate.d/racher-pager-pdl"
 INSTALL_ROOT="/opt/racher-pager/integration"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
@@ -48,6 +50,25 @@ EOF
   sudo chmod 0640 "$ENV_FILE"
 fi
 
+# PDL writes a persistent diagnostic stream. Keep enough history for reception
+# troubleshooting without allowing a long-lived appliance to fill its SD/SSD.
+# copytruncate is intentional: PDL keeps the output file descriptor open, and the
+# gateway tailer already detects truncation safely.
+sudo tee "$LOGROTATE_FILE" >/dev/null <<EOF
+$PDL_LOG_PATH {
+    daily
+    rotate 30
+    maxsize 20M
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su $RUN_USER $RUN_GROUP
+}
+EOF
+sudo chmod 0644 "$LOGROTATE_FILE"
+
 sudo tee "$UNIT_FILE" >/dev/null <<EOF
 [Unit]
 Description=Racher PDL POCSAG Decoder
@@ -80,6 +101,7 @@ sudo systemctl enable racher-pdl.service
 echo "PDL systemd-service er installeret og aktiveret."
 echo "Konfiguration: $ENV_FILE"
 echo "Standardinput: FSK-USB / RS232 19200 8N1"
+echo "PDL-log: $PDL_LOG_PATH · roteres dagligt/ved 20 MB · 30 rotationer"
 echo "Start:  sudo systemctl start racher-pdl"
 echo "Status: sudo systemctl status racher-pdl --no-pager"
 echo "Log:    journalctl -u racher-pdl -f"
