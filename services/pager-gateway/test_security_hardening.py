@@ -21,9 +21,12 @@ class SecurityHardeningTests(unittest.TestCase):
 
                 app.app.config.update(TESTING=True)
                 base_url = 'https://pager.test'
+                assert app.app.config['MAX_CONTENT_LENGTH'] == 10 * 1024 * 1024
 
                 setup_client = app.app.test_client()
-                setup_client.get('/setup', base_url=base_url)
+                setup_page = setup_client.get('/setup', base_url=base_url, headers={'X-Forwarded-Proto': 'https'})
+                assert setup_page.status_code == 200
+                assert setup_page.headers['Cache-Control'] == 'no-store'
                 with setup_client.session_transaction(base_url=base_url) as sess:
                     csrf = sess['csrf_token']
                 created = setup_client.post('/setup', base_url=base_url, data={
@@ -40,7 +43,16 @@ class SecurityHardeningTests(unittest.TestCase):
                 assert login_page.headers['X-Content-Type-Options'] == 'nosniff'
                 assert login_page.headers['X-Frame-Options'] == 'DENY'
                 assert login_page.headers['Referrer-Policy'] == 'no-referrer'
-                assert 'frame-ancestors' in login_page.headers['Content-Security-Policy']
+                assert login_page.headers['Cross-Origin-Opener-Policy'] == 'same-origin'
+                assert login_page.headers['X-Permitted-Cross-Domain-Policies'] == 'none'
+                csp = login_page.headers['Content-Security-Policy']
+                assert "default-src 'self'" in csp
+                assert "script-src 'self'" in csp
+                assert "style-src 'self'" in csp
+                assert "connect-src 'self'" in csp
+                assert "worker-src 'self'" in csp
+                assert "form-action 'self'" in csp
+                assert "frame-ancestors 'none'" in csp
                 assert login_page.headers['Strict-Transport-Security'].startswith('max-age=')
                 assert login_page.headers['Cache-Control'] == 'no-store'
                 assert 'Secure' in login_page.headers.get('Set-Cookie', '')
@@ -78,6 +90,10 @@ class SecurityHardeningTests(unittest.TestCase):
                 }, headers={'CF-Connecting-IP': '203.0.113.11'})
                 assert success.status_code == 302, success.status_code
                 assert success.headers['Location'].endswith('/')
+
+                home = other.get('/', base_url=base_url)
+                assert home.status_code == 200
+                assert home.headers['Cache-Control'] == 'no-store'
 
                 api = other.get('/api/status', base_url=base_url)
                 assert api.status_code == 200, api.get_data(as_text=True)
