@@ -6,12 +6,14 @@ import sqlite3
 import threading
 import unicodedata
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
 
 _WS_RE = re.compile(r"\s+")
 _DIGIT_RUN_RE = re.compile(r"\d+")
+_DUPLICATE_PUNCT_RE = re.compile(r"[^\wÆØÅæøå]+", re.UNICODE)
 
 
 class AdaptiveFilter:
@@ -84,6 +86,18 @@ class AdaptiveFilter:
     @classmethod
     def template_signature(cls, text: Any) -> str:
         return hashlib.sha256(cls.template_text(text).encode("utf-8")).hexdigest()
+
+    @classmethod
+    def duplicate_text(cls, text: Any) -> str:
+        """Normalize text for short-window reception duplicate comparison.
+
+        Decoder punctuation and single undecodable characters should not turn the
+        same radio burst into multiple phone notifications. Digits are retained so
+        different addresses/units remain materially different.
+        """
+        value = cls.normalized_text(text).replace("?", "")
+        value = _DUPLICATE_PUNCT_RE.sub(" ", value)
+        return _WS_RE.sub(" ", value).strip()
 
     def observe(self, message_id: int, text: str) -> None:
         now = self._now()
@@ -161,32 +175,114 @@ class AdaptiveFilter:
             "source": "default",
         }
 
-    def immediate_duplicate(self, text: str, received_at: str, window_seconds: int = 30) -> int | None:
-        fingerprint = self.exact_signature(text)
-        with self._lock, self.connect() as conn:
-            row = conn.execute(
-                """SELECT id, received_at, message_fingerprint
-                   FROM messages ORDER BY id DESC LIMIT 1"""
-            ).fetchone()
-        if not row or str(row["message_fingerprint"] or "") != fingerprint:
-            return None
+    @staticmethod
+    def _parse_moment(value: Any) -> datetime | None:
         try:
-            current = datetime.fromisoformat(str(received_at).replace("Z", "+00:00"))
-            previous = datetime.fromisoformat(str(row["received_at"]).replace("Z", "+00:00"))
-            if current.tzinfo is None:
-                current = current.replace(tzinfo=timezone.utc)
-            if previous.tzinfo is None:
-                previous = previous.replace(tzinfo=timezone.utc)
-            delta = (current.astimezone(timezone.utc) - previous.astimezone(timezone.utc)).total_seconds()
+            moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         except (TypeError, ValueError):
             return None
-        if 0 <= delta <= max(1, min(int(window_seconds), 300)):
-            return int(row["id"])
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return moment.astimezone(timezone.utc)
+
+    @staticmethod
+    def _same_signal(candidate: sqlite3.Row, ric: str | None, function: str | None) -> bool:
+        old_ric = str(candidate["ric"] or "").strip()
+        new_ric = str(ric or "").strip()
+        if bool(old_ric) != bool(new_ric):
+            return False
+        if old_ric and old_ric != new_ric:
+            return False
+
+        old_function = str(candidate["function"] or "").strip()
+        new_function = str(function or "").strip()
+        if old_function and new_function and old_function != new_function:
+            return False
+        return True
+
+    def immediate_duplicate(
+        self,
+        text: str,
+        received_at: str,
+        window_seconds: int = 30,
+        ric: str | None = None,
+        function: str | None = None,
+    ) -> int | None:
+        """Find exact or near-identical recent reception variants.
+
+        Exact duplicates are searched across recent rows rather than only the
+        immediately preceding row, so an interleaved decoder artifact no longer
+        defeats suppression. Near-duplicates use a tighter eight-second window
+        and require the same signal identity when a RIC is available.
+        """
+        current = self._parse_moment(received_at)
+        if current is None:
+            return None
+
+        window = max(1, min(int(window_seconds), 300))
+        fingerprint = self.exact_signature(text)
+        normalized = self.duplicate_text(text)
+        with self._lock, self.connect() as conn:
+            rows = conn.execute(
+                """SELECT id, received_at, message_fingerprint, message, ric, function
+                   FROM messages ORDER BY id DESC LIMIT 80"""
+            ).fetchall()
+
+        # First pass: exact duplicates anywhere inside the configured window.
+        for row in rows:
+            previous = self._parse_moment(row["received_at"])
+            if previous is None:
+                continue
+            delta = (current - previous).total_seconds()
+            if delta < 0:
+                continue
+            if delta > window:
+                continue
+            if str(row["message_fingerprint"] or "") == fingerprint:
+                return int(row["id"])
+
+        # Second pass: reception variants and suffix fragments from the same burst.
+        # Keep this much tighter than the normal duplicate window to avoid merging
+        # two genuinely different dispatches that happen to share boilerplate.
+        fuzzy_window = min(window, 8)
+        if len(normalized) < 12:
+            return None
+        for row in rows:
+            if not self._same_signal(row, ric, function):
+                continue
+            previous = self._parse_moment(row["received_at"])
+            if previous is None:
+                continue
+            delta = (current - previous).total_seconds()
+            if delta < 0 or delta > fuzzy_window:
+                continue
+
+            previous_text = self.duplicate_text(row["message"])
+            if len(previous_text) < 12:
+                continue
+            shorter, longer = sorted((normalized, previous_text), key=len)
+            containment = len(shorter) >= 14 and shorter in longer
+            ratio = SequenceMatcher(None, normalized, previous_text, autojunk=False).ratio()
+            if containment or ratio >= 0.92:
+                return int(row["id"])
         return None
 
-    def evaluate(self, text: str, received_at: str, duplicate_window_seconds: int = 30) -> dict[str, Any]:
+    def evaluate(
+        self,
+        text: str,
+        received_at: str,
+        duplicate_window_seconds: int = 30,
+        ric: str | None = None,
+        function: str | None = None,
+    ) -> dict[str, Any]:
         learned = self.learned_relevance(text)
-        duplicate_of = self.immediate_duplicate(text, received_at, duplicate_window_seconds)
+        duplicate_of = self.immediate_duplicate(
+            text,
+            received_at,
+            duplicate_window_seconds,
+            ric=ric,
+            function=function,
+        )
         if duplicate_of is not None:
             return {
                 "message_fingerprint": self.exact_signature(text),
@@ -195,7 +291,7 @@ class AdaptiveFilter:
                 "suppressed_reason": "duplicate",
                 "duplicate_of": duplicate_of,
                 "delivery_eligible": False,
-                "decision_reason": f"identisk med melding #{duplicate_of} lige før",
+                "decision_reason": f"gentagelse eller modtagevariant af melding #{duplicate_of}",
             }
         is_noise = learned["classification"] == "noise"
         return {
