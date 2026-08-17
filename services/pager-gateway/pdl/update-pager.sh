@@ -15,6 +15,8 @@ LOCK_FILE="${PAGER_MAINTENANCE_LOCK:-/run/racher-pager/maintenance.lock}"
 PDL_BINARY="${PDL_BINARY:-/opt/racher-pager/pdl/bin/pdl}"
 PDL_BACKUP="$UPDATE_DIR/pdl-before-update"
 UPDATE_LOG="$UPDATE_DIR/last-update.log"
+FAILED_CONTAINER_LOG="$UPDATE_DIR/failed-container.log"
+FAILED_HEALTH_BODY="$UPDATE_DIR/failed-health.json"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "update-pager.sh skal køre som root via host-agenten." >&2
@@ -29,6 +31,7 @@ mkdir -p "$(dirname "$LOCK_FILE")"
 exec 9>"$LOCK_FILE"
 flock -n 9 || { echo "En update/rollback/restore kører allerede." >&2; exit 1; }
 mkdir -p "$UPDATE_DIR"
+rm -f "$FAILED_CONTAINER_LOG" "$FAILED_HEALTH_BODY"
 
 # Keep one complete local transcript. The host-agent captures stdout, so merge
 # stderr into stdout here as well; a failed update must never hide the command
@@ -92,6 +95,20 @@ restore_host_runtime_from_checkout() {
   systemctl try-restart racher-pager-network-portal.service >/dev/null 2>&1 || true
 }
 
+capture_failed_container() {
+  set +e
+  echo "[update] Gemmer diagnostik fra den fejlede container." >&2
+  docker logs --tail 400 racher-pager-gateway >"$FAILED_CONTAINER_LOG" 2>&1 || true
+  curl -sS --max-time 5 "http://127.0.0.1:${PORT:-8088}/healthz" >"$FAILED_HEALTH_BODY" 2>&1 || true
+  echo "[update] Containerlog: $FAILED_CONTAINER_LOG" >&2
+  echo "[update] Health body:  $FAILED_HEALTH_BODY" >&2
+  if [[ -s "$FAILED_CONTAINER_LOG" ]]; then
+    echo "[update] --- sidste containerlinjer ---" >&2
+    tail -n 80 "$FAILED_CONTAINER_LOG" >&2 || true
+    echo "[update] --- slut containerlinjer ---" >&2
+  fi
+}
+
 rollback_failed_update() {
   local rc="$1"
   local line="$2"
@@ -100,6 +117,7 @@ rollback_failed_update() {
   set +e
   echo >&2
   echo "[update] FEJL exit=$rc linje=$line kommando=$command" >&2
+  capture_failed_container
   echo "Ny version fejlede; ruller automatisk hele Pager-runtime tilbage til ${CURRENT:0:12}." >&2
   git -C "$RUNTIME_REPO" reset --hard "$CURRENT"
 
@@ -126,6 +144,9 @@ python3 -m py_compile \
   "$RUNTIME_REPO/services/pager-gateway/gateway.py" \
   "$RUNTIME_REPO/services/pager-gateway/push_service.py" \
   "$RUNTIME_REPO/services/pager-gateway/storage.py" \
+  "$RUNTIME_REPO/services/pager-gateway/operations.py" \
+  "$RUNTIME_REPO/services/pager-gateway/rss_updates.py" \
+  "$RUNTIME_REPO/services/pager-gateway/wsgi.py" \
   "$RUNTIME_REPO/services/pager-gateway/system_agent.py" \
   "$RUNTIME_REPO/services/pager-gateway/network_portal.py" \
   "$RUNTIME_REPO/services/pager-gateway/gateway_watchdog.py" \
