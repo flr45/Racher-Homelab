@@ -83,13 +83,13 @@ class RSSUpdateTests(unittest.TestCase):
         self.assertEqual(self.rss.push_users_for_feed(feed["id"]), [self.user_id])
 
     def test_parser_handles_rss_and_strips_markup(self):
-        payload = b"""<?xml version='1.0' encoding='utf-8'?>
+        payload = """<?xml version='1.0' encoding='utf-8'?>
         <rss version='2.0'><channel><item>
           <guid>abc-123</guid><title>Politi &amp; trafik</title>
           <description><![CDATA[<p>Vejen er <strong>spærret</strong>.</p>]]></description>
           <link>https://example.test/update</link>
           <pubDate>Mon, 17 Aug 2026 17:45:00 +0200</pubDate>
-        </item></channel></rss>"""
+        </item></channel></rss>""".encode("utf-8")
         rows = parse_feed_xml(payload)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["title"], "Politi & trafik")
