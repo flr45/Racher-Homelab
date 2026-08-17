@@ -17,6 +17,16 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn("systemctl reset-failed racher-pdl.service", script)
         self.assertIn("systemctl restart racher-pdl.service", script)
 
+    def test_shared_sqlite_state_is_group_writable_for_root_agents_and_web_runtime(self):
+        script = (PDL / "install-system-agent.sh").read_text(encoding="utf-8")
+        self.assertIn('chmod 2770 "$DATA_DIR"', script)
+        self.assertGreaterEqual(script.count("UMask=0007"), 2)
+        compose_helper = (PDL / "pager-compose.sh").read_text(encoding="utf-8")
+        self.assertIn("PAGER_RUNTIME_UID", compose_helper)
+        self.assertIn("PAGER_RUNTIME_GID", compose_helper)
+        self.assertIn("vapid-private.pem", compose_helper)
+        self.assertIn("Afviser usikker symlink", compose_helper)
+
     def test_update_validates_recovery_layers_and_restores_host_files(self):
         script = (PDL / "update-pager.sh").read_text(encoding="utf-8")
         self.assertIn("restore_host_runtime_from_checkout", script)
@@ -26,6 +36,7 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn("systemctl is-active --quiet racher-pager-system-agent.service", script)
         self.assertIn("systemctl is-active --quiet racher-pager-gateway-watchdog.timer", script)
         self.assertIn("systemctl is-active --quiet racher-pdl.service", script)
+        self.assertIn("racher-pager-agent-update-restart", script)
 
     def test_manual_rollback_restores_non_container_runtime(self):
         script = (PDL / "rollback-pager.sh").read_text(encoding="utf-8")
@@ -42,6 +53,9 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn('! -e "$destination"', script)
         self.assertIn("pdl.env gateway.env network.env cloudflared.token", script)
         self.assertIn("systemctl reset-failed racher-pdl.service", script)
+        self.assertIn("STATE_UID", script)
+        self.assertIn("STATE_GID", script)
+        self.assertIn('chown "$STATE_UID:$STATE_GID" "$STATE_ROOT/pager.db"', script)
 
     def test_restore_quiesces_sqlite_writers_and_removes_wal_sidecars(self):
         script = (PDL / "restore-pager.sh").read_text(encoding="utf-8")
