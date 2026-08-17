@@ -184,6 +184,15 @@ sudo systemctl enable --now racher-pager-system-agent.service
 sudo systemctl enable --now racher-pager-fsk-status.timer
 sudo systemctl enable --now racher-pager-gateway-watchdog.timer
 
+# A pre-hardening gateway may have created pager.db/session/VAPID as root. The
+# freshly installed compose helper derives the state-directory owner, rejects
+# unsafe symlinks and fixes those known files before recreating Gunicorn as that
+# unprivileged uid/gid. This also makes the first rootless upgrade self-migrating.
+if [[ -x "$INTEGRATION_DIR/pager-compose.sh" && -f /etc/racher-pager/gateway.env ]]; then
+  sudo env PAGER_GATEWAY_ENV=/etc/racher-pager/gateway.env \
+    "$INTEGRATION_DIR/pager-compose.sh" up -d --force-recreate pager-gateway
+fi
+
 # The previous wrapper could exit repeatedly while FSK-USB was absent and may
 # therefore have reached systemd's failed/start-limit state. Clear that state and
 # start the refreshed wrapper explicitly; it now remains active while waiting for
