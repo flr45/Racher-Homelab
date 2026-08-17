@@ -8,7 +8,6 @@ import re
 import socket
 import sqlite3
 import threading
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -44,11 +43,14 @@ MAX_FEED_BYTES = 2 * 1024 * 1024
 MAX_ITEMS_PER_FEED = 100
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
+PUNCT_SPACE_RE = re.compile(r"\s+([,.;:!?])")
 
 
 def clean_text(value: Any, limit: int = 4000) -> str:
     text = html.unescape(TAG_RE.sub(" ", str(value or "")))
-    return SPACE_RE.sub(" ", text).strip()[:limit]
+    text = SPACE_RE.sub(" ", text).strip()
+    text = PUNCT_SPACE_RE.sub(r"\1", text)
+    return text[:limit]
 
 
 def normalize_published(value: str) -> str:
@@ -116,7 +118,9 @@ def parse_feed_xml(payload: bytes) -> list[dict[str, str]]:
         link = _entry_link(node).strip()[:2000]
         guid = _child_text(node, {"guid", "id"}).strip()[:2000]
         published = normalize_published(_child_text(node, {"pubdate", "published", "updated", "date"}))
-        identity_basis = guid or link or "|".join((title, published, summary[:500]))
+        # Prefer the canonical link for cross-feed deduplication. Some publishers
+        # issue feed-specific GUIDs for the same public update.
+        identity_basis = link or guid or "|".join((title, published, summary[:500]))
         if not identity_basis or not (title or summary):
             continue
         entries.append({
@@ -141,7 +145,10 @@ def validate_feed_url(value: Any, *, resolve: bool = True) -> str:
     hostname = str(parsed.hostname or "").strip().lower().rstrip(".")
     if not hostname or hostname in {"localhost", "localhost.localdomain"}:
         raise ValueError("Ugyldigt RSS-hostnavn")
-    port = parsed.port or 443
+    try:
+        port = parsed.port or 443
+    except ValueError as exc:
+        raise ValueError("Ugyldig RSS-port") from exc
     if port != 443:
         raise ValueError("RSS-feed skal bruge standard HTTPS-port 443")
     if resolve:
@@ -626,7 +633,10 @@ class RSSUpdater:
         try:
             status, payload, etag, modified = self._fetch(feed)
             if status == 304:
-                self.store.update_fetch_state(int(feed["id"]), success=True, etag=etag, last_modified=modified)
+                self.store.update_fetch_state(
+                    int(feed["id"]), success=True, etag=etag, last_modified=modified,
+                    initialized=True if not was_initialized else None,
+                )
                 return
             entries = parse_feed_xml(payload)
             new_items = self.store.ingest_entries(int(feed["id"]), entries)
@@ -655,8 +665,10 @@ class RSSUpdater:
         if self._stop.wait(2):
             return
         while not self._stop.is_set():
-            self.poll_once()
+            # Clear before polling so a wake request arriving during a fetch is
+            # preserved and causes the next cycle to run immediately.
             self._wake.clear()
+            self.poll_once()
             self._wake.wait(self.poll_seconds)
         self._status = "stopped"
 
@@ -784,5 +796,4 @@ def install_rss_updates(core) -> RSSUpdater:
         return response
 
     core.app.view_functions["api_status"] = rss_status
-    updater.store = store
     return updater
