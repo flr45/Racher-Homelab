@@ -36,8 +36,9 @@ PDW_POCSAG_RE = re.compile(
 )
 
 # Danish ISO 646 / DS 2089 replaces the ASCII bracket characters with ÆØÅ/æøå.
-# PDL exposes the raw 7-bit values, so translate only messages coming from the
-# live PDL source. Keep raw_line untouched for admin diagnostics.
+# PDL exposes the raw 7-bit values. Translation must only be applied to alpha
+# payloads: applying it to numeric/tone decoder output turns e.g. `40]04` into
+# the misleading `40Å04` seen in operator notifications.
 POCSAG_DANISH_TRANSLATION = str.maketrans({
     "[": "Æ",
     "\\": "Ø",
@@ -46,6 +47,10 @@ POCSAG_DANISH_TRANSLATION = str.maketrans({
     "|": "ø",
     "}": "å",
 })
+
+_DOUBLE_UNKNOWN_SEPARATOR_RE = re.compile(r"(?<=\S)\?{2,}(?=\S)")
+_ALPHA_WORD_RE = re.compile(r"[A-Za-zÆØÅæøå]{2,}")
+_DECODER_CODE_RE = re.compile(r"^[0-9A-Fa-f*+\-?/\\\[\]{}|ÆØÅæøå\s]{3,120}$")
 
 
 @dataclass
@@ -59,6 +64,7 @@ class PagerEvent:
     function: str | None = None
     station: str | None = None
     received_at: str = ""
+    decoder_noise_reason: str | None = None
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -68,17 +74,22 @@ class PagerEvent:
 
 
 def public_message(text: str) -> str:
-    """Return user-facing alarm text with decoder/capcode metadata removed.
+    """Return readable user-facing alarm text with decoder metadata removed.
 
-    The raw decoder line is retained separately for admins. This function is used
-    for every outbound notification so RIC/capcode never becomes user-facing data.
+    Raw decoder input is retained separately in ``raw_line``. Repeated question
+    marks emitted as field separators by the decoder are rendered as a neutral
+    middle dot; a single `?` is preserved because it can represent a genuinely
+    undecodable character and therefore remains useful diagnostic information.
     """
     value = str(text or "").strip()
     message_match = re.search(r"\bMESSAGE\s*[:=]\s*(.+)$", value, re.I)
     if message_match:
         value = message_match.group(1).strip()
     value = PUBLIC_RIC_FIELD_RE.sub("", value)
-    value = re.sub(r"\s{2,}", " ", value).strip(" -|:;")
+    value = _DOUBLE_UNKNOWN_SEPARATOR_RE.sub(" · ", value)
+    value = re.sub(r"\s*·\s*", " · ", value)
+    value = re.sub(r"(?:\s*·\s*){2,}", " · ", value)
+    value = re.sub(r"\s{2,}", " ", value).strip(" -|:;·")
     return value
 
 
@@ -87,11 +98,53 @@ def decode_pocsag_danish_charset(text: str) -> str:
     return str(text or "").translate(POCSAG_DANISH_TRANSLATION)
 
 
-def _message_for_source(text: str, source: str) -> str:
+def _looks_alpha_payload(message: str, payload_type: str | None = None) -> bool:
+    kind = str(payload_type or "").upper()
+    if kind:
+        return "ALPHA" in kind
+    return bool(_ALPHA_WORD_RE.search(str(message or "")))
+
+
+def _message_for_source(text: str, source: str, payload_type: str | None = None) -> str:
     message = public_message(text)
-    if str(source or "").lower().startswith("pdl"):
+    if str(source or "").lower().startswith("pdl") and _looks_alpha_payload(message, payload_type):
         message = decode_pocsag_danish_charset(message)
+        message = public_message(message)
     return message
+
+
+def decoder_noise_reason(message: str, source: str, payload_type: str | None = None) -> str | None:
+    """Classify obvious decoder-only output without deleting its raw line.
+
+    This is deliberately conservative and only applies to the live PDL source.
+    Simulator/import text remains untouched. The caller stores the event but
+    marks it delivery-ineligible, keeping diagnostics while protecting Pushover.
+    """
+    if not str(source or "").lower().startswith("pdl"):
+        return None
+
+    value = str(message or "").strip()
+    kind = str(payload_type or "").upper()
+    if kind and "ALPHA" not in kind:
+        return "decoder-non-alpha"
+    if not value:
+        return "decoder-empty"
+
+    words = _ALPHA_WORD_RE.findall(value)
+    if not words and _DECODER_CODE_RE.fullmatch(value):
+        return "decoder-code"
+
+    # Suffix fragments such as "førerhus, spredt sig" can be emitted as their
+    # own line when a reception breaks mid-message. Keep them in history but do
+    # not turn a short, lowercase tail into a standalone alarm notification.
+    if (
+        len(value) <= 48
+        and value[:1].islower()
+        and len(words) <= 6
+        and not re.search(r"\b(?:BRAND|ALARM|ISL|VSBV|ØF|VCT)\b", value, re.I)
+    ):
+        return "decoder-fragment"
+    return None
 
 
 def detect_station(text: str) -> str | None:
@@ -125,7 +178,8 @@ def parse_pdl_line(line: str, source: str = "pdl") -> PagerEvent | None:
 
     pdw_match = PDW_POCSAG_RE.match(raw)
     if pdw_match:
-        message = _message_for_source(pdw_match.group("message"), source)
+        payload_type = pdw_match.group("type")
+        message = _message_for_source(pdw_match.group("message"), source, payload_type)
         return PagerEvent(
             message=message,
             raw_line=raw,
@@ -136,6 +190,7 @@ def parse_pdl_line(line: str, source: str = "pdl") -> PagerEvent | None:
             function=pdw_match.group("function"),
             station=detect_station(message),
             received_at=_pdw_received_at(pdw_match.group("date"), pdw_match.group("time")),
+            decoder_noise_reason=decoder_noise_reason(message, source, payload_type),
         )
 
     ric_match = RIC_RE.search(raw)
@@ -151,6 +206,7 @@ def parse_pdl_line(line: str, source: str = "pdl") -> PagerEvent | None:
         ric=ric_match.group(1) if ric_match else None,
         function=function_match.group(1) if function_match else None,
         station=detect_station(message),
+        decoder_noise_reason=decoder_noise_reason(message, source),
     )
 
 
