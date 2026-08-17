@@ -52,6 +52,7 @@ class PagerParsingTests(unittest.TestCase):
         self.assertEqual(event.received_at, "2009-08-17T14:13:33")
         self.assertEqual(event.raw_line, line)
         self.assertNotIn("1234567", event.message)
+        self.assertIsNone(event.decoder_noise_reason)
 
     def test_pdw_four_digit_year_timestamp_is_preserved(self):
         line = "7654321 01:02:03 14-08-2026 POCSAG ALPHA 2400 test"
@@ -69,11 +70,45 @@ class PagerParsingTests(unittest.TestCase):
         self.assertEqual(event.message, "DAGENS PRØVE TIL ISL")
         self.assertEqual(event.raw_line, line)
 
+    def test_numeric_pdl_payload_is_not_danish_translated_and_is_marked_noise(self):
+        line = "0001191 12:00:34 17-08-2026 POCSAG-4 NUMERIC 1200 40]04"
+        event = parse_pdl_line(line, source="pdl-file")
+        self.assertIsNotNone(event)
+        self.assertEqual(event.message, "40]04")
+        self.assertNotIn("Å", event.message)
+        self.assertEqual(event.decoder_noise_reason, "decoder-non-alpha")
+
+    def test_bare_decoder_code_is_marked_noise_without_losing_raw_line(self):
+        line = "40*04"
+        event = parse_pdl_line(line, source="pdl-file")
+        self.assertIsNotNone(event)
+        self.assertEqual(event.raw_line, line)
+        self.assertEqual(event.message, line)
+        self.assertEqual(event.decoder_noise_reason, "decoder-code")
+
+    def test_short_lowercase_suffix_is_marked_fragment(self):
+        event = parse_pdl_line("førerhus, spredt sig", source="pdl-file")
+        self.assertIsNotNone(event)
+        self.assertEqual(event.decoder_noise_reason, "decoder-fragment")
+
+    def test_repeated_question_mark_field_separators_are_cleaned(self):
+        text = "$6 ISL KA, KB V1 (0+2)??Naturbrand-Mark, Høstet??4450 Jyderup??Traktor holder på mark"
+        cleaned = public_message(text)
+        self.assertEqual(
+            cleaned,
+            "$6 ISL KA, KB V1 (0+2) · Naturbrand-Mark, Høstet · 4450 Jyderup · Traktor holder på mark",
+        )
+        self.assertNotIn("??", cleaned)
+
+    def test_single_question_mark_is_preserved_as_possible_decode_error(self):
+        self.assertEqual(public_message("BRANDALARM H?stet"), "BRANDALARM H?stet")
+
     def test_mock_source_does_not_translate_ascii_punctuation(self):
         text = r"MOCK [test] path\file {x|y}"
         event = parse_pdl_line(text, source="mock")
         self.assertIsNotNone(event)
         self.assertEqual(event.message, text)
+        self.assertIsNone(event.decoder_noise_reason)
 
     def test_labeled_address_is_accepted_as_ric_but_not_public_text(self):
         event = parse_pdl_line("Address: 7654321 POCSAG 512 MESSAGE: test")
