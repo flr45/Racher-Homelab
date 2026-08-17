@@ -116,7 +116,7 @@
   function groupMarkup(group, feeds, selected) {
     if (!feeds.length) return '';
     const chosen = feeds.filter((feed) => selected.has(Number(feed.id))).length;
-    return `<details class="rss-feed-group" data-rss-group="${group.key}" open>
+    return `<details class="rss-feed-group" data-rss-group="${group.key}">
       <summary>
         <span><strong>${rssEscape(group.label)}</strong><small>${feeds.length} feed${feeds.length === 1 ? '' : 's'}</small></span>
         <span class="rss-group-selected" data-group-selected>${chosen} valgt</span>
