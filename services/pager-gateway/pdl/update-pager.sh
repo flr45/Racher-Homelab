@@ -80,6 +80,7 @@ restore_host_runtime_from_checkout() {
   # appliance, not just the Docker image and git checkout.
   [[ -f "$pdl_dir/configure-pdl.sh" ]] && install -m 0755 "$pdl_dir/configure-pdl.sh" "$INTEGRATION_DIR/configure-pdl.sh"
   [[ -f "$pdl_dir/run-pdl-headless.sh" ]] && install -m 0755 "$pdl_dir/run-pdl-headless.sh" "$INTEGRATION_DIR/run-pdl-headless.sh"
+  [[ -f "$pdl_dir/pager-compose.sh" ]] && install -m 0755 "$pdl_dir/pager-compose.sh" "$COMPOSE_SCRIPT"
   if [[ -f "$service_dir/network_portal.py" && -d "$NETWORK_DIR" ]]; then
     install -m 0755 "$service_dir/network_portal.py" "$NETWORK_DIR/network_portal.py"
   fi
@@ -126,6 +127,9 @@ rollback_failed_update() {
     install -m 0755 "$PDL_BACKUP" "$PDL_BINARY"
   fi
 
+  # The target update may already have refreshed pager-compose.sh. It remains
+  # compatible with the older compose file and safely repairs known state files.
+  # restore_host_runtime_from_checkout() then puts the exact old helper back.
   "$COMPOSE_SCRIPT" build pager-gateway
   "$COMPOSE_SCRIPT" up -d --remove-orphans
   restore_host_runtime_from_checkout "$RUNTIME_REPO" || true
@@ -155,6 +159,18 @@ python3 -m py_compile \
 for script in "$RUNTIME_REPO/services/pager-gateway/"*.sh "$RUNTIME_REPO/services/pager-gateway/pdl/"*.sh; do
   bash -n "$script"
 done
+
+# Upgrade the privileged compose helper before the first new-container start.
+# A pre-hardening installation can contain root-owned session/VAPID/SQLite files.
+# The new helper derives the appliance uid/gid from STATE_ROOT and repairs only
+# those known files before Gunicorn is switched to the unprivileged runtime user.
+# Doing this after healthcheck is too late: Gunicorn must be able to read
+# session-secret in order to boot and answer /healthz in the first place.
+step "Migrerer gateway-runtime og filrettigheder"
+install -m 0755 \
+  "$RUNTIME_REPO/services/pager-gateway/pdl/pager-compose.sh" \
+  "$COMPOSE_SCRIPT"
+chmod 2770 "$STATE_ROOT"
 
 if [[ "$PDL_CHANGED" == "1" ]]; then
   step "PDL-patch ændret; genbygger decoder"
