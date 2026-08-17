@@ -251,10 +251,19 @@ class Storage:
         with self.connect() as conn:
             conn.execute("UPDATE messages SET notification_sent=1 WHERE id=?", (message_id,))
 
-    def list_messages(self, limit: int = 100) -> list[dict[str, Any]]:
+    def list_messages(self, limit: int = 100, *, delivery_eligible_only: bool = False) -> list[dict[str, Any]]:
+        """List newest messages, optionally restricted to alarms eligible for delivery.
+
+        Raw/suppressed decoder rows stay available to admin history and diagnostics,
+        while the live alarm feed can ask for only rows that passed the cleaner.
+        """
         limit = max(1, min(int(limit), 500))
+        query = "SELECT * FROM messages"
+        if delivery_eligible_only:
+            query += " WHERE delivery_eligible=1"
+        query += " ORDER BY id DESC LIMIT ?"
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM messages ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+            rows = conn.execute(query, (limit,)).fetchall()
         return [dict(row) for row in rows]
 
     def latest_message(self) -> dict[str, Any] | None:
