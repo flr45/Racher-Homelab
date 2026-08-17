@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -233,12 +234,11 @@ class PushoverClient:
 class FileTailSource:
     """Tail PDL output and resume safely after gateway restarts.
 
-    The first time a logfile is seen, the tailer intentionally starts at EOF so an
-    installation does not replay months of old decoder data. After the first live
-    line, a tiny cursor next to the logfile records inode/device/offset. A normal
-    gateway/container restart then resumes exactly after the last successfully
-    processed line, so PDL traffic received while the web process is down is not
-    silently skipped.
+    A tiny cursor next to the logfile records inode/device/offset after each
+    successfully handled line. On the first cursor-aware upgrade, the last PDL raw
+    line already committed to SQLite is used as the hand-off point; this recovers
+    lines that arrived while the old gateway was being replaced without replaying
+    the historic decoder log.
     """
 
     def __init__(self, get_path: Callable[[], str], on_line: Callable[[str], None]) -> None:
@@ -291,12 +291,52 @@ class FileTailSource:
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
             return None
 
+    @staticmethod
+    def _history_db_path() -> Path:
+        explicit = str(os.getenv("PAGER_DB_PATH", "")).strip()
+        if explicit:
+            return Path(explicit)
+        return Path(os.getenv("PAGER_DATA_DIR", "/data")) / "pager.db"
+
+    def _resume_from_stored_history(self, handle) -> int | None:
+        """Find the last raw PDL row already committed before cursors existed."""
+        db_path = self._history_db_path()
+        if not db_path.exists():
+            return None
+        try:
+            with sqlite3.connect(str(db_path), timeout=2) as conn:
+                row = conn.execute(
+                    """SELECT raw_line FROM messages
+                       WHERE source LIKE 'pdl%' ORDER BY id DESC LIMIT 1"""
+                ).fetchone()
+        except sqlite3.Error:
+            return None
+        if not row or not str(row[0] or "").strip():
+            return None
+
+        target = str(row[0]).strip()
+        last_position: int | None = None
+        handle.seek(0, os.SEEK_SET)
+        while True:
+            line = handle.readline()
+            if not line:
+                break
+            if line.strip() == target:
+                last_position = handle.tell()
+        if last_position is not None:
+            handle.seek(last_position, os.SEEK_SET)
+        return last_position
+
     def _resume_position(self, path: Path, handle) -> int:
-        """Seek to persisted progress, or EOF on the first-ever observation."""
+        """Seek to persisted progress or a safe first-upgrade hand-off point."""
         stat = os.fstat(handle.fileno())
         cursor = self._read_cursor(path)
         if cursor is None:
-            handle.seek(0, os.SEEK_END)
+            recovered = self._resume_from_stored_history(handle)
+            if recovered is None:
+                # Fresh install/no prior PDL DB history: do not replay arbitrary
+                # existing decoder data. Establish the cursor at the current EOF.
+                handle.seek(0, os.SEEK_END)
             return handle.tell()
 
         same_identity = cursor["dev"] == stat.st_dev and cursor["ino"] == stat.st_ino
@@ -350,6 +390,9 @@ class FileTailSource:
                 if handle is None:
                     handle = path.open("r", encoding="utf-8", errors="replace")
                     self._resume_position(path, handle)
+                    # Persist even before the next line arrives. This makes a
+                    # fresh installation/recovery crash-safe immediately.
+                    self._save_cursor(path, handle)
                     self._status = "running"
                     self._error = None
 
