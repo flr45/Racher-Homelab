@@ -26,6 +26,15 @@ from training import TrainingStore
 from training_routes import register_training_routes
 
 
+# Bound accidental or hostile JSON/form submissions before Flask buffers them.
+# Training accepts substantial pasted logs, so the default is deliberately roomy
+# while still preventing an authenticated browser from allocating unbounded RAM.
+app.config["MAX_CONTENT_LENGTH"] = max(
+    1024 * 1024,
+    int(os.getenv("PAGER_MAX_REQUEST_BYTES", str(10 * 1024 * 1024))),
+)
+
+
 # The first-admin setup route checks whether any users exist before creating the
 # initial administrator. Gunicorn runs this appliance with one worker and several
 # threads, so serialize that whole check-and-create flow to prevent two concurrent
@@ -43,20 +52,27 @@ app.view_functions["setup"] = serialized_setup
 
 
 # The public hostname is exposed through Cloudflare while the origin remains HTTP.
-# Add browser-side hardening without forcing a CSP that would break the existing
-# inline application code. HSTS is emitted only when the request arrived as HTTPS
-# according to Flask or the proxy header supplied by Cloudflare.
+# The UI has no inline scripts/styles, so enforce a same-origin CSP rather than the
+# previous partial frame-only policy. HSTS is emitted only when the request arrived
+# as HTTPS according to Flask or the proxy header supplied by Cloudflare.
 @app.after_request
 def security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        "connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self'; "
+        "frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
+    )
     forwarded_proto = str(request.headers.get("X-Forwarded-Proto", "")).split(",", 1)[0].strip().lower()
     if request.is_secure or forwarded_proto == "https":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-    if request.path == "/login" or request.path.startswith("/api/"):
+    if request.path in {"/", "/login", "/setup"} or request.path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")
     return response
 
