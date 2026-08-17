@@ -47,7 +47,7 @@ step "1/10 Grundpakker, Docker og NetworkManager"
 sudo -v
 sudo apt-get update
 sudo apt-get install -y \
-  ca-certificates curl git python3 sqlite3 alsa-utils docker.io network-manager
+  ca-certificates curl git python3 sqlite3 alsa-utils docker.io network-manager logrotate
 sudo systemctl enable --now docker.service NetworkManager.service
 
 if ! sudo docker compose version >/dev/null 2>&1; then
