@@ -150,6 +150,7 @@ python3 -m py_compile \
   "$RUNTIME_REPO/services/pager-gateway/storage.py" \
   "$RUNTIME_REPO/services/pager-gateway/operations.py" \
   "$RUNTIME_REPO/services/pager-gateway/rss_updates.py" \
+  "$RUNTIME_REPO/services/pager-gateway/alarm_rules.py" \
   "$RUNTIME_REPO/services/pager-gateway/wsgi.py" \
   "$RUNTIME_REPO/services/pager-gateway/system_agent.py" \
   "$RUNTIME_REPO/services/pager-gateway/network_portal.py" \
