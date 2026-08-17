@@ -22,6 +22,19 @@ export PAGER_GATEWAY_PORT="${PAGER_GATEWAY_PORT:-8088}"
 export PAGER_COOKIE_SECURE="${PAGER_COOKIE_SECURE:-0}"
 export PAGER_VAPID_SUBJECT="${PAGER_VAPID_SUBJECT:-mailto:admin@racher.local}"
 
+# The state directory is owned by the normal appliance user. Run Gunicorn with
+# that same numeric uid/gid instead of root so a compromised web process cannot
+# gain host-level privileges through container defaults. Existing installations
+# need no manual env migration: derive the ids from the mounted state directory.
+if [[ -z "${PAGER_RUNTIME_UID:-}" || -z "${PAGER_RUNTIME_GID:-}" ]]; then
+  if [[ -d "$PAGER_DATA_HOST_PATH" ]]; then
+    PAGER_RUNTIME_UID="${PAGER_RUNTIME_UID:-$(stat -c '%u' "$PAGER_DATA_HOST_PATH")}"
+    PAGER_RUNTIME_GID="${PAGER_RUNTIME_GID:-$(stat -c '%g' "$PAGER_DATA_HOST_PATH")}"
+  fi
+fi
+export PAGER_RUNTIME_UID="${PAGER_RUNTIME_UID:-1000}"
+export PAGER_RUNTIME_GID="${PAGER_RUNTIME_GID:-1000}"
+
 if docker compose version >/dev/null 2>&1; then
   exec docker compose -f "$COMPOSE_FILE" "$@"
 elif command -v docker-compose >/dev/null 2>&1; then
