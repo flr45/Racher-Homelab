@@ -181,8 +181,15 @@ rm -f "$PDL_BACKUP"
 trap - ERR
 
 if command -v systemd-run >/dev/null 2>&1; then
-  systemd-run --unit=racher-pager-agent-update-restart --on-active=3s \
-    /usr/bin/systemctl restart racher-pager-system-agent.service >/dev/null 2>&1 || true
+  # Run outside this update process/cgroup after the maintenance command has
+  # returned. Restarting the privileged agent applies its new UMask, then the new
+  # compose helper repairs any legacy SQLite sidecar ownership and recreates the
+  # web container with the unprivileged state-directory uid/gid. This avoids the
+  # upgrade race where an old root agent could create a root-owned WAL after the
+  # first rootless container start.
+  systemd-run --unit=racher-pager-post-update --on-active=3s \
+    /bin/bash -c "/usr/bin/systemctl restart racher-pager-system-agent.service; '$COMPOSE_SCRIPT' up -d --force-recreate pager-gateway" \
+    >/dev/null 2>&1 || true
 fi
 
 echo
