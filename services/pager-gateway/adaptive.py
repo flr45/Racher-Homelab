@@ -80,9 +80,6 @@ class AdaptiveFilter:
 
     @classmethod
     def template_text(cls, text: Any) -> str:
-        # Numbers are generalized only for learning suggestions. Exact duplicate
-        # detection always uses exact_signature and therefore never conflates
-        # different addresses/unit numbers.
         return _DIGIT_RUN_RE.sub("#", cls.normalized_text(text))
 
     @classmethod
@@ -91,24 +88,12 @@ class AdaptiveFilter:
 
     @classmethod
     def duplicate_text(cls, text: Any) -> str:
-        """Normalize text for short-window reception duplicate comparison.
-
-        Decoder punctuation and single undecodable characters should not turn the
-        same radio burst into multiple phone notifications. Digits are retained so
-        different addresses/units remain materially different.
-        """
         value = cls.normalized_text(text).replace("?", "")
         value = _DUPLICATE_PUNCT_RE.sub(" ", value)
         return _WS_RE.sub(" ", value).strip()
 
     @staticmethod
     def automatic_noise_reason(text: Any) -> str | None:
-        """Catch unmistakable decoder artifacts before notification delivery.
-
-        These rows are still stored in the message database by the normal ingest
-        path; only delivery is suppressed. This deliberately avoids broad keyword
-        filtering so an unfamiliar real alarm continues to pass by default.
-        """
         value = str(text or "").strip()
         words = _ALPHA_WORD_RE.findall(value)
         if not words and _DECODER_CODE_RE.fullmatch(value):
@@ -178,7 +163,6 @@ class AdaptiveFilter:
                 "reason": f"lært støjskabelon · {tn}/{tt} feedback",
                 "source": "template",
             }
-
         if et and er > en:
             score = (er + 1) / (et + 2)
             return {
@@ -187,7 +171,6 @@ class AdaptiveFilter:
                 "reason": f"positiv feedback · {er}/{et}",
                 "source": "exact",
             }
-
         return {
             "classification": "unknown",
             "score": 0.75,
@@ -207,18 +190,14 @@ class AdaptiveFilter:
 
     @staticmethod
     def _same_signal(candidate: sqlite3.Row, ric: str | None, function: str | None) -> bool:
-        # Older callers did not pass RIC/function into evaluate(). In that case
-        # fall back to text similarity instead of silently disabling fuzzy dedup.
         if ric is None and function is None:
             return True
-
         old_ric = str(candidate["ric"] or "").strip()
         new_ric = str(ric or "").strip()
         if bool(old_ric) != bool(new_ric):
             return False
         if old_ric and old_ric != new_ric:
             return False
-
         old_function = str(candidate["function"] or "").strip()
         new_function = str(function or "").strip()
         if old_function and new_function and old_function != new_function:
@@ -233,11 +212,11 @@ class AdaptiveFilter:
         ric: str | None = None,
         function: str | None = None,
     ) -> int | None:
-        """Find exact or near-identical recent reception variants.
+        """Find repeated reception variants inside the current radio burst.
 
-        Exact duplicates are searched across recent rows rather than only the
-        immediately preceding row, so an interleaved decoder artifact no longer
-        defeats suppression. Near-duplicates use a tighter eight-second window.
+        Suppressed decoder artifacts may sit between repeats. A different
+        deliverable alarm is treated as a burst boundary so similar legitimate
+        incidents are not merged merely because they arrive close together.
         """
         current = self._parse_moment(received_at)
         if current is None:
@@ -248,7 +227,8 @@ class AdaptiveFilter:
         normalized = self.duplicate_text(text)
         with self._lock, self.connect() as conn:
             rows = conn.execute(
-                """SELECT id, received_at, message_fingerprint, message, ric, function
+                """SELECT id, received_at, message_fingerprint, message, ric, function,
+                          delivery_eligible, suppressed_reason
                    FROM messages ORDER BY id DESC LIMIT 80"""
             ).fetchall()
 
@@ -261,28 +241,29 @@ class AdaptiveFilter:
                 continue
             if str(row["message_fingerprint"] or "") == fingerprint:
                 return int(row["id"])
+            if bool(row["delivery_eligible"]):
+                break
 
         fuzzy_window = min(window, 8)
         if len(normalized) < 12:
             return None
         for row in rows:
-            if not self._same_signal(row, ric, function):
-                continue
             previous = self._parse_moment(row["received_at"])
             if previous is None:
                 continue
             delta = (current - previous).total_seconds()
             if delta < 0 or delta > fuzzy_window:
                 continue
-
-            previous_text = self.duplicate_text(row["message"])
-            if len(previous_text) < 12:
-                continue
-            shorter, longer = sorted((normalized, previous_text), key=len)
-            containment = len(shorter) >= 14 and shorter in longer
-            ratio = SequenceMatcher(None, normalized, previous_text, autojunk=False).ratio()
-            if containment or ratio >= 0.92:
-                return int(row["id"])
+            if self._same_signal(row, ric, function):
+                previous_text = self.duplicate_text(row["message"])
+                if len(previous_text) >= 12:
+                    shorter, longer = sorted((normalized, previous_text), key=len)
+                    containment = len(shorter) >= 14 and shorter in longer
+                    ratio = SequenceMatcher(None, normalized, previous_text, autojunk=False).ratio()
+                    if containment or ratio >= 0.92:
+                        return int(row["id"])
+            if bool(row["delivery_eligible"]):
+                break
         return None
 
     def evaluate(
@@ -348,7 +329,6 @@ class AdaptiveFilter:
             text = str(message["message"])
             exact = self.exact_signature(text)
             template = self.template_signature(text)
-
             now = self._now()
             for kind, signature, sample in (
                 ("exact", exact, self.normalized_text(text)),
@@ -361,7 +341,6 @@ class AdaptiveFilter:
                        ) VALUES (?, ?, ?, 0, 0, 0, ?)""",
                     (kind, signature, sample[:500], now),
                 )
-
             if previous:
                 old = str(previous["verdict"])
                 old_col = "relevant_votes" if old == "relevant" else "noise_votes"
@@ -370,7 +349,6 @@ class AdaptiveFilter:
                         f"UPDATE adaptive_patterns SET {old_col}=MAX(0, {old_col}-1) WHERE kind=? AND signature=?",
                         (kind, signature),
                     )
-
             conn.execute(
                 """INSERT INTO message_feedback(message_id, verdict, user_id, created_at)
                    VALUES (?, ?, ?, ?)
