@@ -32,7 +32,11 @@ done
 
 sudo mkdir -p "$DATA_DIR" "$AGENT_DIR" "$INTEGRATION_DIR" "$NETWORK_DIR" "$BACKUP_DIR" "$DATA_DIR/update" "$WATCHDOG_RUNTIME_DIR"
 sudo touch "$DATA_DIR/pager.db"
-sudo chmod 0750 "$DATA_DIR"
+# SQLite is shared between the unprivileged web container and root-owned host
+# status agents. Keep the state directory setgid + group-writable so WAL/SHM files
+# created by either side inherit the appliance user's group instead of becoming
+# inaccessible after a checkpoint/restart boundary.
+sudo chmod 2770 "$DATA_DIR"
 sudo chmod 0700 "$BACKUP_DIR"
 sudo chmod 0755 "$WATCHDOG_RUNTIME_DIR"
 
@@ -77,6 +81,7 @@ Wants=docker.service NetworkManager.service
 [Service]
 Type=simple
 User=root
+UMask=0007
 WorkingDirectory=$AGENT_DIR
 Environment=PAGER_DB_PATH=$DATA_DIR/pager.db
 Environment=PAGER_STATE_ROOT=$DATA_DIR
@@ -108,6 +113,7 @@ After=local-fs.target racher-pdl.service
 [Service]
 Type=oneshot
 User=root
+UMask=0007
 WorkingDirectory=$AGENT_DIR
 Environment=PAGER_DB_PATH=$DATA_DIR/pager.db
 Environment=PDL_CONFIG_PATH=$DATA_DIR/pdl/pdl.ini
