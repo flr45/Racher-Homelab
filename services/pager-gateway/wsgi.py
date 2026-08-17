@@ -38,6 +38,7 @@ app = app_module.app
 # The URL therefore changes automatically whenever any frontend asset changes.
 _STATIC_ROOT = Path(app.static_folder or "/app/static")
 _STATIC_ASSET_RE = re.compile(r'(/static/[A-Za-z0-9._-]+\.(?:css|js))(?!\?v=)')
+_ALARM_MAP_SCRIPT = '<script src="/static/alarm-map.js" defer></script>'
 
 
 def _static_asset_version() -> str:
@@ -66,6 +67,11 @@ def version_static_assets(response):
     content_type = str(response.headers.get("Content-Type") or "")
     if response.status_code == 200 and content_type.startswith("text/html"):
         body = response.get_data(as_text=True)
+        # The map helper is deliberately kept isolated from the core alarm UI. It
+        # only enhances the authenticated home page and can therefore evolve
+        # without touching alarm ingestion/routing code.
+        if core.request.path == "/" and "alarm-map.js" not in body and "</body>" in body:
+            body = body.replace("</body>", f"  {_ALARM_MAP_SCRIPT}\n</body>")
         body = _STATIC_ASSET_RE.sub(rf"\1?v={STATIC_ASSET_VERSION}", body)
         response.set_data(body)
         response.headers["Content-Length"] = str(len(response.get_data()))
