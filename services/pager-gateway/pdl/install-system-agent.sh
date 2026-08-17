@@ -14,6 +14,7 @@ FSK_UNIT_PATH="/etc/systemd/system/racher-pager-fsk-status.service"
 FSK_TIMER_PATH="/etc/systemd/system/racher-pager-fsk-status.timer"
 WATCHDOG_UNIT_PATH="/etc/systemd/system/racher-pager-gateway-watchdog.service"
 WATCHDOG_TIMER_PATH="/etc/systemd/system/racher-pager-gateway-watchdog.timer"
+PDL_LOGROTATE_PATH="/etc/logrotate.d/racher-pager-pdl"
 HARDWARE_WATCHDOG_CONF="/etc/systemd/system.conf.d/racher-pager-watchdog.conf"
 WATCHDOG_RUNTIME_DIR="/run/racher-pager"
 
@@ -49,6 +50,23 @@ for helper in \
   sudo install -m 0755 "$SERVICE_DIR/pdl/$helper" "$INTEGRATION_DIR/$helper"
 done
 sudo install -m 0755 "$SERVICE_DIR/network_portal.py" "$NETWORK_DIR/network_portal.py"
+
+# PDL has its own persistent raw logfile in addition to the structured SQLite
+# history. Refresh logrotate here as well as during first install, because this
+# script runs after every gateway update on existing appliances.
+sudo tee "$PDL_LOGROTATE_PATH" >/dev/null <<EOF
+$DATA_DIR/pdl.log {
+    daily
+    rotate 30
+    maxsize 20M
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+sudo chmod 0644 "$PDL_LOGROTATE_PATH"
 
 sudo tee "$UNIT_PATH" >/dev/null <<EOF
 [Unit]
@@ -196,5 +214,6 @@ echo "Agentkode:       $AGENT_DIR"
 echo "Helpers:         $INTEGRATION_DIR"
 echo "FSK probe:       racher-pager-fsk-status.timer (10 sek.)"
 echo "Gateway watchdog: racher-pager-gateway-watchdog.timer (20 sek., 3 fejl)"
+echo "PDL logrotation:  daglig/20 MB, 30 rotationer"
 echo "Pi watchdog:     $HARDWARE_WATCHDOG_STATUS"
 echo "Status: sudo systemctl status racher-pager-system-agent --no-pager"
