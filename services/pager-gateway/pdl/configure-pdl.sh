@@ -3,6 +3,7 @@ set -euo pipefail
 
 STATE_ROOT="${PAGER_STATE_ROOT:-/var/lib/racher-pager}"
 PDL_STATE_DIR="${PDL_STATE_DIR:-$STATE_ROOT/pdl}"
+PAGER_DB_PATH="${PAGER_DB_PATH:-$STATE_ROOT/pager.db}"
 INPUT_MODE="${PDL_INPUT_MODE:-fsk-usb}"
 CAPTURE_DEVICE="${PDL_CAPTURE_DEVICE:-default}"
 SAMPLE_RATE="${PDL_SAMPLE_RATE:-48000}"
@@ -13,6 +14,40 @@ INVERT="${PDL_INVERT:-0}"
 RS232_PORT="${PDL_RS232_PORT:-1}"
 RS232_BITRATE="${PDL_RS232_BITRATE:-19200}"
 RS232_DECODE_MODE="${PDL_RS232_DECODE_MODE:-2}"
+
+# The web UI stores decoder choices in pager.db. This script is also run by
+# systemd before every PDL start, so the database must be the final source of
+# truth for baud/invert. Otherwise a restart would silently overwrite an admin's
+# choice with the older values from /etc/racher-pager/pdl.env.
+if command -v sqlite3 >/dev/null 2>&1 && [[ -f "$PAGER_DB_PATH" ]]; then
+  DB_BAUD="$(sqlite3 -batch -noheader -cmd '.timeout 2000' "$PAGER_DB_PATH" \
+    "SELECT value FROM settings WHERE key='pocsag_baud' LIMIT 1;" 2>/dev/null || true)"
+  case "${DB_BAUD,,}" in
+    512)
+      BAUD_512=1; BAUD_1200=0; BAUD_2400=0
+      ;;
+    1200)
+      BAUD_512=0; BAUD_1200=1; BAUD_2400=0
+      ;;
+    2400)
+      BAUD_512=0; BAUD_1200=0; BAUD_2400=1
+      ;;
+    auto|"")
+      BAUD_512=1; BAUD_1200=1; BAUD_2400=1
+      ;;
+    *)
+      echo "Ignorerer ugyldig pocsag_baud i databasen: $DB_BAUD" >&2
+      ;;
+  esac
+
+  DB_INVERT="$(sqlite3 -batch -noheader -cmd '.timeout 2000' "$PAGER_DB_PATH" \
+    "SELECT value FROM settings WHERE key='invert' LIMIT 1;" 2>/dev/null || true)"
+  case "${DB_INVERT,,}" in
+    inverted) INVERT=1 ;;
+    normal|auto|"") INVERT=0 ;;
+    *) echo "Ignorerer ugyldig invert-indstilling i databasen: $DB_INVERT" >&2 ;;
+  esac
+fi
 
 case "$INPUT_MODE" in
   fsk-usb|rs232)
@@ -85,4 +120,4 @@ if [[ "$RS232_ENABLED" == "1" ]]; then
 else
   echo "ALSA capture device: $CAPTURE_DEVICE @ $SAMPLE_RATE Hz"
 fi
-echo "POCSAG decoder: 512=$BAUD_512 1200=$BAUD_1200 2400=$BAUD_2400 · kun ALPHA-output"
+echo "POCSAG decoder: 512=$BAUD_512 1200=$BAUD_1200 2400=$BAUD_2400 · invert=$INVERT · kun ALPHA-output"
