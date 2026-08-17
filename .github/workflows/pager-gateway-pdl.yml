@@ -51,6 +51,7 @@ jobs:
           node --check services/pager-gateway/static/ric-admin.js
           node --check services/pager-gateway/static/adaptive-admin.js
           node --check services/pager-gateway/static/rss-updates.js
+          node --check services/pager-gateway/static/alarm-map.js
       - name: Validate shell syntax
         run: |
           for script in services/pager-gateway/*.sh services/pager-gateway/pdl/*.sh; do
