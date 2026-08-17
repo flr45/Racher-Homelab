@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import threading
@@ -230,7 +231,15 @@ class PushoverClient:
 
 
 class FileTailSource:
-    """Tail a PDL output/log file and forward each new decoded line."""
+    """Tail PDL output and resume safely after gateway restarts.
+
+    The first time a logfile is seen, the tailer intentionally starts at EOF so an
+    installation does not replay months of old decoder data. After the first live
+    line, a tiny cursor next to the logfile records inode/device/offset. A normal
+    gateway/container restart then resumes exactly after the last successfully
+    processed line, so PDL traffic received while the web process is down is not
+    silently skipped.
+    """
 
     def __init__(self, get_path: Callable[[], str], on_line: Callable[[str], None]) -> None:
         self.get_path = get_path
@@ -258,18 +267,65 @@ class FileTailSource:
 
     @staticmethod
     def _same_file(path: Path, handle) -> bool:
-        """Return whether ``path`` still names the file currently held open.
-
-        A normal log rotation can replace the path with a new inode whose size is
-        larger than the old file. Size-only truncation detection would then leave
-        the tailer stuck on the unlinked old inode forever.
-        """
+        """Return whether ``path`` still names the file currently held open."""
         try:
             path_stat = path.stat()
             open_stat = os.fstat(handle.fileno())
         except (FileNotFoundError, OSError, ValueError):
             return False
         return path_stat.st_dev == open_stat.st_dev and path_stat.st_ino == open_stat.st_ino
+
+    @staticmethod
+    def _cursor_path(path: Path) -> Path:
+        return path.with_name(path.name + ".racher-cursor")
+
+    def _read_cursor(self, path: Path) -> dict[str, int] | None:
+        cursor_path = self._cursor_path(path)
+        try:
+            payload = json.loads(cursor_path.read_text(encoding="utf-8"))
+            return {
+                "dev": int(payload["dev"]),
+                "ino": int(payload["ino"]),
+                "offset": int(payload["offset"]),
+            }
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return None
+
+    def _resume_position(self, path: Path, handle) -> int:
+        """Seek to persisted progress, or EOF on the first-ever observation."""
+        stat = os.fstat(handle.fileno())
+        cursor = self._read_cursor(path)
+        if cursor is None:
+            handle.seek(0, os.SEEK_END)
+            return handle.tell()
+
+        same_identity = cursor["dev"] == stat.st_dev and cursor["ino"] == stat.st_ino
+        offset = cursor["offset"]
+        if same_identity and 0 <= offset <= stat.st_size:
+            handle.seek(offset, os.SEEK_SET)
+        else:
+            # New inode or copytruncate while the gateway was down: consume the
+            # new/current file from the beginning rather than skipping unseen data.
+            handle.seek(0, os.SEEK_SET)
+        return handle.tell()
+
+    def _save_cursor(self, path: Path, handle) -> None:
+        try:
+            stat = os.fstat(handle.fileno())
+            payload = {
+                "dev": int(stat.st_dev),
+                "ino": int(stat.st_ino),
+                "offset": int(handle.tell()),
+            }
+            cursor_path = self._cursor_path(path)
+            tmp_path = cursor_path.with_name(cursor_path.name + ".tmp")
+            tmp_path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+            os.chmod(tmp_path, 0o640)
+            os.replace(tmp_path, cursor_path)
+        except (OSError, ValueError):
+            # Cursor persistence improves crash recovery but must never stop live
+            # alarm ingestion if the filesystem is temporarily unable to save it.
+            return
 
     def _run(self) -> None:
         self._status = "waiting"
@@ -293,13 +349,16 @@ class FileTailSource:
 
                 if handle is None:
                     handle = path.open("r", encoding="utf-8", errors="replace")
-                    handle.seek(0, os.SEEK_END)
+                    self._resume_position(path, handle)
                     self._status = "running"
                     self._error = None
 
                 line = handle.readline()
                 if line:
+                    # Persist progress only after the callback returns. If parsing
+                    # or DB ingestion fails, watchdog recovery replays this line.
                     self.on_line(line)
+                    self._save_cursor(path, handle)
                     continue
 
                 try:
