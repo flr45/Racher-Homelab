@@ -6,6 +6,12 @@ ALSA implementation unchanged. It only bypasses GTK/WebKit initialization so
 headless mode can run either an FSK->USB/RS232 converter or ALSA capture while
 keeping pdl.ini settings and stdout/log output.
 
+The Linux hardware decoder schedules pdl_decode() with a GLib timeout. GUI
+mode normally services that timeout from the GTK main loop, so headless mode
+must explicitly pump the default GLib context as well. Without that, the
+serial RX thread can fill its ring buffer forever while no pager bits are ever
+decoded.
+
 For appliance use the Linux RS232 path also accepts PDL_RS232_DEVICE. This lets
 Racher Pager pin the FSK-USB interface to a stable /dev/serial/by-id/... path
 instead of relying on ttyUSB enumeration order.
@@ -116,8 +122,14 @@ def main() -> int:
 		}
 
 		fprintf(stderr, "[HEADLESS] Ctrl+C/SIGTERM to stop.\n");
-		while (!s_headless_stop)
-			sleep(1);
+		while (!s_headless_stop) {
+			/* pdl_linux_hw_decode_start() schedules pdl_decode() through
+			 * g_timeout_add(). GUI mode dispatches that source from GTK's
+			 * main loop; headless mode must service the default context too. */
+			while (g_main_context_iteration(NULL, FALSE))
+				;
+			usleep(20000);
+		}
 
 		pdl_linux_hw_decode_stop();
 		if (s_capture_active) {
