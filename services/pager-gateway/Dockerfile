@@ -9,7 +9,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py app_core.py gateway.py storage.py routing.py adaptive.py adaptive_routes.py training.py training_routes.py push_service.py operations.py rss_updates.py alarm_rules.py wsgi.py ./
+COPY app.py app_core.py gateway.py storage.py routing.py adaptive.py adaptive_routes.py training.py training_routes.py push_service.py operations.py rss_updates.py alarm_rules.py pushover_destinations.py wsgi.py ./
 COPY templates ./templates
 COPY static ./static
 
