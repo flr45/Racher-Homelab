@@ -51,6 +51,7 @@ POCSAG_DANISH_TRANSLATION = str.maketrans({
 _DOUBLE_UNKNOWN_SEPARATOR_RE = re.compile(r"(?<=\S)\?{2,}(?=\S)")
 _ALPHA_WORD_RE = re.compile(r"[A-Za-zÆØÅæøå]{2,}")
 _DECODER_CODE_RE = re.compile(r"^[0-9A-Fa-f*+\-?/\\\[\]{}|ÆØÅæøå\s]{3,120}$")
+_DECODER_MODE_TEXTS = {"TONE ONLY", "NUMERIC ONLY", "MISC ONLY", "ALPHA ONLY"}
 
 
 @dataclass
@@ -129,6 +130,8 @@ def decoder_noise_reason(message: str, source: str, payload_type: str | None = N
         return "decoder-non-alpha"
     if not value:
         return "decoder-empty"
+    if value.upper() in _DECODER_MODE_TEXTS:
+        return "decoder-mode"
 
     words = _ALPHA_WORD_RE.findall(value)
     if not words and _DECODER_CODE_RE.fullmatch(value):
