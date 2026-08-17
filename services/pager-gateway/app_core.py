@@ -178,9 +178,21 @@ def ingest_event(event: PagerEvent) -> int:
     data = event.to_dict()
     data["message"] = public_message(data.get("message", ""))
 
-    if setting("adaptive_filter_enabled", "1") == "1":
+    decoder_noise = str(data.get("decoder_noise_reason") or "").strip()
+    if decoder_noise:
+        data.update({
+            "message_fingerprint": adaptive.exact_signature(data["message"]),
+            "relevance_class": "noise",
+            "relevance_score": 0.0,
+            "suppressed_reason": decoder_noise,
+            "duplicate_of": None,
+            "delivery_eligible": False,
+            "decision_reason": "automatisk decoder-rens: rålinjen gemmes, notifikation undertrykkes",
+        })
+    elif setting("adaptive_filter_enabled", "1") == "1":
         decision = adaptive.evaluate(
-            data["message"], data["received_at"], duplicate_window_seconds()
+            data["message"], data["received_at"], duplicate_window_seconds(),
+            ric=data.get("ric"), function=data.get("function"),
         )
         data.update(decision)
     else:
@@ -403,11 +415,14 @@ def api_me():
 @auth_required()
 def api_messages():
     try:
-        limit = int(request.args.get("limit", "100"))
+        limit = max(1, min(int(request.args.get("limit", "100")), 500))
     except ValueError:
         limit = 100
+    scope = str(request.args.get("scope") or "feed").strip().lower()
+    if scope not in {"feed", "history"}:
+        return jsonify({"ok": False, "error": "scope skal være feed eller history"}), 400
     if g.user["role"] == "admin":
-        return jsonify(storage.list_messages(limit))
+        return jsonify(storage.list_messages(limit, delivery_eligible_only=(scope == "feed")))
     return jsonify(routing.list_messages_for_user(g.user["id"], limit))
 
 
