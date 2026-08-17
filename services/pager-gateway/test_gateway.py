@@ -3,7 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gateway import FileTailSource, detect_station, parse_pdl_line, public_message
+from gateway import (
+    FileTailSource,
+    decode_pocsag_danish_charset,
+    detect_station,
+    parse_pdl_line,
+    public_message,
+)
 
 
 class PagerParsingTests(unittest.TestCase):
@@ -52,6 +58,22 @@ class PagerParsingTests(unittest.TestCase):
         event = parse_pdl_line(line)
         self.assertIsNotNone(event)
         self.assertEqual(event.received_at, "2026-08-14T01:02:03")
+
+    def test_danish_iso646_character_table(self):
+        self.assertEqual(decode_pocsag_danish_charset("[\\]{|}"), "ÆØÅæøå")
+
+    def test_live_pdl_translates_danish_pager_characters(self):
+        line = "0001191 12:00:34 17-08-2026 POCSAG-4 ALPHA 1200 DAGENS PR\\VE TIL ISL"
+        event = parse_pdl_line(line, source="pdl-file")
+        self.assertIsNotNone(event)
+        self.assertEqual(event.message, "DAGENS PRØVE TIL ISL")
+        self.assertEqual(event.raw_line, line)
+
+    def test_mock_source_does_not_translate_ascii_punctuation(self):
+        text = r"MOCK [test] path\file {x|y}"
+        event = parse_pdl_line(text, source="mock")
+        self.assertIsNotNone(event)
+        self.assertEqual(event.message, text)
 
     def test_labeled_address_is_accepted_as_ric_but_not_public_text(self):
         event = parse_pdl_line("Address: 7654321 POCSAG 512 MESSAGE: test")
