@@ -22,6 +22,9 @@ class WebPushService:
 
     def _ensure_key(self) -> None:
         if self.private_key_path.exists():
+            # Backups/restores can preserve a more permissive mode than intended.
+            # Re-assert the private-key contract every time the service starts.
+            os.chmod(self.private_key_path, 0o600)
             return
         key = ec.generate_private_key(ec.SECP256R1())
         pem = key.private_bytes(
