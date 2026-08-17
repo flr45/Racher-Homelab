@@ -35,13 +35,13 @@ fi
 export PAGER_RUNTIME_UID="${PAGER_RUNTIME_UID:-1000}"
 export PAGER_RUNTIME_GID="${PAGER_RUNTIME_GID:-1000}"
 
-# Older gateway images ran as root and may therefore have created the SQLite and
-# VAPID/session files as root inside an otherwise user-owned state directory.
-# Reconcile only the known gateway-owned files when this helper itself is root.
-# Refuse symlinks before chown/chmod so a compromised state directory cannot trick
-# the privileged update helper into modifying an arbitrary host file.
+# Older gateway images ran as root and may therefore have created the SQLite,
+# cursor and VAPID/session files as root inside an otherwise user-owned state
+# directory. Reconcile only the known gateway-owned files when this helper itself
+# is root. Refuse symlinks before chown/chmod so a compromised state directory
+# cannot trick the privileged update helper into modifying an arbitrary host file.
 if [[ "$EUID" -eq 0 && -d "$PAGER_DATA_HOST_PATH" ]]; then
-  for name in pager.db pager.db-wal pager.db-shm session-secret vapid-private.pem; do
+  for name in pager.db pager.db-wal pager.db-shm pdl.log.racher-cursor session-secret vapid-private.pem; do
     path="$PAGER_DATA_HOST_PATH/$name"
     if [[ -L "$path" ]]; then
       echo "Afviser usikker symlink i pager-state: $path" >&2
