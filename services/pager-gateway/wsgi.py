@@ -64,6 +64,23 @@ _ALARM_FILTER_CARD = """
               <span id="alarm-filter-status" class="muted">Henter…</span>
             </div>
           </article>""".strip()
+_PUSHOVER_HINT = '<p class="hint">Tilføjede Pushover-modtagere vises nedenfor med navn og maskeret user/group key. RIC sendes aldrig med, og støj/dubletter undertrykkes også her.</p>'
+_PUSHOVER_MANAGER = """
+          <div id="pushover-destination-manager" class="split-section">
+            <div>
+              <h3>Pushover-modtagere</h3>
+              <p class="hint">Her kan du se de Pushover user/group keys, der er tilføjet. Nøgler vises maskeret efter de er gemt.</p>
+              <div id="pushover-destination-list" class="command-list"><p class="muted">Henter modtagere…</p></div>
+            </div>
+            <div>
+              <h3>Tilføj modtager</h3>
+              <div class="form-grid compact-form">
+                <label>Navn<input id="pushover-destination-label" maxlength="80" autocomplete="off" placeholder="fx Frederik"></label>
+                <label>User/group key<input id="pushover-destination-key" type="password" minlength="20" maxlength="80" autocomplete="off" placeholder="Pushover user/group key"></label>
+              </div>
+              <div class="actions"><button id="pushover-destination-add" type="button" class="primary">Tilføj modtager</button><span id="pushover-destination-status" class="muted">Henter…</span></div>
+            </div>
+          </div>""".strip()
 
 
 def _static_asset_version() -> str:
@@ -82,9 +99,8 @@ STATIC_ASSET_VERSION = _static_asset_version()
 
 
 def _enhance_home_html(body: str) -> str:
-    # The manual filter is now inserted server-side. It therefore exists in the
-    # HTML response even if a browser extension, stale script, or JavaScript error
-    # prevents the helper module from running. The helper only loads/saves data.
+    # The manual filter is server-rendered in the template. Keep this fallback so
+    # older/custom templates still expose it after an appliance update.
     if 'id="alarm-filter-card"' not in body:
         body, _ = _ADAPTIVE_CARD_RE.subn(
             lambda match: f"{match.group(1)}\n{_ALARM_FILTER_CARD}",
@@ -92,11 +108,18 @@ def _enhance_home_html(body: str) -> str:
             count=1,
         )
 
+    # Render the Pushover destination manager in the response as well. JavaScript
+    # only fills data and handles actions; the controls remain visibly present if a
+    # helper script fails, which makes configuration failures diagnosable.
+    if 'id="pushover-destination-manager"' not in body and _PUSHOVER_HINT in body:
+        body = body.replace(_PUSHOVER_HINT, f"{_PUSHOVER_HINT}\n{_PUSHOVER_MANAGER}", 1)
+
     if "</body>" in body:
         helpers: list[str] = []
-        if "alarm-filter-ui.js" not in body:
+        is_admin_page = 'data-admin="1"' in body
+        if is_admin_page and "alarm-filter-ui.js" not in body:
             helpers.append(_ALARM_FILTER_SCRIPT)
-        if "pushover-admin.js" not in body:
+        if is_admin_page and "pushover-admin.js" not in body:
             helpers.append(_PUSHOVER_ADMIN_SCRIPT)
         if "alarm-map.js" not in body:
             helpers.append(_ALARM_MAP_SCRIPT)
@@ -109,6 +132,7 @@ def _enhance_home_html(body: str) -> str:
 def version_static_assets(response):
     if core.request.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+        response.headers["X-Pager-Frontend-Version"] = STATIC_ASSET_VERSION
         return response
 
     content_type = str(response.headers.get("Content-Type") or "")
@@ -119,4 +143,5 @@ def version_static_assets(response):
         body = _STATIC_ASSET_RE.sub(rf"\1?v={STATIC_ASSET_VERSION}", body)
         response.set_data(body)
         response.headers["Content-Length"] = str(len(response.get_data()))
+        response.headers["X-Pager-Frontend-Version"] = STATIC_ASSET_VERSION
     return response
