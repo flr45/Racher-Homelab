@@ -52,6 +52,50 @@ jobs:
             bash -n "$script"
           done
 
+  gateway-container-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start hardened gateway container
+        run: |
+          set -euo pipefail
+          STATE=/tmp/racher-pager-ci
+          mkdir -p "$STATE"
+          export PAGER_DATA_HOST_PATH="$STATE"
+          export PAGER_RUNTIME_UID="$(id -u)"
+          export PAGER_RUNTIME_GID="$(id -g)"
+          export PAGER_GATEWAY_PORT=18088
+          docker compose -f compose/pager-gateway/docker-compose.yml up -d --build
+          for _ in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:18088/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f compose/pager-gateway/docker-compose.yml logs pager-gateway
+          exit 1
+      - name: Verify container privilege boundaries
+        run: |
+          set -euo pipefail
+          expected="$(id -u):$(id -g)"
+          actual="$(docker inspect --format '{{.Config.User}}' racher-pager-gateway)"
+          readonly="$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' racher-pager-gateway)"
+          test "$actual" = "$expected"
+          test "$readonly" = "true"
+          docker exec racher-pager-gateway sh -c 'test -w /data && test -w /tmp && ! touch /app/should-not-write'
+          curl -fsS http://127.0.0.1:18088/healthz | grep -q '"ok":true'
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs racher-pager-gateway 2>&1 || true
+      - name: Stop container
+        if: always()
+        run: |
+          PAGER_DATA_HOST_PATH=/tmp/racher-pager-ci \
+          PAGER_RUNTIME_UID="$(id -u)" \
+          PAGER_RUNTIME_GID="$(id -g)" \
+          PAGER_GATEWAY_PORT=18088 \
+            docker compose -f compose/pager-gateway/docker-compose.yml down -v || true
+
   pdl-linux-build:
     runs-on: ubuntu-24.04
     steps:
