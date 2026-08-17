@@ -35,6 +35,9 @@ SYSTEM_ACTIONS = {
 }
 BACKUP_NAME_RE = re.compile(r"^racher-pager-\d{8}T\d{6}Z\.tar\.gz$")
 WIFI_PROFILE_RE = re.compile(r"^racher-wifi-[0-9a-f]{10}$")
+LEGACY_DECODER_MODE_TEXTS = {"TONE ONLY", "NUMERIC ONLY", "MISC ONLY", "ALPHA ONLY"}
+LEGACY_DECODER_TOKEN_RE = re.compile(r"^[0-9A-Za-zÆØÅæøå*+\-?/\\\[\]{}|]+$")
+LEGACY_ALPHA_WORD_RE = re.compile(r"[A-Za-zÆØÅæøå]{2,}")
 
 
 def validate_system_command(action: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -200,6 +203,39 @@ class Storage:
                 "DELETE FROM settings WHERE key IN (?, ?, ?, ?, ?)",
                 ("station_a_enabled", "station_s_enabled", "station_k_enabled", "station_l_enabled", "station_r_enabled"),
             )
+            self._reclassify_legacy_decoder_noise(conn)
+
+    @staticmethod
+    def _reclassify_legacy_decoder_noise(conn: sqlite3.Connection) -> None:
+        """Move obvious pre-cleaner decoder artifacts out of the live alarm feed.
+
+        Historic rows are never deleted. This only fixes their delivery metadata so
+        old TONE ONLY / 40*04 style rows remain visible in admin history without
+        occupying the customer-facing alarm feed after upgrading an existing Pi.
+        """
+        rows = conn.execute(
+            "SELECT id, message FROM messages WHERE delivery_eligible=1"
+        ).fetchall()
+        for row in rows:
+            value = str(row["message"] or "").strip()
+            reason = None
+            if value.upper() in LEGACY_DECODER_MODE_TEXTS:
+                reason = "decoder-mode"
+            elif (
+                value
+                and re.search(r"\d", value)
+                and not LEGACY_ALPHA_WORD_RE.search(value)
+                and LEGACY_DECODER_TOKEN_RE.fullmatch(value)
+            ):
+                reason = "decoder-code"
+            if reason:
+                conn.execute(
+                    """UPDATE messages SET delivery_eligible=0, relevance_class='noise',
+                              relevance_score=0.0, suppressed_reason=?,
+                              decision_reason='legacy decoder artifact reclassified during upgrade'
+                       WHERE id=?""",
+                    (reason, int(row["id"])),
+                )
 
     @staticmethod
     def _now() -> str:
