@@ -1,7 +1,9 @@
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from gateway import (
     FileTailSource,
@@ -160,6 +162,28 @@ class PagerParsingTests(unittest.TestCase):
             with path.open("r", encoding="utf-8") as handle:
                 restarted._resume_position(path, handle)
                 self.assertEqual(handle.readline(), "during-restart\n")
+
+    def test_first_cursor_upgrade_replays_only_lines_after_last_committed_pdl_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "pdl.log"
+            processed = "1234567 15:00:00 17-08-2026 POCSAG-1 ALPHA 1200 processed"
+            during_restart = "1234567 15:00:02 17-08-2026 POCSAG-1 ALPHA 1200 during restart"
+            path.write_text(f"historic\n{processed}\n{during_restart}\n", encoding="utf-8")
+
+            db_path = root / "pager.db"
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, raw_line TEXT, source TEXT)")
+                conn.execute(
+                    "INSERT INTO messages(raw_line, source) VALUES (?, 'pdl-file')",
+                    (processed,),
+                )
+
+            source = FileTailSource(lambda: str(path), lambda _: None)
+            with patch.dict(os.environ, {"PAGER_DB_PATH": str(db_path)}):
+                with path.open("r", encoding="utf-8") as handle:
+                    source._resume_position(path, handle)
+                    self.assertEqual(handle.readline().strip(), during_restart)
 
     def test_file_tail_new_inode_or_truncation_restarts_at_beginning(self):
         with tempfile.TemporaryDirectory() as tmp:
