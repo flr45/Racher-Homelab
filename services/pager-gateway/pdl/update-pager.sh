@@ -130,8 +130,7 @@ python3 -m py_compile \
   "$RUNTIME_REPO/services/pager-gateway/network_portal.py" \
   "$RUNTIME_REPO/services/pager-gateway/gateway_watchdog.py" \
   "$RUNTIME_REPO/services/pager-gateway/fsk_status_agent.py" \
-  "$RUNTIME_REPO/services/pager-gateway/external_monitor.py" \
-  "$RUNTIME_REPO/services/pager-gateway/pdl/seed-pdl-cursor.py"
+  "$RUNTIME_REPO/services/pager-gateway/external_monitor.py"
 for script in "$RUNTIME_REPO/services/pager-gateway/"*.sh "$RUNTIME_REPO/services/pager-gateway/pdl/"*.sh; do
   bash -n "$script"
 done
@@ -146,13 +145,6 @@ if [[ "$PDL_CHANGED" == "1" ]]; then
   bash "$RUNTIME_REPO/services/pager-gateway/pdl/install-pdl.sh"
   systemctl restart racher-pdl.service
 fi
-
-# Cursor-based tailing is introduced without replaying the historic PDL log. If
-# this appliance does not have a cursor yet, snapshot the current EOF immediately
-# before replacing the web process. Lines PDL writes after this point are then
-# picked up by the new gateway after its restart.
-step "Sikrer PDL læseposition"
-python3 "$RUNTIME_REPO/services/pager-gateway/pdl/seed-pdl-cursor.py" "$STATE_ROOT/pdl.log"
 
 step "Bygger ny Pager Gateway-container"
 "$COMPOSE_SCRIPT" build --pull pager-gateway
