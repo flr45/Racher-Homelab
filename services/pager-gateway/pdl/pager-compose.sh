@@ -38,8 +38,8 @@ export PAGER_RUNTIME_GID="${PAGER_RUNTIME_GID:-1000}"
 # Older gateway images ran as root and may therefore have created the SQLite and
 # VAPID/session files as root inside an otherwise user-owned state directory.
 # Reconcile only the known gateway-owned files when this helper itself is root.
-# Refuse symlinks before chown so a compromised state directory cannot trick the
-# privileged update helper into changing ownership of an arbitrary host file.
+# Refuse symlinks before chown/chmod so a compromised state directory cannot trick
+# the privileged update helper into modifying an arbitrary host file.
 if [[ "$EUID" -eq 0 && -d "$PAGER_DATA_HOST_PATH" ]]; then
   for name in pager.db pager.db-wal pager.db-shm session-secret vapid-private.pem; do
     path="$PAGER_DATA_HOST_PATH/$name"
@@ -49,6 +49,10 @@ if [[ "$EUID" -eq 0 && -d "$PAGER_DATA_HOST_PATH" ]]; then
     fi
     if [[ -f "$path" ]]; then
       chown "$PAGER_RUNTIME_UID:$PAGER_RUNTIME_GID" "$path"
+      case "$name" in
+        session-secret|vapid-private.pem) chmod 0600 "$path" ;;
+        *) chmod 0640 "$path" ;;
+      esac
     fi
   done
 fi
