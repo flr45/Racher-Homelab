@@ -74,10 +74,14 @@ class PushoverDestinationStore:
     def add(self, label: Any, user_key: Any, created_by: int | None = None) -> dict[str, Any]:
         name = self._validate_label(label)
         key = self._validate_key(user_key)
-        if self.count() >= _MAX_DESTINATIONS:
-            raise ValueError(f"Der kan højst være {_MAX_DESTINATIONS} Pushover-modtagere.")
         now = datetime.now(timezone.utc).isoformat()
         with self.connect() as conn:
+            # Keep the limit check and insert in the same write transaction. Two
+            # concurrent admin requests can therefore never race past the cap.
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT COUNT(*) AS count FROM pushover_destinations").fetchone()
+            if int(row["count"]) >= _MAX_DESTINATIONS:
+                raise ValueError(f"Der kan højst være {_MAX_DESTINATIONS} Pushover-modtagere.")
             cur = conn.execute(
                 "INSERT INTO pushover_destinations(label, user_key, active, created_at, created_by) VALUES (?, ?, 1, ?, ?)",
                 (name, key, now, created_by),
