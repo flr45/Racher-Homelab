@@ -35,6 +35,9 @@ jobs:
             services/pager-gateway/adaptive_routes.py \
             services/pager-gateway/training.py \
             services/pager-gateway/training_routes.py \
+            services/pager-gateway/operations.py \
+            services/pager-gateway/rss_updates.py \
+            services/pager-gateway/wsgi.py \
             services/pager-gateway/system_agent.py \
             services/pager-gateway/fsk_status_agent.py \
             services/pager-gateway/gateway_watchdog.py \
@@ -46,6 +49,7 @@ jobs:
           node --check services/pager-gateway/static/fsk-status.js
           node --check services/pager-gateway/static/ric-admin.js
           node --check services/pager-gateway/static/adaptive-admin.js
+          node --check services/pager-gateway/static/rss-updates.js
       - name: Validate shell syntax
         run: |
           for script in services/pager-gateway/*.sh services/pager-gateway/pdl/*.sh; do
