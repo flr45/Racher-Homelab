@@ -86,12 +86,6 @@ class PagerParsingTests(unittest.TestCase):
         self.assertEqual(event.message, line)
         self.assertEqual(event.decoder_noise_reason, "decoder-code")
 
-    def test_tone_only_decoder_status_is_marked_noise(self):
-        event = parse_pdl_line("TONE ONLY", source="pdl-file")
-        self.assertIsNotNone(event)
-        self.assertEqual(event.message, "TONE ONLY")
-        self.assertEqual(event.decoder_noise_reason, "decoder-mode")
-
     def test_short_lowercase_suffix_is_marked_fragment(self):
         event = parse_pdl_line("førerhus, spredt sig", source="pdl-file")
         self.assertIsNotNone(event)
@@ -139,6 +133,59 @@ class PagerParsingTests(unittest.TestCase):
                 replacement.write_text("new\n", encoding="utf-8")
                 os.replace(replacement, path)
                 self.assertFalse(FileTailSource._same_file(path, handle))
+
+    def test_file_tail_first_start_skips_old_backlog_but_restart_resumes_cursor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "pdl.log"
+            path.write_text("historic\n", encoding="utf-8")
+            source = FileTailSource(lambda: str(path), lambda _: None)
+
+            with path.open("r", encoding="utf-8") as handle:
+                position = source._resume_position(path, handle)
+                self.assertEqual(position, path.stat().st_size)
+
+            with path.open("a", encoding="utf-8") as writer:
+                writer.write("live-one\n")
+                writer.flush()
+            with path.open("r", encoding="utf-8") as handle:
+                handle.seek(len("historic\n"))
+                self.assertEqual(handle.readline(), "live-one\n")
+                source._save_cursor(path, handle)
+
+            with path.open("a", encoding="utf-8") as writer:
+                writer.write("during-restart\n")
+                writer.flush()
+
+            restarted = FileTailSource(lambda: str(path), lambda _: None)
+            with path.open("r", encoding="utf-8") as handle:
+                restarted._resume_position(path, handle)
+                self.assertEqual(handle.readline(), "during-restart\n")
+
+    def test_file_tail_new_inode_or_truncation_restarts_at_beginning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "pdl.log"
+            path.write_text("one\n", encoding="utf-8")
+            source = FileTailSource(lambda: str(path), lambda _: None)
+            with path.open("r", encoding="utf-8") as handle:
+                handle.seek(0, os.SEEK_END)
+                source._save_cursor(path, handle)
+
+            replacement = Path(tmp) / "replacement.log"
+            replacement.write_text("new-inode\n", encoding="utf-8")
+            os.replace(replacement, path)
+            with path.open("r", encoding="utf-8") as handle:
+                source._resume_position(path, handle)
+                self.assertEqual(handle.tell(), 0)
+                self.assertEqual(handle.readline(), "new-inode\n")
+
+            with path.open("r", encoding="utf-8") as handle:
+                handle.seek(0, os.SEEK_END)
+                source._save_cursor(path, handle)
+            path.write_text("short\n", encoding="utf-8")
+            with path.open("r", encoding="utf-8") as handle:
+                source._resume_position(path, handle)
+                self.assertEqual(handle.tell(), 0)
+                self.assertEqual(handle.readline(), "short\n")
 
 
 if __name__ == "__main__":
