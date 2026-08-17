@@ -40,6 +40,19 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn("racher-pager-post-update", script)
         self.assertIn("--force-recreate pager-gateway", script)
 
+    def test_update_migrates_runtime_permissions_before_healthcheck(self):
+        script = (PDL / "update-pager.sh").read_text(encoding="utf-8")
+        migrate = script.index('step "Migrerer gateway-runtime og filrettigheder"')
+        build = script.index('step "Bygger ny Pager Gateway-container"')
+        health = script.index('step "Venter på gateway healthcheck')
+        self.assertLess(migrate, build)
+        self.assertLess(build, health)
+        block = script[migrate:build]
+        self.assertIn('services/pager-gateway/pdl/pager-compose.sh', block)
+        self.assertIn('"$COMPOSE_SCRIPT"', block)
+        self.assertIn('chmod 2770 "$STATE_ROOT"', block)
+        self.assertIn('[[ -f "$pdl_dir/pager-compose.sh" ]]', script)
+
     def test_manual_rollback_restores_non_container_runtime(self):
         script = (PDL / "rollback-pager.sh").read_text(encoding="utf-8")
         self.assertIn("configure-pdl.sh", script)
