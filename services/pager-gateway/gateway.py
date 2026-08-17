@@ -35,6 +35,18 @@ PDW_POCSAG_RE = re.compile(
     re.I,
 )
 
+# Danish ISO 646 / DS 2089 replaces the ASCII bracket characters with ÆØÅ/æøå.
+# PDL exposes the raw 7-bit values, so translate only messages coming from the
+# live PDL source. Keep raw_line untouched for admin diagnostics.
+POCSAG_DANISH_TRANSLATION = str.maketrans({
+    "[": "Æ",
+    "\\": "Ø",
+    "]": "Å",
+    "{": "æ",
+    "|": "ø",
+    "}": "å",
+})
+
 
 @dataclass
 class PagerEvent:
@@ -70,6 +82,18 @@ def public_message(text: str) -> str:
     return value
 
 
+def decode_pocsag_danish_charset(text: str) -> str:
+    """Translate Danish 7-bit pager characters to Unicode ÆØÅ/æøå."""
+    return str(text or "").translate(POCSAG_DANISH_TRANSLATION)
+
+
+def _message_for_source(text: str, source: str) -> str:
+    message = public_message(text)
+    if str(source or "").lower().startswith("pdl"):
+        message = decode_pocsag_danish_charset(message)
+    return message
+
+
 def detect_station(text: str) -> str | None:
     upper = text.upper()
     for marker, station in STATION_MARKERS.items():
@@ -101,7 +125,7 @@ def parse_pdl_line(line: str, source: str = "pdl") -> PagerEvent | None:
 
     pdw_match = PDW_POCSAG_RE.match(raw)
     if pdw_match:
-        message = public_message(pdw_match.group("message"))
+        message = _message_for_source(pdw_match.group("message"), source)
         return PagerEvent(
             message=message,
             raw_line=raw,
@@ -118,7 +142,7 @@ def parse_pdl_line(line: str, source: str = "pdl") -> PagerEvent | None:
     baud_match = BAUD_RE.search(raw)
     function_match = FUNCTION_RE.search(raw)
 
-    message = public_message(raw)
+    message = _message_for_source(raw, source)
     return PagerEvent(
         message=message,
         raw_line=raw,
