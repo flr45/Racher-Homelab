@@ -7,9 +7,9 @@ from pathlib import Path
 from gateway import FileTailSource
 
 
-# Hold the live PDL tailer until the operations and RSS layers have installed
-# their tracking/routes. This removes startup races where the first alarm after a
-# container restart could otherwise be delivered before telemetry is ready.
+# Hold the live PDL tailer until the operations, alarm rules and RSS layers have
+# installed their tracking/routes. This removes startup races where the first alarm
+# after a container restart could otherwise be delivered before policy is ready.
 _real_file_tail_start = FileTailSource.start
 FileTailSource.start = lambda self: None
 try:
@@ -18,10 +18,12 @@ try:
 finally:
     FileTailSource.start = _real_file_tail_start
 
+from alarm_rules import install_alarm_rules
 from operations import install_operations
 from rss_updates import install_rss_updates
 
 
+alarm_rules = install_alarm_rules(core)
 operations = install_operations(core)
 rss_updates = install_rss_updates(core)
 core.source.start()
