@@ -31,6 +31,12 @@ mkdir -p "$(dirname "$LOCK_FILE")"
 exec 9>"$LOCK_FILE"
 flock -n 9 || { echo "En update/rollback/restore kører allerede." >&2; exit 1; }
 
+# The gateway container runs as the owner of STATE_ROOT rather than as root.
+# Remember that identity before replacing files so a restore cannot accidentally
+# turn pager.db/VAPID/session files into root-owned, read-only state for Gunicorn.
+STATE_UID="$(stat -c '%u' "$STATE_ROOT" 2>/dev/null || echo 0)"
+STATE_GID="$(stat -c '%g' "$STATE_ROOT" 2>/dev/null || echo 0)"
+
 TMP_DIR="$(mktemp -d)"
 RUNTIME_PAUSED=0
 cleanup() {
@@ -97,6 +103,7 @@ RUNTIME_PAUSED=1
 sleep 2
 rm -f "$STATE_ROOT/pager.db-wal" "$STATE_ROOT/pager.db-shm"
 install -m 0640 "$TMP_DIR/data/pager.db" "$STATE_ROOT/pager.db"
+chown "$STATE_UID:$STATE_GID" "$STATE_ROOT/pager.db"
 
 if [[ -n "$CURRENT_MONITOR_KEY" ]]; then
   PAGER_RESTORE_DB="$STATE_ROOT/pager.db" PAGER_RESTORE_MONITOR_KEY="$CURRENT_MONITOR_KEY" python3 - <<'PY'
@@ -118,11 +125,14 @@ unset CURRENT_MONITOR_KEY
 for file in session-secret vapid-private.pem; do
   if [[ -f "$TMP_DIR/data/$file" ]]; then
     install -m 0600 "$TMP_DIR/data/$file" "$STATE_ROOT/$file"
+    chown "$STATE_UID:$STATE_GID" "$STATE_ROOT/$file"
   fi
 done
 if [[ -f "$TMP_DIR/data/pdl/pdl.ini" ]]; then
   mkdir -p "$STATE_ROOT/pdl"
+  chown "$STATE_UID:$STATE_GID" "$STATE_ROOT/pdl"
   install -m 0640 "$TMP_DIR/data/pdl/pdl.ini" "$STATE_ROOT/pdl/pdl.ini"
+  chown "$STATE_UID:$STATE_GID" "$STATE_ROOT/pdl/pdl.ini"
 fi
 
 mkdir -p /etc/racher-pager
