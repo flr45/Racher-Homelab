@@ -38,6 +38,7 @@ jobs:
             services/pager-gateway/operations.py \
             services/pager-gateway/rss_updates.py \
             services/pager-gateway/alarm_rules.py \
+            services/pager-gateway/pushover_destinations.py \
             services/pager-gateway/wsgi.py \
             services/pager-gateway/system_agent.py \
             services/pager-gateway/fsk_status_agent.py \
@@ -53,6 +54,7 @@ jobs:
           node --check services/pager-gateway/static/rss-updates.js
           node --check services/pager-gateway/static/alarm-map.js
           node --check services/pager-gateway/static/alarm-filter-ui.js
+          node --check services/pager-gateway/static/pushover-admin.js
       - name: Validate shell syntax
         run: |
           for script in services/pager-gateway/*.sh services/pager-gateway/pdl/*.sh; do
