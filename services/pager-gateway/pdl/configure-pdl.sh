@@ -73,10 +73,10 @@ Baud512=$BAUD_512
 Baud1200=$BAUD_1200
 Baud2400=$BAUD_2400
 FNU=0
-# Alarmflowet er alfanumerisk. Undgå at PDL samtidig viser den samme bitstrøm
-# som numeric/tone-varianter; gatewayen beholder stadig rå ALPHA-decodes til
-# diagnostik og udfører sin egen korte dubletkontrol før notifikation.
-ShowBoth=0
+# Behold en ALPHA-fortolkning når PDL vurderer samme payload lige sandsynligt
+# som NUMERIC. NUMERIC-output er fortsat skjult, så gatewayen får den læsbare
+# tekst uden at sende en dublet med cifferfortolkningen.
+ShowBoth=1
 
 [Audio]
 SampleRate=$SAMPLE_RATE
@@ -120,4 +120,4 @@ if [[ "$RS232_ENABLED" == "1" ]]; then
 else
   echo "ALSA capture device: $CAPTURE_DEVICE @ $SAMPLE_RATE Hz"
 fi
-echo "POCSAG decoder: 512=$BAUD_512 1200=$BAUD_1200 2400=$BAUD_2400 · invert=$INVERT · kun ALPHA-output"
+echo "POCSAG decoder: 512=$BAUD_512 1200=$BAUD_1200 2400=$BAUD_2400 · invert=$INVERT · ALPHA-prioriteret output"
