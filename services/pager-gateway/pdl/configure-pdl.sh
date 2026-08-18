@@ -74,8 +74,7 @@ Baud1200=$BAUD_1200
 Baud2400=$BAUD_2400
 FNU=0
 # Behold en ALPHA-fortolkning når PDL vurderer samme payload lige sandsynligt
-# som NUMERIC. NUMERIC-output er fortsat skjult, så gatewayen får den læsbare
-# tekst uden at sende en dublet med cifferfortolkningen.
+# som NUMERIC. Så får vi stadig den læsbare tekstvariant i råloggen.
 ShowBoth=1
 
 [Audio]
@@ -101,7 +100,11 @@ ERMES=0
 
 [General]
 ShowTone=0
-ShowNumeric=0
+# Behold også NUMERIC-decodes i PDL-råloggen. Gatewayen gemmer dem til
+# diagnostik men markerer PDL non-alpha som decoder-non-alpha, så de bliver
+# ikke leveret som alarm/Pushover. Det gør fejlklassificerede sider synlige i
+# stedet for at de forsvinder inde i PDL før gatewayen kan undersøge dem.
+ShowNumeric=1
 ShowMisc=0
 # Behold gentagne ALPHA-decodes i råloggen. Racher Pager filtrerer dem efter
 # modtagelse, så en mellemkommende støjlinje ikke kan omgå dubletkontrollen.
@@ -120,4 +123,4 @@ if [[ "$RS232_ENABLED" == "1" ]]; then
 else
   echo "ALSA capture device: $CAPTURE_DEVICE @ $SAMPLE_RATE Hz"
 fi
-echo "POCSAG decoder: 512=$BAUD_512 1200=$BAUD_1200 2400=$BAUD_2400 · invert=$INVERT · ALPHA-prioriteret output"
+echo "POCSAG decoder: 512=$BAUD_512 1200=$BAUD_1200 2400=$BAUD_2400 · invert=$INVERT · ALPHA+diagnostisk NUMERIC-output"
