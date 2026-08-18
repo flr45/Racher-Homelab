@@ -26,7 +26,7 @@ fi
 for required in system_agent.py fsk_status_agent.py gateway_watchdog.py storage.py network_portal.py; do
   [[ -f "$SERVICE_DIR/$required" ]] || { echo "Mangler $SERVICE_DIR/$required" >&2; exit 1; }
 done
-for required in backup-pager.sh restore-pager.sh update-pager.sh rollback-pager.sh pager-compose.sh configure-pdl.sh run-pdl-headless.sh; do
+for required in backup-pager.sh restore-pager.sh update-pager.sh rollback-pager.sh pager-compose.sh configure-pdl.sh run-pdl-headless.sh diagnose-reception.sh; do
   [[ -f "$SERVICE_DIR/pdl/$required" ]] || { echo "Mangler $SERVICE_DIR/pdl/$required" >&2; exit 1; }
 done
 
@@ -50,7 +50,7 @@ sudo install -m 0644 "$SERVICE_DIR/storage.py" "$AGENT_DIR/storage.py"
 # actually-running host code cannot drift apart.
 for helper in \
   backup-pager.sh restore-pager.sh update-pager.sh rollback-pager.sh pager-compose.sh \
-  configure-pdl.sh run-pdl-headless.sh; do
+  configure-pdl.sh run-pdl-headless.sh diagnose-reception.sh; do
   sudo install -m 0755 "$SERVICE_DIR/pdl/$helper" "$INTEGRATION_DIR/$helper"
 done
 sudo install -m 0755 "$SERVICE_DIR/network_portal.py" "$NETWORK_DIR/network_portal.py"
@@ -230,5 +230,6 @@ echo "Helpers:         $INTEGRATION_DIR"
 echo "FSK probe:       racher-pager-fsk-status.timer (10 sek.)"
 echo "Gateway watchdog: racher-pager-gateway-watchdog.timer (20 sek., 3 fejl)"
 echo "PDL logrotation:  daglig/20 MB, 30 rotationer"
+echo "Reception diag:  $INTEGRATION_DIR/diagnose-reception.sh"
 echo "Pi watchdog:     $HARDWARE_WATCHDOG_STATUS"
 echo "Status: sudo systemctl status racher-pager-system-agent --no-pager"
