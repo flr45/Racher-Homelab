@@ -45,6 +45,7 @@ git -C "$PDL_SRC" checkout --detach "$PDL_COMMIT"
 echo "[3/5] Tilføjer Racher headless-mode og diagnostik..."
 python3 "$SCRIPT_DIR/patch_headless.py" "$PDL_SRC"
 python3 "$SCRIPT_DIR/patch_rx_diag_periodic.py" "$PDL_SRC"
+python3 "$SCRIPT_DIR/patch_pocsag_512_diag.py" "$PDL_SRC"
 
 echo "[4/5] Bygger PDL..."
 cmake -S "$PDL_SRC" -B "$PDL_SRC/build" \
