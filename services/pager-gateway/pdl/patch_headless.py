@@ -2,7 +2,8 @@
 """Patch upstream PDL 3.2.0 for the Racher Pager appliance.
 
 The patch adds a small --headless live-capture mode, stable FSK-USB device
-selection and one compatibility correction for Danish POCSAG traffic.
+selection, privacy-safe raw FSK receive diagnostics and one compatibility
+correction for Danish POCSAG traffic.
 
 The Linux hardware decoder schedules pdl_decode() with a GLib timeout. GUI
 mode normally services that timeout from the GTK main loop, so headless mode
@@ -13,6 +14,12 @@ decoded.
 For appliance use the Linux RS232 path also accepts PDL_RS232_DEVICE. This lets
 Racher Pager pin the FSK-USB interface to a stable /dev/serial/by-id/... path
 instead of relying on ttyUSB enumeration order.
+
+The RS232 path can additionally emit one [FSK-RX] summary per receive burst
+when PDL_RS232_RX_DIAG=1. The summary contains only byte/symbol counts and
+transition statistics, never raw pager bytes, capcodes or message text. This
+lets us distinguish "the FTDI delivered a burst but PDL could not sync" from
+"the FTDI delivered no data" when a known alarm is missed.
 
 Upstream PDL 3.2.0 additionally forces POCSAG functions 1 and 2 to NUMERIC
 before its payload-quality heuristic runs. Function bits do not reliably encode
@@ -55,6 +62,7 @@ def main() -> int:
     pocsag_text = pocsag_path.read_text(encoding="utf-8")
     headless_done = "s_headless_stop" in text and '"--headless"' in text
     rs232_device_done = 'getenv("PDL_RS232_DEVICE")' in rs232_text
+    rs232_diag_done = "RACHER_FSK_RX_DIAG" in rs232_text
     pocsag_payload_done = "RACHER_POCSAG_PAYLOAD_HEURISTIC" in pocsag_text
 
     if not headless_done:
@@ -171,6 +179,137 @@ def main() -> int:
         print(f"Applied PDL explicit RS232-device patch to {rs232_path}")
     else:
         print("PDL explicit RS232-device patch already applied")
+
+    if not rs232_diag_done:
+        rs232_text = replace_once(
+            rs232_text,
+            "static int s_rx_thread_running = 0;\n",
+            "static int s_rx_thread_running = 0;\n\n"
+            "/* RACHER_FSK_RX_DIAG: privacy-safe metadata for missed-page diagnosis. */\n"
+            "static int s_rx_diag_enabled = 0;\n"
+            "static unsigned long s_rx_diag_symbols = 0;\n"
+            "static unsigned long s_rx_diag_nonzero = 0;\n"
+            "static unsigned long s_rx_diag_transitions = 0;\n"
+            "static int s_rx_diag_last_symbol = -1;\n\n"
+            "static void rx_diag_reset_symbols(void)\n"
+            "{\n"
+            "\ts_rx_diag_symbols = 0;\n"
+            "\ts_rx_diag_nonzero = 0;\n"
+            "\ts_rx_diag_transitions = 0;\n"
+            "\ts_rx_diag_last_symbol = -1;\n"
+            "}\n\n"
+            "static void rx_diag_note_symbol(int symbol)\n"
+            "{\n"
+            "\tif (!s_rx_diag_enabled) return;\n"
+            "\ts_rx_diag_symbols++;\n"
+            "\tif (symbol != 0) s_rx_diag_nonzero++;\n"
+            "\tif (s_rx_diag_last_symbol >= 0 && symbol != s_rx_diag_last_symbol)\n"
+            "\t\ts_rx_diag_transitions++;\n"
+            "\ts_rx_diag_last_symbol = symbol;\n"
+            "}\n\n"
+            "static void rx_diag_flush(unsigned long bytes, unsigned long reads)\n"
+            "{\n"
+            "\tif (!s_rx_diag_enabled || bytes == 0) return;\n"
+            "\tfprintf(stderr,\n"
+            "\t\t\"[FSK-RX] burst bytes=%lu reads=%lu symbols=%lu nonzero=%lu transitions=%lu\\n\",\n"
+            "\t\tbytes, reads, s_rx_diag_symbols, s_rx_diag_nonzero, s_rx_diag_transitions);\n"
+            "\tfflush(stderr);\n"
+            "}\n",
+            "FSK RX diagnostic state",
+        )
+
+        rs232_text = replace_once(
+            rs232_text,
+            "\t\t\ts_linedata[s_cpstn] = (unsigned char)(bit << 4);\n",
+            "\t\t\trx_diag_note_symbol(bit);\n"
+            "\t\t\ts_linedata[s_cpstn] = (unsigned char)(bit << 4);\n",
+            "FSK RX diagnostic symbol count",
+        )
+
+        rs232_text = replace_once(
+            rs232_text,
+            "static void *rx_thread_fn(void *arg)\n"
+            "{\n"
+            "\t(void)arg;\n"
+            "\twhile (s_rx_alive) {\n"
+            "\t\tif (s_fd_in < 0) break;\n"
+            "\t\tfd_set rfds;\n"
+            "\t\tFD_ZERO(&rfds);\n"
+            "\t\tFD_SET(s_fd_in, &rfds);\n"
+            "\t\tstruct timeval tv;\n"
+            "\t\ttv.tv_sec = 0;\n"
+            "\t\ttv.tv_usec = 50000;\n"
+            "\t\tint r = select(s_fd_in + 1, &rfds, NULL, NULL, &tv);\n"
+            "\t\tif (r > 0 && FD_ISSET(s_fd_in, &rfds))\n"
+            "\t\t\trs232_read();\n"
+            "\t}\n"
+            "\treturn NULL;\n"
+            "}\n",
+            "static void *rx_thread_fn(void *arg)\n"
+            "{\n"
+            "\t(void)arg;\n"
+            "\tunsigned long burst_bytes = 0;\n"
+            "\tunsigned long burst_reads = 0;\n"
+            "\tint idle_windows = 0;\n\n"
+            "\twhile (s_rx_alive) {\n"
+            "\t\tif (s_fd_in < 0) break;\n"
+            "\t\tfd_set rfds;\n"
+            "\t\tFD_ZERO(&rfds);\n"
+            "\t\tFD_SET(s_fd_in, &rfds);\n"
+            "\t\tstruct timeval tv;\n"
+            "\t\ttv.tv_sec = 0;\n"
+            "\t\ttv.tv_usec = 50000;\n"
+            "\t\tint r = select(s_fd_in + 1, &rfds, NULL, NULL, &tv);\n"
+            "\t\tif (r > 0 && FD_ISSET(s_fd_in, &rfds)) {\n"
+            "\t\t\tint nread = rs232_read();\n"
+            "\t\t\tif (nread > 0) {\n"
+            "\t\t\t\tif (burst_bytes == 0) rx_diag_reset_symbols();\n"
+            "\t\t\t\tburst_bytes += (unsigned long)nread;\n"
+            "\t\t\t\tburst_reads++;\n"
+            "\t\t\t\tidle_windows = 0;\n"
+            "\t\t\t\tcontinue;\n"
+            "\t\t\t}\n"
+            "\t\t}\n\n"
+            "\t\t/* Four 50 ms quiet select windows delimit one hardware burst. */\n"
+            "\t\tif (s_rx_diag_enabled && burst_bytes > 0 && ++idle_windows >= 4) {\n"
+            "\t\t\trx_diag_flush(burst_bytes, burst_reads);\n"
+            "\t\t\tburst_bytes = 0;\n"
+            "\t\t\tburst_reads = 0;\n"
+            "\t\t\tidle_windows = 0;\n"
+            "\t\t\trx_diag_reset_symbols();\n"
+            "\t\t}\n"
+            "\t}\n\n"
+            "\tif (s_rx_diag_enabled && burst_bytes > 0)\n"
+            "\t\trx_diag_flush(burst_bytes, burst_reads);\n"
+            "\treturn NULL;\n"
+            "}\n",
+            "FSK RX diagnostic burst summaries",
+        )
+
+        rs232_text = replace_once(
+            rs232_text,
+            "\tmemset(s_freqdata, 0, sizeof(s_freqdata));\n"
+            "\tmemset(s_linedata, 0, sizeof(s_linedata));\n"
+            "\ts_cpstn = 0;\n\n"
+            "\ts_rx_alive = 1;\n",
+            "\tmemset(s_freqdata, 0, sizeof(s_freqdata));\n"
+            "\tmemset(s_linedata, 0, sizeof(s_linedata));\n"
+            "\ts_cpstn = 0;\n\n"
+            "\tconst char *diag_env = getenv(\"PDL_RS232_RX_DIAG\");\n"
+            "\ts_rx_diag_enabled = (diag_env && diag_env[0] && strcmp(diag_env, \"0\") != 0);\n"
+            "\trx_diag_reset_symbols();\n"
+            "\tif (s_rx_diag_enabled) {\n"
+            "\t\tfprintf(stderr, \"[FSK-RX] diagnostics active; burst_gap_ms=200 metadata_only=1\\n\");\n"
+            "\t\tfflush(stderr);\n"
+            "\t}\n\n"
+            "\ts_rx_alive = 1;\n",
+            "FSK RX diagnostic enable",
+        )
+
+        rs232_path.write_text(rs232_text, encoding="utf-8")
+        print(f"Applied privacy-safe FSK RX diagnostics to {rs232_path}")
+    else:
+        print("FSK RX diagnostics already applied")
 
     if not pocsag_payload_done:
         pocsag_text = replace_once(
