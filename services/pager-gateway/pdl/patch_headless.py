@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Patch upstream PDL 3.2.0 with a small --headless live-capture mode.
+"""Patch upstream PDL 3.2.0 for the Racher Pager appliance.
 
-The patch deliberately keeps PDL's decoder, Linux RS232 bitstream input and
-ALSA implementation unchanged. It only bypasses GTK/WebKit initialization so
-headless mode can run either an FSK->USB/RS232 converter or ALSA capture while
-keeping pdl.ini settings and stdout/log output.
+The patch adds a small --headless live-capture mode, stable FSK-USB device
+selection and one compatibility correction for Danish POCSAG traffic.
 
 The Linux hardware decoder schedules pdl_decode() with a GLib timeout. GUI
 mode normally services that timeout from the GTK main loop, so headless mode
@@ -15,6 +13,13 @@ decoded.
 For appliance use the Linux RS232 path also accepts PDL_RS232_DEVICE. This lets
 Racher Pager pin the FSK-USB interface to a stable /dev/serial/by-id/... path
 instead of relying on ttyUSB enumeration order.
+
+Upstream PDL 3.2.0 additionally forces POCSAG functions 1 and 2 to NUMERIC
+before its payload-quality heuristic runs. Function bits do not reliably encode
+payload type on every Danish paging network; the previous PDW installation
+therefore decoded pages that this shortcut can misclassify. The appliance keeps
+function 4 as an alpha hint, but lets functions 1/2 use PDL's normal content
+heuristic instead.
 """
 from __future__ import annotations
 
@@ -37,15 +42,20 @@ def main() -> int:
     source = Path(sys.argv[1]).resolve()
     main_path = source / "linux" / "main_linux.cpp"
     rs232_path = source / "linux" / "rs232_linux.cpp"
+    pocsag_path = source / "Pocsag.cpp"
     if not main_path.is_file():
         raise RuntimeError(f"Missing {main_path}")
     if not rs232_path.is_file():
         raise RuntimeError(f"Missing {rs232_path}")
+    if not pocsag_path.is_file():
+        raise RuntimeError(f"Missing {pocsag_path}")
 
     text = main_path.read_text(encoding="utf-8")
     rs232_text = rs232_path.read_text(encoding="utf-8")
+    pocsag_text = pocsag_path.read_text(encoding="utf-8")
     headless_done = "s_headless_stop" in text and '"--headless"' in text
     rs232_device_done = 'getenv("PDL_RS232_DEVICE")' in rs232_text
+    pocsag_payload_done = "RACHER_POCSAG_PAYLOAD_HEURISTIC" in pocsag_text
 
     if not headless_done:
         text = replace_once(
@@ -161,6 +171,21 @@ def main() -> int:
         print(f"Applied PDL explicit RS232-device patch to {rs232_path}")
     else:
         print("PDL explicit RS232-device patch already applied")
+
+    if not pocsag_payload_done:
+        pocsag_text = replace_once(
+            pocsag_text,
+            "\tif (function == 1 || function == 2)\n"
+            "\t\treturn(TYPE_NUMERIC);\n",
+            "\t/* RACHER_POCSAG_PAYLOAD_HEURISTIC: function 1/2 is not a reliable\n"
+            "\t * numeric/alpha discriminator on the Danish paging networks we\n"
+            "\t * receive. Let the existing content-quality heuristic decide. */\n",
+            "POCSAG function 1/2 payload heuristic",
+        )
+        pocsag_path.write_text(pocsag_text, encoding="utf-8")
+        print(f"Applied POCSAG payload heuristic patch to {pocsag_path}")
+    else:
+        print("POCSAG payload heuristic patch already applied")
 
     return 0
 
