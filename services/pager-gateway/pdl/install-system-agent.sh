@@ -190,13 +190,44 @@ sudo systemctl enable --now racher-pager-system-agent.service
 sudo systemctl enable --now racher-pager-fsk-status.timer
 sudo systemctl enable --now racher-pager-gateway-watchdog.timer
 
-# A pre-hardening gateway may have created pager.db/session/VAPID as root. The
-# freshly installed compose helper derives the state-directory owner, rejects
-# unsafe symlinks and fixes those known files before recreating Gunicorn as that
-# unprivileged uid/gid. This also makes the first rootless upgrade self-migrating.
+# A pre-hardening gateway may have created pager.db/session/VAPID as root. Only
+# force-recreate when the existing gateway container actually runs as root.
+# During a normal update update-pager.sh has already rebuilt, recreated and
+# health-checked the hardened container. Recreating it again here caused a race:
+# update-pager.sh could hit /healthz while Gunicorn was being restarted and then
+# roll an otherwise healthy release back. --no-recreate keeps that healthy
+# container in place while still creating/starting it on a fresh installation.
 if [[ -x "$INTEGRATION_DIR/pager-compose.sh" && -f /etc/racher-pager/gateway.env ]]; then
+  COMPOSE_ARGS=(up -d --no-recreate pager-gateway)
+  if docker inspect racher-pager-gateway >/dev/null 2>&1; then
+    GATEWAY_USER="$(docker inspect -f '{{.Config.User}}' racher-pager-gateway 2>/dev/null || true)"
+    case "$GATEWAY_USER" in
+      ""|0|0:0|root)
+        COMPOSE_ARGS=(up -d --force-recreate pager-gateway)
+        ;;
+    esac
+  fi
   sudo env PAGER_GATEWAY_ENV=/etc/racher-pager/gateway.env \
-    "$INTEGRATION_DIR/pager-compose.sh" up -d --force-recreate pager-gateway
+    "$INTEGRATION_DIR/pager-compose.sh" "${COMPOSE_ARGS[@]}"
+
+  # If the container had to be created/restarted, do not return to the updater
+  # until Gunicorn is listening again. This makes the helper safe both during
+  # bootstrap and during upgrades from older root-running installations.
+  if command -v curl >/dev/null 2>&1; then
+    GATEWAY_PORT="${PAGER_GATEWAY_PORT:-8088}"
+    GATEWAY_READY=0
+    for _ in $(seq 1 60); do
+      if curl -fsS "http://127.0.0.1:$GATEWAY_PORT/healthz" >/dev/null 2>&1; then
+        GATEWAY_READY=1
+        break
+      fi
+      sleep 1
+    done
+    if [[ "$GATEWAY_READY" != "1" ]]; then
+      echo "Pager Gateway blev ikke klar efter system-agent opdatering." >&2
+      exit 1
+    fi
+  fi
 fi
 
 # The previous wrapper could exit repeatedly while FSK-USB was absent and may
