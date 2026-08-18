@@ -6,6 +6,7 @@ DB_PATH="${PAGER_DB_PATH:-$STATE_ROOT/pager.db}"
 PDL_CONFIG="${PDL_CONFIG_PATH:-$STATE_ROOT/pdl/pdl.ini}"
 PDL_LOG="${PDL_LOG_PATH:-$STATE_ROOT/pdl.log}"
 RAW_RX_SINCE="${PDL_DIAG_RAW_RX_SINCE:--30 min}"
+POCSAG_SINCE="${PDL_DIAG_POCSAG_SINCE:-$RAW_RX_SINCE}"
 
 section() { printf '\n===== %s =====\n' "$1"; }
 
@@ -53,9 +54,21 @@ else
   echo "journalctl er ikke tilgængelig."
 fi
 
-section "POCSAG-512 efter sync, metadata-only ($RAW_RX_SINCE)"
+section "POCSAG-512 før sync, metadata-only ($POCSAG_SINCE)"
 if command -v journalctl >/dev/null 2>&1; then
-  pocsag_diag="$({ journalctl -u racher-pdl.service --since "$RAW_RX_SINCE" --no-pager 2>/dev/null || true; } | grep '\[POCSAG-DIAG\]' | tail -n 60 || true)"
+  pocsag_presync="$({ journalctl -u racher-pdl.service --since "$POCSAG_SINCE" --no-pager 2>/dev/null || true; } | grep '\[POCSAG-PRESYNC\]' | tail -n 60 || true)"
+  if [[ -n "$pocsag_presync" ]]; then
+    printf '%s\n' "$pocsag_presync"
+  else
+    echo "Ingen [POCSAG-PRESYNC]-summaries i perioden."
+  fi
+else
+  echo "journalctl er ikke tilgængelig."
+fi
+
+section "POCSAG-512 efter sync, metadata-only ($POCSAG_SINCE)"
+if command -v journalctl >/dev/null 2>&1; then
+  pocsag_diag="$({ journalctl -u racher-pdl.service --since "$POCSAG_SINCE" --no-pager 2>/dev/null || true; } | grep '\[POCSAG-DIAG\]' | tail -n 60 || true)"
   if [[ -n "$pocsag_diag" ]]; then
     printf '%s\n' "$pocsag_diag"
   else
