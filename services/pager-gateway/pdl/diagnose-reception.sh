@@ -47,7 +47,19 @@ if command -v journalctl >/dev/null 2>&1; then
   if [[ -n "$raw_rx" ]]; then
     printf '%s\n' "$raw_rx"
   else
-    echo "Ingen [FSK-RX]-burst-summaries i perioden."
+    echo "Ingen [FSK-RX]-summaries i perioden."
+  fi
+else
+  echo "journalctl er ikke tilgængelig."
+fi
+
+section "POCSAG-512 efter sync, metadata-only ($RAW_RX_SINCE)"
+if command -v journalctl >/dev/null 2>&1; then
+  pocsag_diag="$({ journalctl -u racher-pdl.service --since "$RAW_RX_SINCE" --no-pager 2>/dev/null || true; } | grep '\[POCSAG-DIAG\]' | tail -n 60 || true)"
+  if [[ -n "$pocsag_diag" ]]; then
+    printf '%s\n' "$pocsag_diag"
+  else
+    echo "Ingen [POCSAG-DIAG]-summaries i perioden."
   fi
 else
   echo "journalctl er ikke tilgængelig."
