@@ -5,6 +5,7 @@ STATE_ROOT="${PAGER_STATE_ROOT:-/var/lib/racher-pager}"
 DB_PATH="${PAGER_DB_PATH:-$STATE_ROOT/pager.db}"
 PDL_CONFIG="${PDL_CONFIG_PATH:-$STATE_ROOT/pdl/pdl.ini}"
 PDL_LOG="${PDL_LOG_PATH:-$STATE_ROOT/pdl.log}"
+RAW_RX_SINCE="${PDL_DIAG_RAW_RX_SINCE:--30 min}"
 
 section() { printf '\n===== %s =====\n' "$1"; }
 
@@ -38,6 +39,18 @@ if [[ -r "$PDL_CONFIG" ]]; then
   ' "$PDL_CONFIG"
 else
   echo "Mangler: $PDL_CONFIG"
+fi
+
+section "Rå FSK-input, metadata-only ($RAW_RX_SINCE)"
+if command -v journalctl >/dev/null 2>&1; then
+  raw_rx="$({ journalctl -u racher-pdl.service --since "$RAW_RX_SINCE" --no-pager 2>/dev/null || true; } | grep '\[FSK-RX\]' | tail -n 40 || true)"
+  if [[ -n "$raw_rx" ]]; then
+    printf '%s\n' "$raw_rx"
+  else
+    echo "Ingen [FSK-RX]-burst-summaries i perioden."
+  fi
+else
+  echo "journalctl er ikke tilgængelig."
 fi
 
 section "Seneste PDL-output fordelt på type og bitrate"
