@@ -62,7 +62,12 @@ if [[ "$INPUT_MODE" == "fsk-usb" || "$INPUT_MODE" == "rs232" ]]; then
     selected_device="$(select_fsk_device)"
     if [[ -n "$selected_device" ]]; then
       export PDL_RS232_DEVICE="$selected_device"
+      # Enabled by default on the appliance while reception is being validated.
+      # The PDL patch logs metadata-only burst summaries; no raw bytes, RIC or
+      # message text are written to the journal by this diagnostic.
+      export PDL_RS232_RX_DIAG="${PDL_RS232_RX_DIAG:-1}"
       echo "FSK-USB input: $PDL_RS232_DEVICE"
+      echo "FSK-USB rådiagnostik: PDL_RS232_RX_DIAG=$PDL_RS232_RX_DIAG"
       break
     fi
     if [[ "$announced_wait" == "0" ]]; then
