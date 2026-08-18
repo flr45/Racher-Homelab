@@ -58,6 +58,7 @@ class PdlConfigureScriptTests(unittest.TestCase):
             self.assertEqual(parser.get("POCSAG", "Baud512"), "0")
             self.assertEqual(parser.get("POCSAG", "Baud1200"), "1")
             self.assertEqual(parser.get("POCSAG", "Baud2400"), "0")
+            self.assertEqual(parser.get("POCSAG", "ShowBoth"), "1")
             self.assertEqual(parser.get("Audio", "Invert"), "1")
             self.assertEqual(parser.get("General", "ShowTone"), "0")
             self.assertEqual(parser.get("General", "ShowNumeric"), "0")
