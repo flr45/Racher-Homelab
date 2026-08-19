@@ -54,6 +54,18 @@ else
   echo "journalctl er ikke tilgængelig."
 fi
 
+section "POCSAG preamble scan 512/1200/2400, metadata-only ($POCSAG_SINCE)"
+if command -v journalctl >/dev/null 2>&1; then
+  pocsag_scan="$({ journalctl -u racher-pdl.service --since "$POCSAG_SINCE" --no-pager 2>/dev/null || true; } | grep '\[POCSAG-SCAN\]' | tail -n 120 || true)"
+  if [[ -n "$pocsag_scan" ]]; then
+    printf '%s\n' "$pocsag_scan"
+  else
+    echo "Ingen [POCSAG-SCAN]-summaries i perioden."
+  fi
+else
+  echo "journalctl er ikke tilgængelig."
+fi
+
 section "POCSAG-1200 preamble, metadata-only ($POCSAG_SINCE)"
 if command -v journalctl >/dev/null 2>&1; then
   pocsag_preamble="$({ journalctl -u racher-pdl.service --since "$POCSAG_SINCE" --no-pager 2>/dev/null || true; } | grep '\[POCSAG-PREAMBLE\].*baud=1200' | tail -n 80 || true)"
