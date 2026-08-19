@@ -63,13 +63,15 @@ if [[ "$INPUT_MODE" == "fsk-usb" || "$INPUT_MODE" == "rs232" ]]; then
     if [[ -n "$selected_device" ]]; then
       export PDL_RS232_DEVICE="$selected_device"
       # Enabled by default on the appliance while reception is being validated.
-      # Both diagnostics are metadata-only: no raw bytes, RIC/capcodes or
-      # message text are written to the journal.
+      # Diagnostics are metadata-only: no raw bytes, RIC/capcodes or message
+      # text are written to the journal.
       export PDL_RS232_RX_DIAG="${PDL_RS232_RX_DIAG:-1}"
       export PDL_POCSAG_512_DIAG="${PDL_POCSAG_512_DIAG:-1}"
+      export PDL_POCSAG_1200_DIAG="${PDL_POCSAG_1200_DIAG:-1}"
       echo "FSK-USB input: $PDL_RS232_DEVICE"
       echo "FSK-USB rådiagnostik: PDL_RS232_RX_DIAG=$PDL_RS232_RX_DIAG"
       echo "POCSAG-512 diagnostik: PDL_POCSAG_512_DIAG=$PDL_POCSAG_512_DIAG"
+      echo "POCSAG-1200 diagnostik: PDL_POCSAG_1200_DIAG=$PDL_POCSAG_1200_DIAG"
       break
     fi
     if [[ "$announced_wait" == "0" ]]; then
