@@ -20,6 +20,7 @@ finally:
 
 from alarm_rules import install_alarm_rules
 from operations import install_operations
+from pdl_multiline import install_pdl_multiline_tail
 from pushover_destinations import install_pushover_destinations
 from rss_updates import install_rss_updates
 
@@ -31,6 +32,7 @@ pushover_destinations = install_pushover_destinations(core)
 alarm_rules = install_alarm_rules(core)
 operations = install_operations(core)
 rss_updates = install_rss_updates(core)
+install_pdl_multiline_tail(core.source)
 core.source.start()
 rss_updates.start()
 app = app_module.app
