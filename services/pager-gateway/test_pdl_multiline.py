@@ -8,6 +8,12 @@ from pdl_multiline import install_pdl_multiline_tail, join_wrapped_pdl_lines
 
 
 class PdlMultilineTests(unittest.TestCase):
+    def wait_for_source_running(self, source: FileTailSource, timeout: float = 1.5) -> None:
+        deadline = time.monotonic() + timeout
+        while source.status.get("state") != "running" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(source.status.get("state"), "running", source.status)
+
     def test_real_wrapped_kalundborg_message_is_joined(self):
         lines = [
             " 0000999   14:17:56 19-08-26 POCSAG-4  ALPHA   1200   ISL KA, KB M1 (1+3) -??Bygn.brand-Mindre brand??Stenagervej 6??4400 Kalundborg??Ulovlig afbr{nding i halmfyr, ryger ud af\n",
@@ -31,6 +37,7 @@ class PdlMultilineTests(unittest.TestCase):
             install_pdl_multiline_tail(source, flush_delay_seconds=0.05)
             source.start()
             try:
+                self.wait_for_source_running(source)
                 with path.open("a", encoding="utf-8") as writer:
                     writer.write(
                         " 0000999   14:17:56 19-08-26 POCSAG-4  ALPHA   1200   "
@@ -60,6 +67,7 @@ class PdlMultilineTests(unittest.TestCase):
             install_pdl_multiline_tail(source, flush_delay_seconds=0.5)
             source.start()
             try:
+                self.wait_for_source_running(source)
                 with path.open("a", encoding="utf-8") as writer:
                     writer.write(" 0000999 14:17:56 19-08-26 POCSAG-4 ALPHA 1200 Første del\n")
                     writer.write("                                                     anden del\n")
