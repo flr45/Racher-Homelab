@@ -46,6 +46,7 @@ jobs:
             services/pager-gateway/external_monitor.py \
             services/pager-gateway/network_portal.py \
             services/pager-gateway/pdl/patch_headless.py \
+            services/pager-gateway/pdl/patch_hw_decode_diag.py \
             services/pager-gateway/pdl/patch_rx_diag_periodic.py \
             services/pager-gateway/pdl/patch_pocsag_512_diag.py \
             services/pager-gateway/pdl/patch_pocsag_1200_preamble.py \
@@ -146,11 +147,14 @@ jobs:
       - name: Apply Racher headless and diagnostic patches
         run: |
           python3 services/pager-gateway/pdl/patch_headless.py /tmp/PDL
+          python3 services/pager-gateway/pdl/patch_hw_decode_diag.py /tmp/PDL
           python3 services/pager-gateway/pdl/patch_rx_diag_periodic.py /tmp/PDL
           python3 services/pager-gateway/pdl/patch_pocsag_512_diag.py /tmp/PDL
           python3 services/pager-gateway/pdl/patch_pocsag_1200_preamble.py /tmp/PDL
           python3 services/pager-gateway/pdl/patch_pocsag_1200_diag.py /tmp/PDL
           grep -F 'PDL_RS232_DEVICE' /tmp/PDL/linux/rs232_linux.cpp
+          grep -F 'RACHER_HW_DECODE_TICK_DIAG' /tmp/PDL/linux/hw_decode.cpp
+          grep -F '[PDL-TICK]' /tmp/PDL/linux/hw_decode.cpp
           grep -F 'RACHER_FSK_RX_PERIODIC' /tmp/PDL/linux/rs232_linux.cpp
           grep -F 'RACHER_POCSAG_512_DIAG' /tmp/PDL/Pocsag.cpp
           grep -F 'RACHER_POCSAG_1200_DIAG' /tmp/PDL/Pocsag.cpp
