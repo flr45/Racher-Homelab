@@ -13,7 +13,10 @@ BAUD_2400="${PDL_BAUD_2400:-1}"
 INVERT="${PDL_INVERT:-0}"
 RS232_PORT="${PDL_RS232_PORT:-1}"
 RS232_BITRATE="${PDL_RS232_BITRATE:-19200}"
-RS232_DECODE_MODE="${PDL_RS232_DECODE_MODE:-2}"
+# Legacy PDW decode modes: 1=POCSAG, 2=FLEX 1600, 3=Mobitex 8000.
+# The discriminator.nl FSK-to-USB appliance path is POCSAG, so mode 1 is the
+# correct timing mode. POCSAG 512/1200/2400 selection is configured separately.
+RS232_DECODE_MODE="${PDL_RS232_DECODE_MODE:-1}"
 
 # The web UI stores decoder choices in pager.db. This script is also run by
 # systemd before every PDL start, so the database must be the final source of
