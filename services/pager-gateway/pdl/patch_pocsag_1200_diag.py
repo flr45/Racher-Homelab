@@ -271,6 +271,17 @@ static void pocsag_1200_preamble_note(int count, int interval)
 		return;
 	}
 
+	if (count > 180) {
+		if (s_pocsag_1200_preamble_bucket == 0)
+			s_pocsag_1200_preamble_attempt++;
+		fprintf(stderr,
+			"[POCSAG-PREAMBLE] baud=1200 attempt=%lu stage=acquired count=%d interval=%d acquired=1\n",
+			s_pocsag_1200_preamble_attempt, count, interval);
+		fflush(stderr);
+		s_pocsag_1200_preamble_bucket = 0;
+		return;
+	}
+
 	int bucket = count / 30;
 	if (bucket > 6) bucket = 6;
 	if (bucket <= 0 || bucket <= s_pocsag_1200_preamble_bucket) return;
@@ -280,13 +291,9 @@ static void pocsag_1200_preamble_note(int count, int interval)
 	s_pocsag_1200_preamble_bucket = bucket;
 
 	fprintf(stderr,
-		"[POCSAG-PREAMBLE] baud=1200 attempt=%lu stage=%d count=%d interval=%d acquired=%d\n",
-		s_pocsag_1200_preamble_attempt, bucket * 30, count, interval,
-		count > 180 ? 1 : 0);
+		"[POCSAG-PREAMBLE] baud=1200 attempt=%lu stage=%d count=%d interval=%d acquired=0\n",
+		s_pocsag_1200_preamble_attempt, bucket * 30, count, interval);
 	fflush(stderr);
-
-	if (count > 180)
-		s_pocsag_1200_preamble_bucket = 0;
 }
 '''
         decode = replace_once(
