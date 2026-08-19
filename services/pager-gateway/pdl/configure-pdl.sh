@@ -32,6 +32,11 @@ if command -v sqlite3 >/dev/null 2>&1 && [[ -f "$PAGER_DB_PATH" ]]; then
     2400)
       BAUD_512=0; BAUD_1200=0; BAUD_2400=1
       ;;
+    1200+2400)
+      # discriminator.nl FSK-to-USB has a combined 1200/2400 hardware mode.
+      # Match that mode without allowing PDL to jump into a false 512 decode.
+      BAUD_512=0; BAUD_1200=1; BAUD_2400=1
+      ;;
     auto|"")
       BAUD_512=1; BAUD_1200=1; BAUD_2400=1
       ;;
