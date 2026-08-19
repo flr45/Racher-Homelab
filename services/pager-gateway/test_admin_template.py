@@ -26,6 +26,10 @@ class AdminTemplateTests(unittest.TestCase):
         self.assertIn('type="hidden" name="pushover_user_key"', self.html)
         self.assertIn("Tilføjede Pushover-modtagere", self.html)
 
+    def test_combined_1200_2400_decoder_option_is_visible(self):
+        self.assertIn('<option value="1200+2400">1200 + 2400</option>', self.html)
+        self.assertIn("deaktiverer 512 i PDL", self.html)
+
 
 if __name__ == "__main__":
     unittest.main()
