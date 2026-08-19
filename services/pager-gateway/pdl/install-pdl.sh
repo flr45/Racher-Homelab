@@ -44,6 +44,7 @@ git -C "$PDL_SRC" checkout --detach "$PDL_COMMIT"
 
 echo "[3/5] Tilføjer Racher headless-mode og diagnostik..."
 python3 "$SCRIPT_DIR/patch_headless.py" "$PDL_SRC"
+python3 "$SCRIPT_DIR/patch_pdw_clock_init.py" "$PDL_SRC"
 python3 "$SCRIPT_DIR/patch_headless_direct_decode.py" "$PDL_SRC"
 python3 "$SCRIPT_DIR/patch_hw_decode_diag.py" "$PDL_SRC"
 python3 "$SCRIPT_DIR/patch_rx_diag_periodic.py" "$PDL_SRC"
