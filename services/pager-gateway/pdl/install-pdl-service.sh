@@ -34,7 +34,8 @@ PDL_INPUT_MODE=fsk-usb
 PDL_RS232_DEVICE=
 PDL_RS232_PORT=1
 PDL_RS232_BITRATE=19200
-PDL_RS232_DECODE_MODE=2
+# Legacy PDW timing mode: 1=POCSAG, 2=FLEX 1600, 3=Mobitex 8000.
+PDL_RS232_DECODE_MODE=1
 
 # POCSAG-rater som PDL må forsøge at dekode. DIP-switch på FSK-USB skal samtidig stå korrekt.
 PDL_BAUD_512=1
@@ -48,6 +49,13 @@ PDL_INVERT=0
 PAGER_STATE_ROOT=/var/lib/racher-pager
 EOF
   sudo chmod 0640 "$ENV_FILE"
+fi
+
+# Early Pager Gateway builds incorrectly seeded mode 2 (FLEX 1600 timing) for
+# the POCSAG FSK-USB path. Migrate only that exact legacy default; preserve any
+# other explicit operator value.
+if sudo grep -qx 'PDL_RS232_DECODE_MODE=2' "$ENV_FILE" 2>/dev/null; then
+  sudo sed -i 's/^PDL_RS232_DECODE_MODE=2$/PDL_RS232_DECODE_MODE=1/' "$ENV_FILE"
 fi
 
 # PDL writes a persistent diagnostic stream. Keep enough history for reception
