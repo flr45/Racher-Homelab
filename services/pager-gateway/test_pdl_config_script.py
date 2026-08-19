@@ -60,6 +60,7 @@ class PdlConfigureScriptTests(unittest.TestCase):
             self.assertEqual(parser.get("POCSAG", "Baud2400"), "0")
             self.assertEqual(parser.get("POCSAG", "ShowBoth"), "1")
             self.assertEqual(parser.get("Audio", "Invert"), "1")
+            self.assertEqual(parser.get("RS232", "DecodeMode"), "1")
             self.assertEqual(parser.get("General", "ShowTone"), "0")
             self.assertEqual(parser.get("General", "ShowNumeric"), "1")
             self.assertEqual(parser.get("General", "ShowMisc"), "0")
@@ -115,6 +116,7 @@ class PdlConfigureScriptTests(unittest.TestCase):
             self.assertEqual(parser.get("POCSAG", "Baud1200"), "1")
             self.assertEqual(parser.get("POCSAG", "Baud2400"), "1")
             self.assertEqual(parser.get("Audio", "Invert"), "0")
+            self.assertEqual(parser.get("RS232", "DecodeMode"), "1")
 
 
 if __name__ == "__main__":
