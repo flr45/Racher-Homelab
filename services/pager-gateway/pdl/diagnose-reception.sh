@@ -54,9 +54,21 @@ else
   echo "journalctl er ikke tilgængelig."
 fi
 
-section "POCSAG-512 før sync, metadata-only ($POCSAG_SINCE)"
+section "POCSAG-1200 preamble, metadata-only ($POCSAG_SINCE)"
 if command -v journalctl >/dev/null 2>&1; then
-  pocsag_presync="$({ journalctl -u racher-pdl.service --since "$POCSAG_SINCE" --no-pager 2>/dev/null || true; } | grep '\[POCSAG-PRESYNC\]' | tail -n 60 || true)"
+  pocsag_preamble="$({ journalctl -u racher-pdl.service --since "$POCSAG_SINCE" --no-pager 2>/dev/null || true; } | grep '\[POCSAG-PREAMBLE\].*baud=1200' | tail -n 80 || true)"
+  if [[ -n "$pocsag_preamble" ]]; then
+    printf '%s\n' "$pocsag_preamble"
+  else
+    echo "Ingen [POCSAG-PREAMBLE] 1200-summaries i perioden."
+  fi
+else
+  echo "journalctl er ikke tilgængelig."
+fi
+
+section "POCSAG før sync, metadata-only ($POCSAG_SINCE)"
+if command -v journalctl >/dev/null 2>&1; then
+  pocsag_presync="$({ journalctl -u racher-pdl.service --since "$POCSAG_SINCE" --no-pager 2>/dev/null || true; } | grep '\[POCSAG-PRESYNC\]' | tail -n 100 || true)"
   if [[ -n "$pocsag_presync" ]]; then
     printf '%s\n' "$pocsag_presync"
   else
@@ -66,9 +78,9 @@ else
   echo "journalctl er ikke tilgængelig."
 fi
 
-section "POCSAG-512 efter sync, metadata-only ($POCSAG_SINCE)"
+section "POCSAG efter sync, metadata-only ($POCSAG_SINCE)"
 if command -v journalctl >/dev/null 2>&1; then
-  pocsag_diag="$({ journalctl -u racher-pdl.service --since "$POCSAG_SINCE" --no-pager 2>/dev/null || true; } | grep '\[POCSAG-DIAG\]' | tail -n 60 || true)"
+  pocsag_diag="$({ journalctl -u racher-pdl.service --since "$POCSAG_SINCE" --no-pager 2>/dev/null || true; } | grep '\[POCSAG-DIAG\]' | tail -n 100 || true)"
   if [[ -n "$pocsag_diag" ]]; then
     printf '%s\n' "$pocsag_diag"
   else
