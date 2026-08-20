@@ -36,6 +36,9 @@ PDL_RS232_PORT=1
 PDL_RS232_BITRATE=19200
 # Legacy PDW timing mode: 1=POCSAG, 2=FLEX 1600, 3=Mobitex 8000.
 PDL_RS232_DECODE_MODE=1
+# Start POCSAG-1200 sync search earlier than legacy PDW's >180 preamble count.
+# Runtime patch clamps this value to 60..180. Live Vordingborg reached 166.
+PDL_POCSAG_1200_ACQUIRE_THRESHOLD=120
 
 # POCSAG-rater som PDL må forsøge at dekode. DIP-switch på FSK-USB skal samtidig stå korrekt.
 PDL_BAUD_512=1
@@ -56,6 +59,13 @@ fi
 # other explicit operator value.
 if sudo grep -qx 'PDL_RS232_DECODE_MODE=2' "$ENV_FILE" 2>/dev/null; then
   sudo sed -i 's/^PDL_RS232_DECODE_MODE=2$/PDL_RS232_DECODE_MODE=1/' "$ENV_FILE"
+fi
+
+# Existing appliances predate the configurable acquisition threshold. Add the
+# measured-safe default once without overwriting a later operator tuning value.
+if ! sudo grep -q '^PDL_POCSAG_1200_ACQUIRE_THRESHOLD=' "$ENV_FILE" 2>/dev/null; then
+  printf '\n# POCSAG-1200 preamble acquisition (clamped 60..180)\nPDL_POCSAG_1200_ACQUIRE_THRESHOLD=120\n' \
+    | sudo tee -a "$ENV_FILE" >/dev/null
 fi
 
 # PDL writes a persistent diagnostic stream. Keep enough history for reception
@@ -109,6 +119,7 @@ sudo systemctl enable racher-pdl.service
 echo "PDL systemd-service er installeret og aktiveret."
 echo "Konfiguration: $ENV_FILE"
 echo "Standardinput: FSK-USB / RS232 19200 8N1"
+echo "POCSAG-1200 acquisition: PDL_POCSAG_1200_ACQUIRE_THRESHOLD (standard 120)"
 echo "PDL-log: $PDL_LOG_PATH · roteres dagligt/ved 20 MB · 30 rotationer"
 echo "Start:  sudo systemctl start racher-pdl"
 echo "Status: sudo systemctl status racher-pdl --no-pager"
