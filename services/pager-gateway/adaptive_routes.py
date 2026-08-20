@@ -5,20 +5,62 @@ from typing import Callable
 
 from flask import g, jsonify, request
 
+from ric_noise_filter import RicNoiseFilter
+
 
 def register_adaptive_routes(app, storage, routing, adaptive, auth_required: Callable) -> None:
+    ric_noise = RicNoiseFilter(adaptive.db_path)
+
     @app.get("/api/adaptive/status")
     @auth_required(admin=True)
     def api_adaptive_status():
+        stats = adaptive.stats()
+        stats["ric_noise_filters"] = len(ric_noise.list_filters())
         return jsonify({
-            "stats": adaptive.stats(),
+            "stats": stats,
             "station_suggestions": routing.list_station_suggestions(limit=40),
+            "ric_noise_filters": ric_noise.list_filters(),
         })
 
     @app.get("/api/adaptive/review")
     @auth_required(admin=True)
     def api_adaptive_review():
-        return jsonify(adaptive.review_queue(limit=60))
+        # Fetch more rows than the UI needs because known diagnostic RICs are
+        # removed after retrieval. This lets older useful messages fill the queue
+        # instead of a burst of filtered diagnostics leaving it almost empty.
+        rows = adaptive.review_queue(limit=200)
+        return jsonify(ric_noise.filter_review_rows(rows, limit=60))
+
+    @app.get("/api/adaptive/ric-filters")
+    @auth_required(admin=True)
+    def api_adaptive_ric_filters_get():
+        return jsonify(ric_noise.list_filters())
+
+    @app.post("/api/adaptive/ric-filters")
+    @auth_required(admin=True)
+    def api_adaptive_ric_filters_post():
+        body = request.get_json(silent=True) or {}
+        try:
+            row = ric_noise.add(body.get("ric"), body.get("label", ""), int(g.user["id"]))
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        storage.add_audit(
+            g.user["id"], "adaptive-ric-filter-add",
+            f"ric={row['ric']}; label={row['label'] or '-'}",
+        )
+        return jsonify({"ok": True, "filter": row})
+
+    @app.delete("/api/adaptive/ric-filters/<ric>")
+    @auth_required(admin=True)
+    def api_adaptive_ric_filters_delete(ric: str):
+        try:
+            removed = ric_noise.remove(ric)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        if not removed:
+            return jsonify({"ok": False, "error": "RIC-filteret findes ikke."}), 404
+        storage.add_audit(g.user["id"], "adaptive-ric-filter-delete", f"ric={ric}")
+        return jsonify({"ok": True})
 
     @app.post("/api/adaptive/messages/<int:message_id>/feedback")
     @auth_required(admin=True)
