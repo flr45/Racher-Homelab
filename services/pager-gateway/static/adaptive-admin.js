@@ -9,6 +9,27 @@
     return `${Math.round(number * 100)}%`;
   }
 
+  function installRicNoiseUi() {
+    if (document.querySelector('#ric-noise-filter-card')) return;
+    const learningPanel = document.querySelector('#learning');
+    const reviewCard = document.querySelector('#learning-review')?.closest('.card');
+    if (!learningPanel || !reviewCard) return;
+
+    const card = document.createElement('article');
+    card.id = 'ric-noise-filter-card';
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="card-head"><div><span class="label">RIC-støjfilter</span><h2>Ignorer kendte støj-RIC'er</h2></div></div>
+      <p class="hint">Filtrerede RIC'er gemmes fortsat i rå historik, men skjules fra Læringskøen. Brug det til faste diagnostik-/testadresser, som ikke skal træne relevansmodellen.</p>
+      <form id="ric-noise-filter-form" class="form-grid compact-form">
+        <label>RIC / capcode<input name="ric" inputmode="numeric" pattern="[0-9]{4,10}" minlength="4" maxlength="10" required placeholder="0174760"></label>
+        <label>Beskrivelse<input name="label" maxlength="120" placeholder="fx Fast diagnostik"></label>
+        <div class="wide actions"><button class="primary" type="submit">Tilføj RIC-filter</button></div>
+      </form>
+      <div id="learning-ric-filters" class="command-list"><p class="muted">Henter RIC-filtre…</p></div>`;
+    learningPanel.insertBefore(card, reviewCard);
+  }
+
   async function refreshLearning() {
     const [status, rows] = await Promise.all([
       api('/api/adaptive/status'),
@@ -19,6 +40,23 @@
     document.querySelector('#learn-feedback').textContent = stats.feedback || 0;
     document.querySelector('#learn-suppressed').textContent =
       Number(stats.noise_suppressed || 0) + Number(stats.duplicates_suppressed || 0);
+
+    const ricFilters = document.querySelector('#learning-ric-filters');
+    const filters = status.ric_noise_filters || [];
+    if (ricFilters) {
+      ricFilters.innerHTML = filters.length ? filters.map((item) => `
+        <div class="command-row">
+          <div><strong>RIC ${escapeHtml(item.ric)}</strong><small>${escapeHtml(item.label || 'Støjfilter')}</small></div>
+          <button data-delete-ric-noise="${escapeHtml(item.ric)}">Fjern filter</button>
+        </div>`).join('') : '<p class="muted">Ingen RIC-støjfiltre.</p>';
+      ricFilters.querySelectorAll('[data-delete-ric-noise]').forEach((button) => button.addEventListener('click', async () => {
+        if (!confirm(`Fjern RIC ${button.dataset.deleteRicNoise} fra støjfilteret?`)) return;
+        try {
+          await api(`/api/adaptive/ric-filters/${encodeURIComponent(button.dataset.deleteRicNoise)}`, {method: 'DELETE'});
+          await refreshLearning();
+        } catch (error) { alert(error.message); }
+      }));
+    }
 
     const review = document.querySelector('#learning-review');
     if (review) {
@@ -37,6 +75,7 @@
             <div class="actions wrap">
               <button data-feedback="relevant" class="primary">Relevant</button>
               <button data-feedback="noise">Støj</button>
+              ${row.ric ? `<button data-filter-ric="${escapeHtml(row.ric)}">Filtrer RIC</button>` : ''}
             </div>
           </div>
         </div>`;
@@ -48,6 +87,18 @@
         try {
           await api(`/api/adaptive/messages/${row.dataset.learningMessage}/feedback`, {
             method: 'POST', body: JSON.stringify({verdict}),
+          });
+          await refreshLearning();
+        } catch (error) { alert(error.message); }
+      }));
+
+      review.querySelectorAll('[data-filter-ric]').forEach((button) => button.addEventListener('click', async () => {
+        const ric = button.dataset.filterRic;
+        if (!confirm(`Filtrer hele RIC ${ric} fra Læringskøen? Råmeldingerne bliver stadig gemt.`)) return;
+        try {
+          await api('/api/adaptive/ric-filters', {
+            method: 'POST',
+            body: JSON.stringify({ric, label: 'Tilføjet fra Læringskø'}),
           });
           await refreshLearning();
         } catch (error) { alert(error.message); }
@@ -259,9 +310,22 @@
   }
 
   installTrainingUi();
+  installRicNoiseUi();
 
   document.querySelector('[data-tab="learning"]')?.addEventListener('click', () => refreshLearning().catch((error) => alert(error.message)));
   document.querySelector('#refresh-learning')?.addEventListener('click', () => refreshLearning().catch((error) => alert(error.message)));
+  document.querySelector('#ric-noise-filter-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      await api('/api/adaptive/ric-filters', {
+        method: 'POST',
+        body: JSON.stringify({ric: form.elements.ric.value, label: form.elements.label.value}),
+      });
+      form.reset();
+      await refreshLearning();
+    } catch (error) { alert(error.message); }
+  });
 
   document.querySelector('#training-file')?.addEventListener('change', (event) => loadFileInto(event.currentTarget, '#training-text').catch((error) => alert(error.message)));
   document.querySelector('#ric-import-file')?.addEventListener('change', (event) => loadFileInto(event.currentTarget, '#ric-import-text').catch((error) => alert(error.message)));
