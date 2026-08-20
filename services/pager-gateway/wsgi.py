@@ -23,15 +23,18 @@ from burst_consensus import install_burst_consensus
 from operations import install_operations
 from pdl_multiline import install_pdl_multiline_tail
 from pushover_destinations import install_pushover_destinations
+from ric_sms import install_ric_sms
 from rss_updates import install_rss_updates
 
 
 # Pushover destination management must wrap the core sender before alarm_rules
-# adds its alarm-time decoration. Burst consensus then wraps the final ingest path
-# before the source starts, while operations wraps the eventual delivery calls.
+# adds its alarm-time decoration. Burst consensus then wraps the final ingest path.
+# RIC SMS wraps the final delivery hook after burst consensus, so a multi-RIC
+# transmission can only create one SMS per configured phone number.
 pushover_destinations = install_pushover_destinations(core)
 alarm_rules = install_alarm_rules(core)
 burst_consensus = install_burst_consensus(core, alarm_rules)
+ric_sms = install_ric_sms(core, core.auth_required)
 operations = install_operations(core)
 rss_updates = install_rss_updates(core)
 install_pdl_multiline_tail(core.source)
