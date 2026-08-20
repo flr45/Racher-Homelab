@@ -50,24 +50,16 @@ def _dispatch_key(message: str) -> str | None:
     return match.group("place").casefold()
 
 
-def _common_prefix_length(left: str, right: str) -> int:
-    count = 0
-    for a, b in zip(left, right):
-        if a != b:
-            break
-        count += 1
-    return count
-
-
 def same_nr_burst(left: str, right: str) -> bool:
-    """Conservatively decide whether two damaged texts belong to one radio burst."""
+    """Conservatively decide whether two damaged texts belong to one radio burst.
+
+    Two complete dispatches are never merged merely because they name the same
+    place. Full copies need strong whole-message similarity. A short/truncated
+    copy may join a complete one when its clean dispatch key agrees; this is the
+    common multi-RIC failure mode observed in the live Ringsted traffic.
+    """
     if not _looks_nr_dispatch(left) or not _looks_nr_dispatch(right):
         return False
-
-    left_key = _dispatch_key(left)
-    right_key = _dispatch_key(right)
-    if left_key and left_key == right_key:
-        return True
 
     left_norm = _normalized_text(left)
     right_norm = _normalized_text(right)
@@ -75,14 +67,19 @@ def same_nr_burst(left: str, right: str) -> bool:
         return False
 
     similarity = SequenceMatcher(None, left_norm, right_norm, autojunk=False).ratio()
-    if similarity >= 0.82:
+    if similarity >= 0.88:
         return True
 
     shorter, longer = sorted((left_norm, right_norm), key=len)
-    # A short intermediate copy can end halfway through the dispatch. Allow it
-    # to join a longer copy only when a substantial beginning is identical.
-    if len(shorter) <= 44 and len(shorter) >= 24:
-        return _common_prefix_length(shorter, longer) >= 20
+    if 24 <= len(shorter) <= 44:
+        left_key = _dispatch_key(left)
+        right_key = _dispatch_key(right)
+        if left_key and left_key == right_key:
+            prefix_length = min(28, len(shorter), len(longer))
+            prefix_similarity = SequenceMatcher(
+                None, shorter[:prefix_length], longer[:prefix_length], autojunk=False
+            ).ratio()
+            return prefix_similarity >= 0.75
     return False
 
 
@@ -181,7 +178,9 @@ def consensus_message(messages: list[str]) -> str:
         if slot == len(anchor):
             break
 
-        votes: dict[str | None, int] = {anchor[slot]: 1}
+        # The anchor is already present in alignments, so do not give it a
+        # second synthetic vote. Ties still fall back to the anchor character.
+        votes: dict[str | None, int] = {}
         for mapped, _insertions, coverage in alignments:
             if coverage is None:
                 continue
@@ -191,13 +190,12 @@ def consensus_message(messages: list[str]) -> str:
             char = mapped[slot]
             votes[char] = votes.get(char, 0) + 1
 
+        if not votes:
+            output.append(anchor[slot])
+            continue
         highest = max(votes.values())
         winners = [char for char, count in votes.items() if count == highest]
-        winner: str | None
-        if len(winners) == 1:
-            winner = winners[0]
-        else:
-            winner = anchor[slot]
+        winner: str | None = winners[0] if len(winners) == 1 else anchor[slot]
         if winner is not None:
             output.append(winner)
 
