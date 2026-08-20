@@ -38,6 +38,7 @@ jobs:
             services/pager-gateway/operations.py \
             services/pager-gateway/rss_updates.py \
             services/pager-gateway/alarm_rules.py \
+            services/pager-gateway/burst_consensus.py \
             services/pager-gateway/pushover_destinations.py \
             services/pager-gateway/wsgi.py \
             services/pager-gateway/system_agent.py \
