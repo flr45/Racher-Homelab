@@ -26,9 +26,12 @@ services:
     volumes:
       - sms_gateway_data:/data
     ports:
-      # Behold 127.0.0.1 som sikker standard. På den originale Pi sættes
-      # SMS_GATEWAY_BIND_HOST til Pi'ens Tailscale-IP (100.x.x.x), aldrig 0.0.0.0.
-      - "${SMS_GATEWAY_BIND_HOST:-127.0.0.1}:${SMS_GATEWAY_PORT:-8090}:8080"
+      # Behold den eksisterende lokale endpoint til modem/diagnostik.
+      - "127.0.0.1:${SMS_GATEWAY_PORT:-8090}:8080"
+      # En ekstra bind-adresse kan sættes til original-Pi'ens Tailscale-IP.
+      # 127.0.0.2 er en harmløs loopback-standard, så tjenesten er aldrig
+      # netværkseksponeret, før SMS_GATEWAY_BIND_HOST sættes eksplicit.
+      - "${SMS_GATEWAY_BIND_HOST:-127.0.0.2}:${SMS_GATEWAY_PORT:-8090}:8080"
     networks:
       - backend
     healthcheck:
