@@ -23,7 +23,7 @@ from burst_consensus import install_burst_consensus
 from operations import install_operations
 from pdl_multiline import install_pdl_multiline_tail
 from pushover_destinations import install_pushover_destinations
-from ric_sms import install_ric_sms
+from ric_sms_remote import install_ric_sms
 from rss_updates import install_rss_updates
 
 
