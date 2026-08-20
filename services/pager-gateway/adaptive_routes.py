@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from typing import Callable
 
 from flask import g, jsonify, request
 
-from ric_noise_filter import RicNoiseFilter
+from ric_noise_filter import RicNoiseFilter, install_live_ric_filter
 
 
 def register_adaptive_routes(app, storage, routing, adaptive, auth_required: Callable) -> None:
     ric_noise = RicNoiseFilter(adaptive.db_path)
+
+    # app_core calls this registration after ingest_event has been defined. Wrap
+    # that live ingest function here so the same persistent RIC list controls
+    # both notification delivery and the adaptive review queue.
+    core = sys.modules.get("app_core")
+    if core is not None and hasattr(core, "ingest_event"):
+        install_live_ric_filter(core, ric_noise)
 
     @app.get("/api/adaptive/status")
     @auth_required(admin=True)
