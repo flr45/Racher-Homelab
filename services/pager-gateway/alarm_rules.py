@@ -14,8 +14,8 @@ _MAX_TERM_LENGTH = 80
 _SPLIT_RE = re.compile(r"[\n,;]+")
 _ALARM_HINT_RE = re.compile(r"(?:\b(?:BRAND(?:ALARM)?|ALARM|ISL|VSBV|ØF|VCT)\b|M\+S)", re.I)
 _POSTAL_LOCALITY_RE = re.compile(r"\b(?P<postcode>\d{4})\s+(?P<locality>[A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]{2,})\b")
-_LEADING_DECODER_PREFIX_RE = re.compile(
-    r"^\s*(?:(?:[$@#*+!%&]{1,3}\d{0,2})|(?:\?+))\s*(?=(?:ISL|VSBV|NR|BRAND|ALARM|\d{4}\b))",
+_DISPATCH_KEY_RE = re.compile(
+    r"\bNR\s+RI\([^)]{1,16}\)M\+S\b[\s·:;,_-]*(?P<place>[A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]{3,})",
     re.I,
 )
 
@@ -81,17 +81,41 @@ def alarm_clock(received_at: str | None) -> str:
 
 
 def _clean_pager_message(message: str) -> str:
-    """Remove only obvious decoder prefixes while preserving the real payload."""
-    value = str(message or "").strip()
-    value = _LEADING_DECODER_PREFIX_RE.sub("", value, count=1).strip()
-    return value
+    """Preserve pager payload prefixes; only trim surrounding whitespace.
+
+    Prefixes such as ``@8`` and ``$9`` are present in the known-good pager feed
+    and are therefore treated as real payload rather than decoder garbage.
+    """
+    return str(message or "").strip()
+
+
+def _dispatch_key(message: str) -> str | None:
+    """Return a stable short key for NR RI(... )M+S dispatch bursts."""
+    match = _DISPATCH_KEY_RE.search(str(message or ""))
+    if not match:
+        return None
+    return f"nr-ri-m+s:{match.group('place').casefold()}"
 
 
 def _quality_noise_reason(message: str) -> str | None:
-    """Catch tiny broken POCSAG alpha fragments that are useless as notifications."""
+    """Catch tiny/broken POCSAG alpha fragments that are useless as notifications."""
     value = str(message or "").strip()
-    if not value or _ALARM_HINT_RE.search(value):
+    if not value:
         return None
+
+    # A recurring failure mode is a short first/second copy of an NR dispatch,
+    # e.g. "NR RI(1+5)M+S · Ringsted Svlmv2v". Do not let that partial copy
+    # become the notification that blocks a complete copy a second later.
+    if (
+        _dispatch_key(value)
+        and len(value) <= 44
+        and not re.search(r"\b(?:BRAND(?:ALARM)?|ALARM)\b|\b\d{4}\b", value, re.I)
+    ):
+        return "decoder-partial"
+
+    if _ALARM_HINT_RE.search(value):
+        return None
+
     compact = "".join(char for char in value if not char.isspace())
     if len(value) <= 12 and compact:
         symbols = sum(1 for char in compact if not char.isalnum() and char not in "ÆØÅæøå")
@@ -129,16 +153,19 @@ def _parse_moment(value: Any) -> datetime | None:
 
 
 def _find_extended_duplicate(store: "AlarmFilterStore", message: str, received_at: str) -> int | None:
-    """Find the same long incident repeated on another RIC within 90 seconds."""
+    """Find the same dispatch burst or incident despite small decoder errors."""
     current = _parse_moment(received_at)
-    current_incident = _incident_key(message)
-    if current is None or current_incident is None:
+    if current is None:
         return None
-    current_key, current_tail = current_incident
+
+    current_dispatch = _dispatch_key(message)
+    current_incident = _incident_key(message)
+    if current_dispatch is None and current_incident is None:
+        return None
 
     with store.connect() as conn:
         rows = conn.execute(
-            """SELECT id, received_at, message
+            """SELECT id, received_at, message, delivery_eligible, duplicate_of
                FROM messages
                ORDER BY id DESC LIMIT 120"""
         ).fetchall()
@@ -151,9 +178,20 @@ def _find_extended_duplicate(store: "AlarmFilterStore", message: str, received_a
         if delta < 0 or delta > 90:
             continue
 
+        # NR dispatches are commonly repeated to several RICs within a few
+        # seconds. The tail can be badly corrupted, while the dispatch prefix
+        # and first place token remain stable. Treat those as one radio burst.
+        if current_dispatch is not None and delta <= 8:
+            previous_dispatch = _dispatch_key(str(row["message"] or ""))
+            if previous_dispatch == current_dispatch:
+                return int(row["duplicate_of"] or row["id"])
+
+        if current_incident is None:
+            continue
         previous_incident = _incident_key(str(row["message"] or ""))
         if previous_incident is None:
             continue
+        current_key, current_tail = current_incident
         previous_key, previous_tail = previous_incident
         if previous_key != current_key:
             continue
@@ -162,7 +200,7 @@ def _find_extended_duplicate(store: "AlarmFilterStore", message: str, received_a
         containment = len(shorter) >= 28 and shorter in longer
         similarity = SequenceMatcher(None, current_tail, previous_tail, autojunk=False).ratio()
         if containment or similarity >= 0.88:
-            return int(row["id"])
+            return int(row["duplicate_of"] or row["id"])
     return None
 
 
@@ -285,7 +323,7 @@ def install_alarm_rules(core: Any) -> AlarmFilterStore:
                 message,
                 relevance_class="noise",
                 suppressed_reason=quality_reason,
-                decision_reason="pager-kvalitetsfilter: kort decoder-fragment gemt uden notifikation",
+                decision_reason="pager-kvalitetsfilter: kort/ufuldstændigt decoder-fragment gemt uden notifikation",
             )
 
         matched = store.match(message)
@@ -306,7 +344,7 @@ def install_alarm_rules(core: Any) -> AlarmFilterStore:
                 relevance_class="unknown",
                 suppressed_reason="duplicate",
                 duplicate_of=duplicate_of,
-                decision_reason=f"samme hændelse gentaget inden for 90 sekunder; dublet af melding #{duplicate_of}",
+                decision_reason=f"samme hændelse/radioburst gentaget; dublet af melding #{duplicate_of}",
             )
 
         return original_ingest(event)
