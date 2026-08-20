@@ -36,18 +36,18 @@ class PagerQualityV3Tests(unittest.TestCase):
             "delivery_eligible": True,
         })
 
-    def test_known_decoder_prefixes_are_removed_from_display_text(self):
+    def test_operational_pager_prefixes_are_preserved_in_display_text(self):
         self.assertEqual(
             _clean_pager_message("$9 ISL-Forespørgsel · 4100 Ringsted"),
-            "ISL-Forespørgsel · 4100 Ringsted",
+            "$9 ISL-Forespørgsel · 4100 Ringsted",
         )
         self.assertEqual(
             _clean_pager_message("@7 NR RI(1+5)M+S · Ringstedet · BRANDALARM"),
-            "NR RI(1+5)M+S · Ringstedet · BRANDALARM",
+            "@7 NR RI(1+5)M+S · Ringstedet · BRANDALARM",
         )
         self.assertEqual(
             _clean_pager_message("?4100 Ringsted · lugt af brændt plastic"),
-            "4100 Ringsted · lugt af brændt plastic",
+            "?4100 Ringsted · lugt af brændt plastic",
         )
 
     def test_tiny_corrupt_fragment_is_suppressed(self):
