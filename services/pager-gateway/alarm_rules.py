@@ -18,6 +18,7 @@ _DISPATCH_KEY_RE = re.compile(
     r"\bNR\s+RI\([^)]{1,16}\)M\+S\b[\s·:;,_-]*(?P<place>[A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]{3,})",
     re.I,
 )
+_NR_BURST_RE = re.compile(r"\bNR\b.{0,28}?M\+S\b", re.I)
 
 
 def normalize_filter_terms(values: Any) -> list[str]:
@@ -90,11 +91,16 @@ def _clean_pager_message(message: str) -> str:
 
 
 def _dispatch_key(message: str) -> str | None:
-    """Return a stable short key for NR RI(... )M+S dispatch bursts."""
+    """Return a stable short key for clean NR RI(... )M+S dispatch bursts."""
     match = _DISPATCH_KEY_RE.search(str(message or ""))
     if not match:
         return None
     return f"nr-ri-m+s:{match.group('place').casefold()}"
+
+
+def _looks_nr_dispatch(message: str) -> bool:
+    """Recognise an NR M+S dispatch even when a few prefix bits are corrupt."""
+    return bool(_NR_BURST_RE.search(str(message or "")))
 
 
 def _quality_noise_reason(message: str) -> str | None:
@@ -107,7 +113,7 @@ def _quality_noise_reason(message: str) -> str | None:
     # e.g. "NR RI(1+5)M+S · Ringsted Svlmv2v". Do not let that partial copy
     # become the notification that blocks a complete copy a second later.
     if (
-        _dispatch_key(value)
+        _looks_nr_dispatch(value)
         and len(value) <= 44
         and not re.search(r"\b(?:BRAND(?:ALARM)?|ALARM)\b|\b\d{4}\b", value, re.I)
     ):
@@ -159,8 +165,10 @@ def _find_extended_duplicate(store: "AlarmFilterStore", message: str, received_a
         return None
 
     current_dispatch = _dispatch_key(message)
+    current_is_nr = _looks_nr_dispatch(message)
     current_incident = _incident_key(message)
-    if current_dispatch is None and current_incident is None:
+    current_normalized = _normalized_incident_text(message)
+    if not current_is_nr and current_incident is None:
         return None
 
     with store.connect() as conn:
@@ -178,17 +186,31 @@ def _find_extended_duplicate(store: "AlarmFilterStore", message: str, received_a
         if delta < 0 or delta > 90:
             continue
 
-        # NR dispatches are commonly repeated to several RICs within a few
-        # seconds. The tail can be badly corrupted, while the dispatch prefix
-        # and first place token remain stable. Treat those as one radio burst.
-        if current_dispatch is not None and delta <= 8:
-            previous_dispatch = _dispatch_key(str(row["message"] or ""))
-            if previous_dispatch == current_dispatch:
+        previous_message = str(row["message"] or "")
+
+        # One physical NR dispatch is commonly repeated to several pager RICs
+        # over only a few seconds. A single bad codeword can corrupt the place,
+        # postcode or RI(...) prefix, so exact locality matching is too brittle.
+        # In this very short burst window we therefore also compare the whole
+        # normalized payload. The high threshold is deliberately conservative:
+        # it catches the observed Ringsted variants while keeping meaningfully
+        # different dispatches separate.
+        if current_is_nr and delta <= 8 and _looks_nr_dispatch(previous_message):
+            previous_dispatch = _dispatch_key(previous_message)
+            if current_dispatch is not None and previous_dispatch == current_dispatch:
                 return int(row["duplicate_of"] or row["id"])
+
+            previous_normalized = _normalized_incident_text(previous_message)
+            if current_normalized and previous_normalized:
+                burst_similarity = SequenceMatcher(
+                    None, current_normalized, previous_normalized, autojunk=False
+                ).ratio()
+                if burst_similarity >= 0.915:
+                    return int(row["duplicate_of"] or row["id"])
 
         if current_incident is None:
             continue
-        previous_incident = _incident_key(str(row["message"] or ""))
+        previous_incident = _incident_key(previous_message)
         if previous_incident is None:
             continue
         current_key, current_tail = current_incident
