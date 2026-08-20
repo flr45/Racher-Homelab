@@ -67,36 +67,73 @@ class AlarmRuleTests(unittest.TestCase):
         complete = "@8 NR RI(1+5)M+S Ringsted Svømmeland BRANDALARM 4100 Ringsted"
         self.assertIsNone(_quality_noise_reason(complete))
 
-    def test_nr_dispatch_burst_dedupes_despite_corrupt_tail(self):
+    @staticmethod
+    def _create_message_table(db: str) -> None:
+        with sqlite3.connect(db) as conn:
+            conn.execute(
+                """CREATE TABLE messages (
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       received_at TEXT,
+                       message TEXT,
+                       delivery_eligible INTEGER,
+                       duplicate_of INTEGER
+                   )"""
+            )
+            conn.commit()
+
+    def test_nr_dispatch_burst_dedupes_observed_corrupt_variants(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = str(Path(tmp) / "pager.db")
             store = AlarmFilterStore(db)
+            self._create_message_table(db)
             with sqlite3.connect(db) as conn:
-                conn.execute(
-                    """CREATE TABLE messages (
-                           id INTEGER PRIMARY KEY AUTOINCREMENT,
-                           received_at TEXT,
-                           message TEXT,
-                           delivery_eligible INTEGER,
-                           duplicate_of INTEGER
-                       )"""
-                )
                 cur = conn.execute(
                     "INSERT INTO messages(received_at, message, delivery_eligible, duplicate_of) VALUES (?, ?, 1, NULL)",
                     (
                         "2026-08-20T12:35:35",
-                        "NR RI(1+5)M+S · Ringsted(?vømmeland · BRANDALARM · 4100 Ringsted",
+                        "@8 NR RI(1+5)M+S · Ringsted(?vømmeland · BRANDALARM · 4100 Ringsted",
                     ),
                 )
                 first_id = int(cur.lastrowid)
                 conn.commit()
 
+            # RIC 0006220: the RI(...) prefix and first Ringsted character are corrupt.
             duplicate = _find_extended_duplicate(
                 store,
-                "NR RI(1+5)M+S · Ringsted Svlmv2v",
-                "2026-08-20T12:35:37",
+                "@8 NR RM*1+5)M+S · R`ngsted Svømmeland · BRANDALARM · 4100 Ringsted",
+                "2026-08-20T12:35:36",
             )
             self.assertEqual(duplicate, first_id)
+
+            # RIC 0006240: place/postcode/town contain several bit errors.
+            duplicate = _find_extended_duplicate(
+                store,
+                "@8 NR RI(1+5)M+S · Ringstul Svømmeland · BRANDALARM · 410x Zingsted",
+                "2026-08-20T12:35:39",
+            )
+            self.assertEqual(duplicate, first_id)
+
+    def test_nr_dispatch_dedupe_does_not_hide_different_same_town_alarm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "pager.db")
+            store = AlarmFilterStore(db)
+            self._create_message_table(db)
+            with sqlite3.connect(db) as conn:
+                conn.execute(
+                    "INSERT INTO messages(received_at, message, delivery_eligible, duplicate_of) VALUES (?, ?, 1, NULL)",
+                    (
+                        "2026-08-20T12:35:35",
+                        "@8 NR RI(1+5)M+S · Ringsted Svømmeland · BRANDALARM · 4100 Ringsted",
+                    ),
+                )
+                conn.commit()
+
+            duplicate = _find_extended_duplicate(
+                store,
+                "@8 NR RI(1+5)M+S · Ringsted Station · BRANDALARM · 4100 Ringsted",
+                "2026-08-20T12:35:39",
+            )
+            self.assertIsNone(duplicate)
 
     def test_installed_filter_suppresses_before_original_delivery(self):
         with tempfile.TemporaryDirectory() as tmp:
