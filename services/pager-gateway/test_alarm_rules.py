@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +9,16 @@ from types import SimpleNamespace
 
 from flask import Flask, g, jsonify, request
 
-from alarm_rules import AlarmFilterStore, alarm_clock, install_alarm_rules, match_filter_term, normalize_filter_terms
+from alarm_rules import (
+    AlarmFilterStore,
+    _clean_pager_message,
+    _find_extended_duplicate,
+    _quality_noise_reason,
+    alarm_clock,
+    install_alarm_rules,
+    match_filter_term,
+    normalize_filter_terms,
+)
 
 
 class AlarmRuleTests(unittest.TestCase):
@@ -44,6 +54,49 @@ class AlarmRuleTests(unittest.TestCase):
             self.assertEqual(store.match("Alarm - ØVELSE"), "øvelse")
             self.assertEqual(store.replace_terms([]), [])
             self.assertEqual(store.list_terms(), [])
+
+    def test_known_operational_prefixes_are_preserved(self):
+        first = "@8 NR RI(1+5)M+S Ringsted Svømmeland BRANDALARM 4100 Ringsted"
+        second = "$9 ISL-Forespørgsel 4100 Ringsted lugt af brændt plastic"
+        self.assertEqual(_clean_pager_message(first), first)
+        self.assertEqual(_clean_pager_message(second), second)
+
+    def test_short_nr_dispatch_copy_is_treated_as_partial(self):
+        text = "NR RI(1+5)M+S · Ringsted Svlmv2v"
+        self.assertEqual(_quality_noise_reason(text), "decoder-partial")
+        complete = "@8 NR RI(1+5)M+S Ringsted Svømmeland BRANDALARM 4100 Ringsted"
+        self.assertIsNone(_quality_noise_reason(complete))
+
+    def test_nr_dispatch_burst_dedupes_despite_corrupt_tail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "pager.db")
+            store = AlarmFilterStore(db)
+            with sqlite3.connect(db) as conn:
+                conn.execute(
+                    """CREATE TABLE messages (
+                           id INTEGER PRIMARY KEY AUTOINCREMENT,
+                           received_at TEXT,
+                           message TEXT,
+                           delivery_eligible INTEGER,
+                           duplicate_of INTEGER
+                       )"""
+                )
+                cur = conn.execute(
+                    "INSERT INTO messages(received_at, message, delivery_eligible, duplicate_of) VALUES (?, ?, 1, NULL)",
+                    (
+                        "2026-08-20T12:35:35",
+                        "NR RI(1+5)M+S · Ringsted(?vømmeland · BRANDALARM · 4100 Ringsted",
+                    ),
+                )
+                first_id = int(cur.lastrowid)
+                conn.commit()
+
+            duplicate = _find_extended_duplicate(
+                store,
+                "NR RI(1+5)M+S · Ringsted Svlmv2v",
+                "2026-08-20T12:35:37",
+            )
+            self.assertEqual(duplicate, first_id)
 
     def test_installed_filter_suppresses_before_original_delivery(self):
         with tempfile.TemporaryDirectory() as tmp:
