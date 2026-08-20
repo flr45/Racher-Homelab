@@ -21,7 +21,7 @@ MARKER = "RACHER_POCSAG_1200_ACQUIRE_THRESHOLD"
 DEFAULT_THRESHOLD = 120
 
 
-def sub_once(text: str, pattern: str, replacement: str, label: str, *, flags: int = 0) -> str:
+def sub_once(text: str, pattern: str, replacement, label: str, *, flags: int = 0) -> str:
     updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)
     if count != 1:
         raise RuntimeError(f"Could not patch {label}: expected 1 match, found {count}")
@@ -73,10 +73,12 @@ static int racher_pocsag_1200_acquire_threshold(void)
 }
 '''
 
+    # Use a callback replacement so C/C++ backslash escapes in helper (notably
+    # '\0') are copied byte-for-byte instead of being interpreted by re.sub.
     decode = sub_once(
         decode,
         r"(?m)^(static int s_pocsag_1200_preamble_enabled = -1;)$",
-        helper + r"\n\1",
+        lambda match: helper + "\n" + match.group(1),
         "1200 acquisition helper",
     )
 
