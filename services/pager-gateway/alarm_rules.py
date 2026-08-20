@@ -14,10 +14,6 @@ _MAX_TERM_LENGTH = 80
 _SPLIT_RE = re.compile(r"[\n,;]+")
 _ALARM_HINT_RE = re.compile(r"(?:\b(?:BRAND(?:ALARM)?|ALARM|ISL|VSBV|ØF|VCT)\b|M\+S)", re.I)
 _POSTAL_LOCALITY_RE = re.compile(r"\b(?P<postcode>\d{4})\s+(?P<locality>[A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]{2,})\b")
-_DISPATCH_KEY_RE = re.compile(
-    r"\bNR\s+RI\([^)]{1,16}\)M\+S\b[\s·:;,_-]*(?P<place>[A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]{3,})",
-    re.I,
-)
 _NR_BURST_RE = re.compile(r"\bNR\b.{0,28}?M\+S\b", re.I)
 
 
@@ -90,14 +86,6 @@ def _clean_pager_message(message: str) -> str:
     return str(message or "").strip()
 
 
-def _dispatch_key(message: str) -> str | None:
-    """Return a stable short key for clean NR RI(... )M+S dispatch bursts."""
-    match = _DISPATCH_KEY_RE.search(str(message or ""))
-    if not match:
-        return None
-    return f"nr-ri-m+s:{match.group('place').casefold()}"
-
-
 def _looks_nr_dispatch(message: str) -> bool:
     """Recognise an NR M+S dispatch even when a few prefix bits are corrupt."""
     return bool(_NR_BURST_RE.search(str(message or "")))
@@ -164,7 +152,6 @@ def _find_extended_duplicate(store: "AlarmFilterStore", message: str, received_a
     if current is None:
         return None
 
-    current_dispatch = _dispatch_key(message)
     current_is_nr = _looks_nr_dispatch(message)
     current_incident = _incident_key(message)
     current_normalized = _normalized_incident_text(message)
@@ -191,15 +178,10 @@ def _find_extended_duplicate(store: "AlarmFilterStore", message: str, received_a
         # One physical NR dispatch is commonly repeated to several pager RICs
         # over only a few seconds. A single bad codeword can corrupt the place,
         # postcode or RI(...) prefix, so exact locality matching is too brittle.
-        # In this very short burst window we therefore also compare the whole
-        # normalized payload. The high threshold is deliberately conservative:
-        # it catches the observed Ringsted variants while keeping meaningfully
-        # different dispatches separate.
+        # Compare the whole normalized payload inside this short burst window.
+        # The deliberately high threshold catches the observed Ringsted copies
+        # while avoiding suppression based only on a shared town/staffing prefix.
         if current_is_nr and delta <= 8 and _looks_nr_dispatch(previous_message):
-            previous_dispatch = _dispatch_key(previous_message)
-            if current_dispatch is not None and previous_dispatch == current_dispatch:
-                return int(row["duplicate_of"] or row["id"])
-
             previous_normalized = _normalized_incident_text(previous_message)
             if current_normalized and previous_normalized:
                 burst_similarity = SequenceMatcher(
