@@ -4,6 +4,7 @@ import os
 import re
 import sqlite3
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -11,6 +12,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 _MAX_FILTER_TERMS = 100
 _MAX_TERM_LENGTH = 80
 _SPLIT_RE = re.compile(r"[\n,;]+")
+_ALARM_HINT_RE = re.compile(r"(?:\b(?:BRAND(?:ALARM)?|ALARM|ISL|VSBV|ØF|VCT)\b|M\+S)", re.I)
+_POSTAL_LOCALITY_RE = re.compile(r"\b(?P<postcode>\d{4})\s+(?P<locality>[A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]{2,})\b")
+_LEADING_DECODER_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:[$@#*+!%&]{1,3}\d{0,2})|(?:\?+))\s*(?=(?:ISL|VSBV|NR|BRAND|ALARM|\d{4}\b))",
+    re.I,
+)
 
 
 def normalize_filter_terms(values: Any) -> list[str]:
@@ -73,6 +80,92 @@ def alarm_clock(received_at: str | None) -> str:
     return moment.astimezone(zone).strftime("%H:%M:%S")
 
 
+def _clean_pager_message(message: str) -> str:
+    """Remove only obvious decoder prefixes while preserving the real payload."""
+    value = str(message or "").strip()
+    value = _LEADING_DECODER_PREFIX_RE.sub("", value, count=1).strip()
+    return value
+
+
+def _quality_noise_reason(message: str) -> str | None:
+    """Catch tiny broken POCSAG alpha fragments that are useless as notifications."""
+    value = str(message or "").strip()
+    if not value or _ALARM_HINT_RE.search(value):
+        return None
+    compact = "".join(char for char in value if not char.isspace())
+    if len(value) <= 12 and compact:
+        symbols = sum(1 for char in compact if not char.isalnum() and char not in "ÆØÅæøå")
+        if "?" in compact or symbols / len(compact) >= 0.25:
+            return "decoder-fragment"
+    return None
+
+
+def _normalized_incident_text(message: str) -> str:
+    value = str(message or "").casefold().replace("?", "")
+    value = re.sub(r"[^\wÆØÅæøå]+", " ", value, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _incident_key(message: str) -> tuple[str, str] | None:
+    """Return postcode/locality plus a long comparable incident tail."""
+    normalized = _normalized_incident_text(message)
+    match = _POSTAL_LOCALITY_RE.search(normalized)
+    if not match:
+        return None
+    tail = normalized[match.start():].strip()
+    if len(tail) < 28:
+        return None
+    return f"{match.group('postcode')} {match.group('locality').casefold()}", tail
+
+
+def _parse_moment(value: Any) -> datetime | None:
+    try:
+        moment = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
+def _find_extended_duplicate(store: "AlarmFilterStore", message: str, received_at: str) -> int | None:
+    """Find the same long incident repeated on another RIC within 90 seconds."""
+    current = _parse_moment(received_at)
+    current_incident = _incident_key(message)
+    if current is None or current_incident is None:
+        return None
+    current_key, current_tail = current_incident
+
+    with store.connect() as conn:
+        rows = conn.execute(
+            """SELECT id, received_at, message
+               FROM messages
+               ORDER BY id DESC LIMIT 120"""
+        ).fetchall()
+
+    for row in rows:
+        previous = _parse_moment(row["received_at"])
+        if previous is None:
+            continue
+        delta = (current - previous).total_seconds()
+        if delta < 0 or delta > 90:
+            continue
+
+        previous_incident = _incident_key(str(row["message"] or ""))
+        if previous_incident is None:
+            continue
+        previous_key, previous_tail = previous_incident
+        if previous_key != current_key:
+            continue
+
+        shorter, longer = sorted((current_tail, previous_tail), key=len)
+        containment = len(shorter) >= 28 and shorter in longer
+        similarity = SequenceMatcher(None, current_tail, previous_tail, autojunk=False).ratio()
+        if containment or similarity >= 0.88:
+            return int(row["id"])
+    return None
+
+
 class AlarmFilterStore:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
@@ -126,11 +219,7 @@ def _timed_event(core: Any, event: dict[str, Any]) -> dict[str, Any]:
 
 
 def install_alarm_rules(core: Any) -> AlarmFilterStore:
-    """Install global manual pager filters and add alarm time to notifications.
-
-    A matching pager alarm is retained in admin history with raw data intact, but
-    is marked delivery-ineligible before Pushover/Web Push/routing can run.
-    """
+    """Install pager filtering, burst dedupe and notification timing."""
     store = AlarmFilterStore(core.DB_PATH)
 
     @core.app.get("/api/alarm-filters")
@@ -155,22 +244,25 @@ def install_alarm_rules(core: Any) -> AlarmFilterStore:
 
     original_ingest = core.ingest_event
 
-    def filtered_ingest(event: Any) -> int:
-        message = core.public_message(str(getattr(event, "message", "") or ""))
-        matched = store.match(message)
-        if not matched:
-            return original_ingest(event)
-
+    def store_suppressed(
+        event: Any,
+        message: str,
+        *,
+        relevance_class: str,
+        suppressed_reason: str,
+        decision_reason: str,
+        duplicate_of: int | None = None,
+    ) -> int:
         data = event.to_dict()
         data["message"] = message
         data.update({
             "message_fingerprint": core.adaptive.exact_signature(message),
-            "relevance_class": "filtered",
-            "relevance_score": 0.0,
-            "suppressed_reason": f"word-filter:{matched}",
-            "duplicate_of": None,
+            "relevance_class": relevance_class,
+            "relevance_score": 0.0 if relevance_class in {"noise", "filtered"} else 0.75,
+            "suppressed_reason": suppressed_reason,
+            "duplicate_of": duplicate_of,
             "delivery_eligible": False,
-            "decision_reason": f"manuelt ordfilter matchede '{matched}'; råmeldingen er gemt, levering undertrykt",
+            "decision_reason": decision_reason,
         })
         station, routing_source = core.routing.classify(
             data.get("ric"), data.get("station"), message
@@ -180,6 +272,44 @@ def install_alarm_rules(core: Any) -> AlarmFilterStore:
         message_id = core.storage.add_message(data)
         core.adaptive.observe(message_id, message)
         return message_id
+
+    def filtered_ingest(event: Any) -> int:
+        message = core.public_message(str(getattr(event, "message", "") or ""))
+        message = core.public_message(_clean_pager_message(message))
+        event.message = message
+
+        quality_reason = _quality_noise_reason(message)
+        if quality_reason:
+            return store_suppressed(
+                event,
+                message,
+                relevance_class="noise",
+                suppressed_reason=quality_reason,
+                decision_reason="pager-kvalitetsfilter: kort decoder-fragment gemt uden notifikation",
+            )
+
+        matched = store.match(message)
+        if matched:
+            return store_suppressed(
+                event,
+                message,
+                relevance_class="filtered",
+                suppressed_reason=f"word-filter:{matched}",
+                decision_reason=f"manuelt ordfilter matchede '{matched}'; råmeldingen er gemt, levering undertrykt",
+            )
+
+        duplicate_of = _find_extended_duplicate(store, message, str(getattr(event, "received_at", "") or ""))
+        if duplicate_of is not None:
+            return store_suppressed(
+                event,
+                message,
+                relevance_class="unknown",
+                suppressed_reason="duplicate",
+                duplicate_of=duplicate_of,
+                decision_reason=f"samme hændelse gentaget inden for 90 sekunder; dublet af melding #{duplicate_of}",
+            )
+
+        return original_ingest(event)
 
     core.ingest_event = filtered_ingest
 
