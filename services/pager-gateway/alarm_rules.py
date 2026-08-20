@@ -14,7 +14,13 @@ _MAX_TERM_LENGTH = 80
 _SPLIT_RE = re.compile(r"[\n,;]+")
 _ALARM_HINT_RE = re.compile(r"(?:\b(?:BRAND(?:ALARM)?|ALARM|ISL|VSBV|ØF|VCT)\b|M\+S)", re.I)
 _POSTAL_LOCALITY_RE = re.compile(r"\b(?P<postcode>\d{4})\s+(?P<locality>[A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]{2,})\b")
-_NR_BURST_RE = re.compile(r"\bNR\b.{0,28}?M\+S\b", re.I)
+# Known 1200-baud dispatch families are not limited to the historic "NR RI(...)M+S"
+# spelling. Næstved traffic has also been observed as e.g. "MN NÆ(1+5)M+S".
+# Keep the old function names for compatibility, but recognise both families.
+_NR_BURST_RE = re.compile(
+    r"(?:\bNR\b.{0,28}?M\+S\b|\b[A-ZÆØÅ]{1,4}\s+[A-ZÆØÅ]{1,4}\([^)]{1,16}\)M\+S\b)",
+    re.I,
+)
 
 
 def normalize_filter_terms(values: Any) -> list[str]:
@@ -87,7 +93,7 @@ def _clean_pager_message(message: str) -> str:
 
 
 def _looks_nr_dispatch(message: str) -> bool:
-    """Recognise an NR M+S dispatch even when a few prefix bits are corrupt."""
+    """Recognise a known M+S dispatch family even when a few prefix bits are corrupt."""
     return bool(_NR_BURST_RE.search(str(message or "")))
 
 
@@ -97,9 +103,10 @@ def _quality_noise_reason(message: str) -> str | None:
     if not value:
         return None
 
-    # A recurring failure mode is a short first/second copy of an NR dispatch,
-    # e.g. "NR RI(1+5)M+S · Ringsted Svlmv2v". Do not let that partial copy
-    # become the notification that blocks a complete copy a second later.
+    # A recurring failure mode is a short first/second copy of an M+S dispatch,
+    # e.g. "NR RI(1+5)M+S · Ringsted Svlmv2v" or the observed Næstved copy
+    # "MN NÆ(1+5)M+S · Park%y4gs9". Do not let that partial copy become the
+    # notification that blocks a complete copy a few seconds later.
     if (
         _looks_nr_dispatch(value)
         and len(value) <= 44
@@ -175,12 +182,10 @@ def _find_extended_duplicate(store: "AlarmFilterStore", message: str, received_a
 
         previous_message = str(row["message"] or "")
 
-        # One physical NR dispatch is commonly repeated to several pager RICs
+        # One physical M+S dispatch is commonly repeated to several pager RICs
         # over only a few seconds. A single bad codeword can corrupt the place,
-        # postcode or RI(...) prefix, so exact locality matching is too brittle.
+        # postcode or dispatch prefix, so exact locality matching is too brittle.
         # Compare the whole normalized payload inside this short burst window.
-        # The deliberately high threshold catches the observed Ringsted copies
-        # while avoiding suppression based only on a shared town/staffing prefix.
         if current_is_nr and delta <= 8 and _looks_nr_dispatch(previous_message):
             previous_normalized = _normalized_incident_text(previous_message)
             if current_normalized and previous_normalized:
