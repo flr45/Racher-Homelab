@@ -12,9 +12,16 @@ from typing import Any
 from alarm_rules import _quality_noise_reason
 
 
-_NR_BURST_RE = re.compile(r"\bNR\b.{0,28}?M\+S\b", re.I)
+# 1200-baud dispatches are emitted in more than one prefix family. Keep the
+# historic NR naming internally for compatibility, but also recognise formats
+# such as the observed Næstved "MN NÆ(1+5)M+S" traffic.
+_NR_BURST_RE = re.compile(
+    r"(?:\bNR\b.{0,28}?M\+S\b|\b[A-ZÆØÅ]{1,4}\s+[A-ZÆØÅ]{1,4}\([^)]{1,16}\)M\+S\b)",
+    re.I,
+)
 _DISPATCH_KEY_RE = re.compile(
-    r"\bNR\s+RI\([^)]{1,16}\)M\+S\b[\s·:;,_-]*(?P<place>[A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]{3,})",
+    r"(?:\bNR\s+RI\([^)]{1,16}\)M\+S\b|\b[A-ZÆØÅ]{1,4}\s+[A-ZÆØÅ]{1,4}\([^)]{1,16}\)M\+S\b)"
+    r"[\s·:;,_-]*(?P<place>[A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]{3,})",
     re.I,
 )
 
@@ -50,13 +57,25 @@ def _dispatch_key(message: str) -> str | None:
     return match.group("place").casefold()
 
 
+def _compatible_dispatch_keys(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    shorter, longer = sorted((left, right), key=len)
+    # A damaged short copy may only retain the first few clean letters of the
+    # incident place, as in "Park%y4gs9" vs "Parkeringshuset". Four matching
+    # letters are enough only inside the already strict M+S burst/time checks.
+    return len(shorter) >= 4 and longer.startswith(shorter)
+
+
 def same_nr_burst(left: str, right: str) -> bool:
     """Conservatively decide whether two damaged texts belong to one radio burst.
 
     Two complete dispatches are never merged merely because they name the same
     place. Full copies need strong whole-message similarity. A short/truncated
-    copy may join a complete one when its clean dispatch key agrees; this is the
-    common multi-RIC failure mode observed in the live Ringsted traffic.
+    copy may join a complete one when its dispatch-place prefix agrees; this is
+    the common multi-RIC failure mode observed in Ringsted and Næstved traffic.
     """
     if not _looks_nr_dispatch(left) or not _looks_nr_dispatch(right):
         return False
@@ -74,7 +93,7 @@ def same_nr_burst(left: str, right: str) -> bool:
     if 24 <= len(shorter) <= 44:
         left_key = _dispatch_key(left)
         right_key = _dispatch_key(right)
-        if left_key and left_key == right_key:
+        if _compatible_dispatch_keys(left_key, right_key):
             prefix_length = min(28, len(shorter), len(longer))
             prefix_similarity = SequenceMatcher(
                 None, shorter[:prefix_length], longer[:prefix_length], autojunk=False
@@ -425,7 +444,7 @@ class PocsagBurstConsensus:
                 "suppressed_reason": "duplicate",
                 "duplicate_of": duplicate_of,
                 "delivery_eligible": False,
-                "decision_reason": f"samme NR-dispatch som tidligere melding #{duplicate_of}",
+                "decision_reason": f"samme M+S-dispatch som tidligere melding #{duplicate_of}",
             }
 
         is_noise = learned["classification"] == "noise"
