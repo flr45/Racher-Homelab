@@ -20,7 +20,13 @@ class AdaptiveFilterTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def _add(self, text: str, when: datetime, ric: str = "1111111", **extra) -> int:
-        decision = self.adaptive.evaluate(text, when.isoformat(), 30)
+        decision = self.adaptive.evaluate(
+            text,
+            when.isoformat(),
+            30,
+            ric=ric,
+            function=extra.get("function"),
+        )
         payload = {
             "received_at": when.isoformat(),
             "protocol": "POCSAG",
@@ -55,6 +61,50 @@ class AdaptiveFilterTests(unittest.TestCase):
         decision = self.adaptive.evaluate("Ny ukendt alarmtype", datetime.now(timezone.utc).isoformat(), 30)
         self.assertTrue(decision["delivery_eligible"])
         self.assertEqual(decision["relevance_class"], "unknown")
+
+    def test_observed_decoder_gibberish_is_suppressed(self):
+        samples = [
+            'WH?U*e?rp?98E?Ø"? · WHC+da?rp?98E?Ø"?',
+            '*UJ+da?rp?98E?Ø"?. · WHC+da?rp?98E?',
+            '??P+dA?Us?98E?Ø&?.??',
+            'W',
+            '/',
+            '*U*U*U*U*U*U*U*U*U*U',
+        ]
+        for sample in samples:
+            with self.subTest(sample=sample):
+                decision = self.adaptive.evaluate(sample, datetime.now(timezone.utc).isoformat(), 30)
+                self.assertFalse(decision["delivery_eligible"])
+                self.assertTrue(str(decision["suppressed_reason"]).startswith("decoder-"))
+
+    def test_raw_pdl_header_is_suppressed(self):
+        text = "0174760 05:17:51 20-08-26 POCSAG-1 ALPHA 1200"
+        decision = self.adaptive.evaluate(text, datetime.now(timezone.utc).isoformat(), 30)
+        self.assertFalse(decision["delivery_eligible"])
+        self.assertEqual(decision["suppressed_reason"], "decoder-header")
+
+    def test_alarm_marker_survives_partial_decoder_corruption(self):
+        text = "@7 NR RI(1+5)M+S??Ringstedet??BRANDALARM??4100 Ringsted"
+        decision = self.adaptive.evaluate(text, datetime.now(timezone.utc).isoformat(), 30, ric="0006240")
+        self.assertTrue(decision["delivery_eligible"])
+        self.assertIsNone(decision["suppressed_reason"])
+
+    def test_near_simultaneous_alarm_variant_is_duplicate_across_rics(self):
+        now = datetime.now(timezone.utc)
+        first = self._add(
+            "@7 NR RI(1+5)M+S??Ringstedet??BRANDALARM??4100 Ringsted",
+            now,
+            "0006240",
+        )
+        decision = self.adaptive.evaluate(
+            "@7 NR ri*1+5)M+S??Ringstedet??BRANDALARM??4100 Ringsted",
+            (now + timedelta(seconds=1)).isoformat(),
+            30,
+            ric="0005300",
+        )
+        self.assertFalse(decision["delivery_eligible"])
+        self.assertEqual(decision["suppressed_reason"], "duplicate")
+        self.assertEqual(decision["duplicate_of"], first)
 
     def test_three_noise_votes_teach_exact_noise_pattern(self):
         now = datetime.now(timezone.utc)
