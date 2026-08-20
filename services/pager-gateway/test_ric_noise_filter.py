@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from types import SimpleNamespace
 
-from ric_noise_filter import RicNoiseFilter
+from ric_noise_filter import RicNoiseFilter, install_live_ric_filter
 from storage import Storage
 
 
@@ -42,6 +42,28 @@ class RicNoiseFilterTests(unittest.TestCase):
     def test_invalid_ric_is_rejected(self):
         with self.assertRaises(ValueError):
             self.filters.add("ABC", "støj")
+
+    def test_live_filter_marks_blocked_ric_but_still_calls_raw_ingest(self):
+        seen = []
+
+        def original_ingest(event):
+            seen.append(event)
+            return 42
+
+        core = SimpleNamespace(
+            ingest_event=original_ingest,
+            app=SimpleNamespace(logger=SimpleNamespace(warning=lambda *args, **kwargs: None)),
+        )
+        install_live_ric_filter(core, self.filters)
+
+        blocked = SimpleNamespace(ric="0174760", decoder_noise_reason=None)
+        allowed = SimpleNamespace(ric="0006240", decoder_noise_reason=None)
+
+        self.assertEqual(core.ingest_event(blocked), 42)
+        self.assertEqual(blocked.decoder_noise_reason, "ric-filter")
+        self.assertEqual(core.ingest_event(allowed), 42)
+        self.assertIsNone(allowed.decoder_noise_reason)
+        self.assertEqual(seen, [blocked, allowed])
 
 
 if __name__ == "__main__":
