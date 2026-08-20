@@ -50,6 +50,7 @@ python3 "$SCRIPT_DIR/patch_hw_decode_diag.py" "$PDL_SRC"
 python3 "$SCRIPT_DIR/patch_rx_diag_periodic.py" "$PDL_SRC"
 python3 "$SCRIPT_DIR/patch_pocsag_512_diag.py" "$PDL_SRC"
 python3 "$SCRIPT_DIR/patch_pocsag_1200_preamble.py" "$PDL_SRC"
+python3 "$SCRIPT_DIR/patch_pocsag_1200_acquire.py" "$PDL_SRC"
 python3 "$SCRIPT_DIR/patch_pocsag_1200_diag.py" "$PDL_SRC"
 
 echo "[4/5] Bygger PDL..."
