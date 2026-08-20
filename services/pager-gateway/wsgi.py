@@ -19,6 +19,7 @@ finally:
     FileTailSource.start = _real_file_tail_start
 
 from alarm_rules import install_alarm_rules
+from burst_consensus import install_burst_consensus
 from operations import install_operations
 from pdl_multiline import install_pdl_multiline_tail
 from pushover_destinations import install_pushover_destinations
@@ -26,10 +27,11 @@ from rss_updates import install_rss_updates
 
 
 # Pushover destination management must wrap the core sender before alarm_rules
-# adds its alarm-time decoration. The resulting call chain is therefore:
-# alarm time -> managed recipients -> Pushover API.
+# adds its alarm-time decoration. Burst consensus then wraps the final ingest path
+# before the source starts, while operations wraps the eventual delivery calls.
 pushover_destinations = install_pushover_destinations(core)
 alarm_rules = install_alarm_rules(core)
+burst_consensus = install_burst_consensus(core, alarm_rules)
 operations = install_operations(core)
 rss_updates = install_rss_updates(core)
 install_pdl_multiline_tail(core.source)
