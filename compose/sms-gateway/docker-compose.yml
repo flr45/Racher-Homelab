@@ -14,6 +14,7 @@ services:
       DELETE_SMS_AFTER_IMPORT: ${SMS_DELETE_AFTER_IMPORT:-true}
       ALARM_SOURCE_WINDOW_MINUTES: ${SMS_ALARM_SOURCE_WINDOW_MINUTES:-10}
       SMS_DRY_RUN: ${SMS_DRY_RUN:-true}
+      SMS_GATEWAY_API_TOKEN: ${SMS_GATEWAY_API_TOKEN:-}
       VAGTBYTTE_ALARM_FEED_URL: ${VAGTBYTTE_ALARM_FEED_URL:-http://vagtbytte-web:3000/api/alarm-feed/ingest}
       VAGTBYTTE_ALARM_FEED_TOKEN: ${VAGTBYTTE_ALARM_FEED_INGEST_TOKEN}
       RACHER_MONITOR_SMS_TO: ${RACHER_MONITOR_SMS_TO:-}
@@ -25,7 +26,9 @@ services:
     volumes:
       - sms_gateway_data:/data
     ports:
-      - "127.0.0.1:${SMS_GATEWAY_PORT:-8090}:8080"
+      # Behold 127.0.0.1 som sikker standard. På den originale Pi sættes
+      # SMS_GATEWAY_BIND_HOST til Pi'ens Tailscale-IP (100.x.x.x), aldrig 0.0.0.0.
+      - "${SMS_GATEWAY_BIND_HOST:-127.0.0.1}:${SMS_GATEWAY_PORT:-8090}:8080"
     networks:
       - backend
     healthcheck:
