@@ -68,10 +68,15 @@ if [[ "$INPUT_MODE" == "fsk-usb" || "$INPUT_MODE" == "rs232" ]]; then
       export PDL_RS232_RX_DIAG="${PDL_RS232_RX_DIAG:-1}"
       export PDL_POCSAG_512_DIAG="${PDL_POCSAG_512_DIAG:-1}"
       export PDL_POCSAG_1200_DIAG="${PDL_POCSAG_1200_DIAG:-1}"
+      # Legacy PDW waits for >180 alternating 1200-baud transitions. A real
+      # Vordingborg dispatch reached 166 and was missed. Start sync search at
+      # >120 instead; the real POCSAG sync word and BCH checks still have to pass.
+      export PDL_POCSAG_1200_ACQUIRE_THRESHOLD="${PDL_POCSAG_1200_ACQUIRE_THRESHOLD:-120}"
       echo "FSK-USB input: $PDL_RS232_DEVICE"
       echo "FSK-USB rådiagnostik: PDL_RS232_RX_DIAG=$PDL_RS232_RX_DIAG"
       echo "POCSAG-512 diagnostik: PDL_POCSAG_512_DIAG=$PDL_POCSAG_512_DIAG"
       echo "POCSAG-1200 diagnostik: PDL_POCSAG_1200_DIAG=$PDL_POCSAG_1200_DIAG"
+      echo "POCSAG-1200 acquisition: threshold=$PDL_POCSAG_1200_ACQUIRE_THRESHOLD"
       break
     fi
     if [[ "$announced_wait" == "0" ]]; then
