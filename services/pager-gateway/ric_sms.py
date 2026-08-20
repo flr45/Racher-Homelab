@@ -131,12 +131,11 @@ class RicSmsStore:
 
     def update_config(self, *, enabled: Any, gateway_url: Any) -> dict[str, Any]:
         clean_url = normalize_gateway_url(gateway_url)
-        clean_enabled = bool(enabled)
         with self._lock, self.connect() as conn:
             conn.execute(
                 "INSERT INTO settings(key,value) VALUES ('ric_sms_enabled',?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                ("1" if clean_enabled else "0",),
+                ("1" if bool(enabled) else "0",),
             )
             conn.execute(
                 "INSERT INTO settings(key,value) VALUES ('ric_sms_gateway_url',?) "
@@ -152,10 +151,7 @@ class RicSmsStore:
                 "SELECT id, ric, phone, label, active, created_at, created_by "
                 "FROM ric_sms_rules ORDER BY ric, label COLLATE NOCASE, phone"
             ).fetchall()
-        return [
-            {**dict(row), "active": bool(row["active"])}
-            for row in rows
-        ]
+        return [{**dict(row), "active": bool(row["active"])} for row in rows]
 
     def add_rule(self, ric: Any, phone: Any, label: Any = "", active: Any = True,
                  created_by: int | None = None) -> dict[str, Any]:
@@ -255,11 +251,15 @@ class RicSmsStore:
             )
             conn.commit()
 
-    def list_deliveries(self, limit: int = 50) -> list[dict[str, Any]]:
-        limit = max(1, min(int(limit), 200))
+    def list_deliveries(self, limit: Any = 50) -> list[dict[str, Any]]:
+        try:
+            clean_limit = int(limit)
+        except (TypeError, ValueError):
+            clean_limit = 50
+        clean_limit = max(1, min(clean_limit, 200))
         with self._lock, self.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM ric_sms_deliveries ORDER BY id DESC LIMIT ?", (limit,)
+                "SELECT * FROM ric_sms_deliveries ORDER BY id DESC LIMIT ?", (clean_limit,)
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -271,18 +271,29 @@ class RicSmsRouter:
         self._original_notify = core.maybe_notify_pushover
         core.maybe_notify_pushover = self.notify_and_sms
 
-    @staticmethod
-    def _event_rics(event: dict[str, Any]) -> set[str]:
+    def _event_rics(self, message_id: int, event: dict[str, Any]) -> set[str]:
         result: set[str] = set()
-        values = event.get("burst_rics")
-        if isinstance(values, (list, tuple, set)):
-            result.update(str(value).strip() for value in values if str(value).strip())
         if event.get("ric"):
             result.add(str(event["ric"]).strip())
+        try:
+            with self.core.storage.connect() as conn:
+                rows = conn.execute(
+                    "SELECT ric FROM messages WHERE id=? OR duplicate_of=?",
+                    (int(message_id), int(message_id)),
+                ).fetchall()
+            result.update(
+                str(row["ric"] or "").strip()
+                for row in rows
+                if str(row["ric"] or "").strip()
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.core.app.logger.warning(
+                "Could not resolve burst RICs for SMS message %s: %s", message_id, exc
+            )
         return result
 
-    def _allowed_rics(self, event: dict[str, Any]) -> set[str]:
-        result = self._event_rics(event)
+    def _allowed_rics(self, message_id: int, event: dict[str, Any]) -> set[str]:
+        result = self._event_rics(message_id, event)
         ric_filter = getattr(self.core, "ric_noise_filter", None)
         if ric_filter is None:
             return result
@@ -292,8 +303,6 @@ class RicSmsRouter:
                 if not ric_filter.contains(ric):
                     allowed.add(ric)
             except Exception:
-                # Fail safe for SMS: if blocklist lookup itself fails, do not create
-                # a side-channel SMS that the main delivery policy may have blocked.
                 continue
         return allowed
 
@@ -321,14 +330,11 @@ class RicSmsRouter:
         except json.JSONDecodeError as exc:
             raise RuntimeError("SMS Gateway returnerede ugyldigt JSON") from exc
 
-    def _send_reserved(self, message_id: int, recipient: str, matched_rics: set[str],
-                       gateway_url: str, body: str) -> None:
+    def _send_reserved(self, message_id: int, recipient: str, gateway_url: str, body: str) -> None:
         try:
             result = self._post_outgoing(gateway_url, recipient, body)
             self.store.finish_delivery(
-                message_id, recipient,
-                status="queued",
-                gateway_message_id=result.get("id"),
+                message_id, recipient, status="queued", gateway_message_id=result.get("id")
             )
         except Exception as exc:  # noqa: BLE001
             self.store.finish_delivery(message_id, recipient, status="failed", error=exc)
@@ -344,7 +350,7 @@ class RicSmsRouter:
         config = self.store.config()
         if not config["enabled"] or not config["gateway_url"]:
             return 0
-        rics = self._allowed_rics(event)
+        rics = self._allowed_rics(message_id, event)
         if not rics:
             return 0
         rules = self.store.rules_for_rics(rics)
@@ -362,7 +368,7 @@ class RicSmsRouter:
                 continue
             threading.Thread(
                 target=self._send_reserved,
-                args=(message_id, recipient, matched_rics, config["gateway_url"], body),
+                args=(message_id, recipient, config["gateway_url"], body),
                 name=f"ric-sms-{message_id}",
                 daemon=True,
             ).start()
@@ -381,7 +387,9 @@ class RicSmsRouter:
         if not config["gateway_url"]:
             raise ValueError("SMS Gateway URL mangler")
         phone = normalize_phone(recipient)
-        return self._post_outgoing(config["gateway_url"], phone, "RACHER PAGER\nTest-SMS fra Pager Gateway")
+        return self._post_outgoing(
+            config["gateway_url"], phone, "RACHER PAGER\nTest-SMS fra Pager Gateway"
+        )
 
 
 def register_ric_sms_routes(core: Any, router: RicSmsRouter, auth_required: Callable) -> None:
@@ -470,7 +478,9 @@ def register_ric_sms_routes(core: Any, router: RicSmsRouter, auth_required: Call
         body = request.get_json(silent=True) or {}
         try:
             result = router.test_sms(body.get("phone", ""))
-        except (ValueError, RuntimeError) as exc:
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except RuntimeError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 502
         storage.add_audit(g.user["id"], "ric-sms-test", "test-SMS queued")
         return jsonify({"ok": True, "gateway": result})
