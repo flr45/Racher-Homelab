@@ -55,6 +55,7 @@ _ADAPTIVE_CARD_RE = re.compile(
 _ALARM_MAP_SCRIPT = '<script src="/static/alarm-map.js" defer></script>'
 _ALARM_FILTER_SCRIPT = '<script src="/static/alarm-filter-ui.js" defer></script>'
 _PUSHOVER_ADMIN_SCRIPT = '<script src="/static/pushover-admin.js" defer></script>'
+_RIC_SMS_ADMIN_SCRIPT = '<script src="/static/ric-sms-admin.js" defer></script>'
 _ALARM_FILTER_CARD = """
           <article class="card" id="alarm-filter-card">
             <span class="label">Manuelt alarmfilter</span>
@@ -128,6 +129,8 @@ def _enhance_home_html(body: str) -> str:
             helpers.append(_ALARM_FILTER_SCRIPT)
         if is_admin_page and "pushover-admin.js" not in body:
             helpers.append(_PUSHOVER_ADMIN_SCRIPT)
+        if is_admin_page and "ric-sms-admin.js" not in body:
+            helpers.append(_RIC_SMS_ADMIN_SCRIPT)
         if "alarm-map.js" not in body:
             helpers.append(_ALARM_MAP_SCRIPT)
         if helpers:
