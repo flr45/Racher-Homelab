@@ -15,10 +15,10 @@ DEFAULT_FILTERS: tuple[tuple[str, str], ...] = (
 class RicNoiseFilter:
     """Persistent RIC deny-list for known diagnostic/noise capcodes.
 
-    Matching messages remain untouched in the raw message history. The filter is
-    used to keep known technical RIC traffic out of the adaptive learning queue,
-    so operator feedback is reserved for traffic that can actually teach the
-    relevance model something useful.
+    Matching messages remain untouched in the raw message history. The same
+    deny-list is used by live ingestion and the adaptive learning queue: a
+    blocked RIC is retained for diagnostics, but is not delivered as an alarm,
+    Web Push/Pushover notification or learning-review item.
     """
 
     def __init__(self, db_path: str) -> None:
@@ -110,3 +110,30 @@ class RicNoiseFilter:
         blocked = self.filtered_rics()
         result = [row for row in rows if str(row.get("ric") or "").strip() not in blocked]
         return result[: max(1, int(limit))]
+
+
+def install_live_ric_filter(core: Any, ric_noise: RicNoiseFilter) -> None:
+    """Wrap ``core.ingest_event`` so blocked RICs are retained but never delivered.
+
+    The wrapper intentionally fails open if the SQLite lookup itself fails: a
+    filter/database problem must not make a real emergency page disappear.
+    """
+    if getattr(core, "_ric_noise_filter_installed", False):
+        return
+
+    original_ingest = core.ingest_event
+
+    def filtered_ingest(event):
+        try:
+            if ric_noise.contains(getattr(event, "ric", None)):
+                event.decoder_noise_reason = "ric-filter"
+        except Exception as exc:  # fail open for alarm delivery
+            try:
+                core.app.logger.warning("RIC blocklist lookup failed: %s", exc)
+            except Exception:
+                pass
+        return original_ingest(event)
+
+    core.ingest_event = filtered_ingest
+    core._ric_noise_filter_installed = True
+    core.ric_noise_filter = ric_noise
