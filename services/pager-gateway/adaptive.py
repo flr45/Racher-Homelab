@@ -15,7 +15,18 @@ _WS_RE = re.compile(r"\s+")
 _DIGIT_RUN_RE = re.compile(r"\d+")
 _DUPLICATE_PUNCT_RE = re.compile(r"[^\wÆØÅæøå]+", re.UNICODE)
 _ALPHA_WORD_RE = re.compile(r"[A-Za-zÆØÅæøå]{2,}")
+_LONG_ALPHA_WORD_RE = re.compile(r"[A-Za-zÆØÅæøå]{3,}")
 _DECODER_CODE_RE = re.compile(r"^[0-9A-Fa-f*+\-?/\\\[\]{}|ÆØÅæøå\s]{3,120}$")
+_ALARM_HINT_RE = re.compile(
+    r"(?:\b(?:BRAND(?:ALARM)?|ALARM|ISL|VSBV|ØF|VCT)\b|M\+S)",
+    re.I,
+)
+_PDL_HEADER_RE = re.compile(
+    r"^\s*\d{7}\s+\d{2}:\d{2}:\d{2}\s+\d{2}-\d{2}-\d{2}\s+"
+    r"POCSAG-\d+\s+(?:ALPHA|NUMERIC)\s+\d+\s*$",
+    re.I,
+)
+_REPEATED_DECODER_RE = re.compile(r"(?:\*?[Uu]){5,}")
 
 
 class AdaptiveFilter:
@@ -93,16 +104,56 @@ class AdaptiveFilter:
         return _WS_RE.sub(" ", value).strip()
 
     @staticmethod
-    def automatic_noise_reason(text: Any) -> str | None:
+    def _has_alarm_hint(text: Any) -> bool:
+        return bool(_ALARM_HINT_RE.search(str(text or "")))
+
+    @classmethod
+    def automatic_noise_reason(cls, text: Any) -> str | None:
         value = str(text or "").strip()
+        if not value:
+            return "decoder-empty"
+
+        # Strong alarm markers win over the generic corruption heuristics below.
+        # A damaged but still recognisable alarm must never be discarded merely
+        # because PDL replaced a few characters with question marks.
+        if cls._has_alarm_hint(value):
+            return None
+
+        if _PDL_HEADER_RE.fullmatch(value):
+            return "decoder-header"
+        if len(value) <= 2:
+            return "decoder-fragment"
+        if _REPEATED_DECODER_RE.search(value):
+            return "decoder-pattern"
+
         words = _ALPHA_WORD_RE.findall(value)
         if not words and _DECODER_CODE_RE.fullmatch(value):
             return "decoder-code"
+
+        compact = "".join(char for char in value if not char.isspace())
+        if compact:
+            question_marks = compact.count("?")
+            symbol_count = sum(
+                1
+                for char in compact
+                if not char.isalnum() and char not in "ÆØÅæøå"
+            )
+            long_words = _LONG_ALPHA_WORD_RE.findall(value)
+            question_ratio = question_marks / len(compact)
+            symbol_ratio = symbol_count / len(compact)
+
+            # Typical failed POCSAG alpha payloads look like
+            # "WH?U*e?rp?98E?...". Keep the raw row in SQLite, but do not
+            # generate a push notification for text with this corruption shape.
+            if question_marks >= 4 and question_ratio >= 0.09:
+                return "decoder-gibberish"
+            if question_marks >= 2 and symbol_ratio >= 0.30 and len(long_words) <= 1:
+                return "decoder-gibberish"
+
         if (
             len(value) <= 48
             and value[:1].islower()
             and len(words) <= 6
-            and not re.search(r"\b(?:BRAND|ALARM|ISL|VSBV|ØF|VCT)\b", value, re.I)
         ):
             return "decoder-fragment"
         return None
@@ -247,6 +298,7 @@ class AdaptiveFilter:
         fuzzy_window = min(window, 8)
         if len(normalized) < 12:
             return None
+        current_alarm_hint = self._has_alarm_hint(text)
         for row in rows:
             previous = self._parse_moment(row["received_at"])
             if previous is None:
@@ -254,14 +306,29 @@ class AdaptiveFilter:
             delta = (current - previous).total_seconds()
             if delta < 0 or delta > fuzzy_window:
                 continue
-            if self._same_signal(row, ric, function):
-                previous_text = self.duplicate_text(row["message"])
-                if len(previous_text) >= 12:
-                    shorter, longer = sorted((normalized, previous_text), key=len)
-                    containment = len(shorter) >= 14 and shorter in longer
-                    ratio = SequenceMatcher(None, normalized, previous_text, autojunk=False).ratio()
+
+            previous_raw = str(row["message"] or "")
+            previous_text = self.duplicate_text(previous_raw)
+            if len(previous_text) >= 12:
+                shorter, longer = sorted((normalized, previous_text), key=len)
+                containment = len(shorter) >= 14 and shorter in longer
+                ratio = SequenceMatcher(None, normalized, previous_text, autojunk=False).ratio()
+
+                if self._same_signal(row, ric, function):
                     if containment or ratio >= 0.92:
                         return int(row["id"])
+                elif (
+                    delta <= 4
+                    and current_alarm_hint
+                    and self._has_alarm_hint(previous_raw)
+                    and (containment or ratio >= 0.86)
+                ):
+                    # The same dispatch is often transmitted to several RICs.
+                    # PDL may decode each copy with tiny bit differences. Treat
+                    # those near-simultaneous, strongly alarm-like variants as
+                    # one notification even when the RIC differs.
+                    return int(row["id"])
+
             if bool(row["delivery_eligible"]):
                 break
         return None
@@ -386,10 +453,15 @@ class AdaptiveFilter:
             noise = conn.execute(
                 "SELECT COUNT(*) AS c FROM messages WHERE suppressed_reason='noise' OR suppressed_reason LIKE 'decoder-%'"
             ).fetchone()["c"]
-            duplicates = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE duplicate_of IS NOT NULL").fetchone()["c"]
+            duplicates = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE suppressed_reason='duplicate'").fetchone()["c"]
+            learned = conn.execute(
+                """SELECT COUNT(*) AS c FROM adaptive_patterns
+                   WHERE (kind='exact' AND noise_votes>=3) OR (kind='template' AND noise_votes>=10)"""
+            ).fetchone()["c"]
         return {
             "messages": int(messages),
             "feedback": int(feedback),
-            "noise": int(noise),
-            "duplicates": int(duplicates),
+            "noise_suppressed": int(noise),
+            "duplicates_suppressed": int(duplicates),
+            "learned_noise_patterns": int(learned),
         }
