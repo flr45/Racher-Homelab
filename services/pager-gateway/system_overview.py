@@ -119,7 +119,30 @@ class SystemOverview:
         sms_ok = bool(sms.get("reachable")) and str(sms.get("status") or "").lower() == "ok"
         modem_ok = str(sms.get("modem_state") or "").lower() == "online"
 
-        chain = [
+        chain: list[dict[str, str]] = []
+        boot_state = str(runtime.get("boot_verify_state") or "").lower()
+        if boot_state:
+            boot_ok = boot_state == "ok"
+            boot_at = str(runtime.get("boot_verify_at") or "")
+            attempts = str(runtime.get("boot_verify_attempts") or "")
+            detail = {
+                "ok": "Seneste opstart bestod hele end-to-end kontrollen",
+                "waiting": "Boot-kontrollen venter stadig på et eller flere led",
+                "degraded": "Lokal Pager startede, men ekstern SMS/GSM-kæde var ikke helt klar",
+                "failed": "Et lokalt kritisk Pager-led kom ikke korrekt op efter boot",
+            }.get(boot_state, f"Status {boot_state}")
+            suffix = " · ".join(part for part in [f"forsøg {attempts}" if attempts else "", boot_at] if part)
+            if suffix:
+                detail += " · " + suffix
+            chain.append(self._item(
+                "boot-verify",
+                "Seneste boot-verifikation",
+                boot_ok,
+                detail,
+                warning=boot_state in {"waiting", "degraded"},
+            ))
+
+        chain.extend([
             self._item(
                 "fsk",
                 "FSK-USB / scanner",
@@ -182,7 +205,7 @@ class SystemOverview:
                 ),
                 warning=bool(sms.get("reachable")) and not modem_ok,
             ),
-        ]
+        ])
 
         local_ready = fsk_connected and fsk_in_use and pdl_ok and gateway_ok and agent_ok
         end_to_end_ready = local_ready and bool(sms.get("reachable")) and sms_ok and modem_ok
@@ -192,6 +215,7 @@ class SystemOverview:
             "end_to_end_ready": end_to_end_ready,
             "chain": chain,
             "sms": sms,
+            "boot_verify_state": boot_state,
             "host_uptime_seconds": runtime.get("host_uptime_seconds") or "",
         }
 
