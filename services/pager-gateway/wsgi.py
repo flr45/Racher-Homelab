@@ -22,6 +22,7 @@ from alarm_feed_v2 import install_alarm_feed_v2
 from alarm_rules import install_alarm_rules
 from burst_consensus import install_burst_consensus
 from operations import install_operations
+from pager_gibberish_filter import install_gibberish_filter
 from pdl_multiline import install_pdl_multiline_tail
 from pushover_destinations import install_pushover_destinations
 from ric_sms_remote import install_ric_sms
@@ -30,8 +31,10 @@ from system_overview import install_system_overview
 
 
 # Pushover destination management must wrap the core sender before alarm_rules
-# adds its alarm-time decoration. Burst consensus wraps the final ingest path.
-# Alarmfeed v2 then observes the stored duplicate result and may promote a cleaner
+# adds its alarm-time decoration. Burst consensus wraps the normal ingest path.
+# The gibberish filter sits outside consensus so obviously corrupt live PDL alpha
+# payloads are marked as decoder noise before they can become public alarms.
+# Alarmfeed v2 then observes stored duplicate results and may promote a cleaner
 # copy to the already-approved root display row without changing raw history.
 # Operations owns delivery/quality telemetry; system overview extends that status
 # with the actual end-to-end scanner -> SMS/GSM chain. RIC SMS is intentionally
@@ -39,6 +42,7 @@ from system_overview import install_system_overview
 pushover_destinations = install_pushover_destinations(core)
 alarm_rules = install_alarm_rules(core)
 burst_consensus = install_burst_consensus(core, alarm_rules)
+gibberish_filter = install_gibberish_filter(core)
 alarm_feed_v2 = install_alarm_feed_v2(core)
 operations = install_operations(core)
 system_overview = install_system_overview(core)
