@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import shutil
@@ -49,15 +50,18 @@ def http_json(url: str, timeout: float = 2.5) -> dict[str, Any] | None:
         return payload if isinstance(payload, dict) else None
     except (
         TimeoutError,
+        ConnectionError,
+        http.client.HTTPException,
         urllib.error.URLError,
         urllib.error.HTTPError,
         json.JSONDecodeError,
         ValueError,
     ):
-        # During boot, Tailscale/network/Gunicorn can accept a TCP connection a
-        # few seconds before the peer is ready to answer HTTP. urllib may raise a
-        # bare TimeoutError while reading the HTTP status line; treat that exactly
-        # like an ordinary not-ready probe so the outer boot loop can retry.
+        # During boot, Docker/Gunicorn/Tailscale can expose a socket before the
+        # service behind it is ready to complete HTTP. Python can surface that as
+        # a bare timeout, connection reset/close (RemoteDisconnected), malformed
+        # early HTTP response or the usual urllib errors. All are transient probe
+        # failures here: return not-ready and let the outer boot loop retry.
         return None
 
 
