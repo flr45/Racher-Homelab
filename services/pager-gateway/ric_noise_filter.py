@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -11,6 +12,25 @@ DEFAULT_FILTERS: tuple[tuple[str, str], ...] = (
     ("0174760", "Fast diagnostik / decoder-test"),
 )
 
+# A blocked/noisy RIC can occasionally be the result of address-bit corruption
+# during a genuine dispatch. If the alpha payload still contains strong operational
+# structure, fail open and let the normal quality/dedupe pipeline decide. This is
+# intentionally narrow: ordinary numeric diagnostic traffic never matches it.
+_OPERATIONAL_RESCUE_RE = re.compile(
+    r"(?:\b(?:ISL|BRAND(?:ALARM)?|ALARM|VSBV|ØF|VCT)\b|M\+[SV])",
+    re.I,
+)
+_ALPHA_RE = re.compile(r"[A-Za-zÆØÅæøå]")
+
+
+def _looks_operational_alarm(message: Any) -> bool:
+    value = str(message or "").strip()
+    if len(value) < 8 or not _OPERATIONAL_RESCUE_RE.search(value):
+        return False
+    # Require enough alphabetic payload that a chance three-letter corruption on
+    # the diagnostic RIC cannot bypass the deny-list by itself.
+    return len(_ALPHA_RE.findall(value)) >= 6
+
 
 class RicNoiseFilter:
     """Persistent RIC deny-list for known diagnostic/noise capcodes.
@@ -18,7 +38,8 @@ class RicNoiseFilter:
     Matching messages remain untouched in the raw message history. The same
     deny-list is used by live ingestion and the adaptive learning queue: a
     blocked RIC is retained for diagnostics, but is not delivered as an alarm,
-    Web Push/Pushover notification or learning-review item.
+    Web Push/Pushover notification or learning-review item unless a damaged
+    payload still carries strong operational alarm structure.
     """
 
     def __init__(self, db_path: str) -> None:
@@ -108,15 +129,23 @@ class RicNoiseFilter:
 
     def filter_review_rows(self, rows: list[dict[str, Any]], limit: int = 60) -> list[dict[str, Any]]:
         blocked = self.filtered_rics()
-        result = [row for row in rows if str(row.get("ric") or "").strip() not in blocked]
+        result = [
+            row
+            for row in rows
+            if str(row.get("ric") or "").strip() not in blocked
+            or _looks_operational_alarm(row.get("message"))
+        ]
         return result[: max(1, int(limit))]
 
 
 def install_live_ric_filter(core: Any, ric_noise: RicNoiseFilter) -> None:
-    """Wrap ``core.ingest_event`` so blocked RICs are retained but never delivered.
+    """Wrap ``core.ingest_event`` so blocked RICs are retained but normally not delivered.
 
     The wrapper intentionally fails open if the SQLite lookup itself fails: a
-    filter/database problem must not make a real emergency page disappear.
+    filter/database problem must not make a real emergency page disappear. It
+    also fails open for a blocked RIC when the payload still contains strong
+    operational alarm structure; address corruption during a real dispatch must
+    not let a diagnostic deny-list hide the whole incident.
     """
     if getattr(core, "_ric_noise_filter_installed", False):
         return
@@ -126,7 +155,22 @@ def install_live_ric_filter(core: Any, ric_noise: RicNoiseFilter) -> None:
     def filtered_ingest(event):
         try:
             if ric_noise.contains(getattr(event, "ric", None)):
-                event.decoder_noise_reason = "ric-filter"
+                existing_reason = str(getattr(event, "decoder_noise_reason", None) or "").strip()
+                message = getattr(event, "message", "")
+                if existing_reason:
+                    # A stronger upstream decoder-quality decision already exists.
+                    # Never replace it merely because the RIC is also blocklisted.
+                    pass
+                elif _looks_operational_alarm(message):
+                    try:
+                        core.app.logger.warning(
+                            "RIC blocklist bypassed for operational alarm fragment: ric=%s",
+                            getattr(event, "ric", None),
+                        )
+                    except Exception:
+                        pass
+                else:
+                    event.decoder_noise_reason = "ric-filter"
         except Exception as exc:  # fail open for alarm delivery
             try:
                 core.app.logger.warning("RIC blocklist lookup failed: %s", exc)
