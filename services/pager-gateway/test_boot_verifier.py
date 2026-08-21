@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import os
 import sqlite3
 import tempfile
@@ -35,6 +36,17 @@ class BootVerifierTests(unittest.TestCase):
         ):
             self.assertIsNone(
                 boot_verifier.http_json("http://100.111.28.12:8090/health", timeout=0.1)
+            )
+
+    def test_http_remote_disconnect_is_treated_as_not_ready(self):
+        with patch(
+            "boot_verifier.urllib.request.urlopen",
+            side_effect=http.client.RemoteDisconnected(
+                "Remote end closed connection without response"
+            ),
+        ):
+            self.assertIsNone(
+                boot_verifier.http_json("http://127.0.0.1:8088/healthz", timeout=0.1)
             )
 
     def test_end_to_end_boot_check_can_become_ready(self):
