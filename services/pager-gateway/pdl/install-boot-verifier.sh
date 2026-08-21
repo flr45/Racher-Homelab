@@ -4,15 +4,15 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 RUNTIME_REPO="${PAGER_RUNTIME_REPO:-/opt/racher-pager/runtime-repo}"
 DATA_DIR="${PAGER_DATA_HOST_PATH:-/var/lib/racher-pager}"
-INSTALL_DIR="${PAGER_BOOT_VERIFY_INSTALL_DIR:-/opt/racher-pager/boot-verifier}"
 UNIT_PATH="/etc/systemd/system/racher-pager-boot-verify.service"
 SOURCE="$REPO_ROOT/services/pager-gateway/boot_verifier.py"
+RUNTIME_SOURCE="$RUNTIME_REPO/services/pager-gateway/boot_verifier.py"
 
 [[ "$(uname -s)" == "Linux" ]] || { echo "Boot-verifikation installeres kun på Linux." >&2; exit 1; }
 [[ -f "$SOURCE" ]] || { echo "Mangler $SOURCE" >&2; exit 1; }
+[[ -f "$RUNTIME_SOURCE" ]] || { echo "Mangler runtime-fil: $RUNTIME_SOURCE" >&2; exit 1; }
 
-sudo mkdir -p "$INSTALL_DIR" "$DATA_DIR"
-sudo install -m 0755 "$SOURCE" "$INSTALL_DIR/boot_verifier.py"
+sudo mkdir -p "$DATA_DIR"
 
 sudo tee "$UNIT_PATH" >/dev/null <<EOF
 [Unit]
@@ -23,10 +23,10 @@ Wants=network-online.target docker.service racher-pdl.service racher-pager-syste
 [Service]
 Type=oneshot
 User=root
-WorkingDirectory=$INSTALL_DIR
+WorkingDirectory=$RUNTIME_REPO/services/pager-gateway
 Environment=PAGER_DB_PATH=$DATA_DIR/pager.db
 EnvironmentFile=-/etc/racher-pager/gateway.env
-ExecStart=/usr/bin/python3 $INSTALL_DIR/boot_verifier.py
+ExecStart=/usr/bin/python3 $RUNTIME_SOURCE
 TimeoutStartSec=130s
 NoNewPrivileges=true
 ProtectHome=true
@@ -47,5 +47,6 @@ sudo systemctl restart racher-pager-boot-verify.service || true
 
 echo "Racher Pager boot-verifikation er installeret."
 echo "Service: racher-pager-boot-verify.service"
+echo "Kode:    $RUNTIME_SOURCE"
 echo "Status:  systemctl status racher-pager-boot-verify.service --no-pager"
 echo "Resultat gemmes i runtime_status som boot_verify_* og vises i Systemoverblik."
