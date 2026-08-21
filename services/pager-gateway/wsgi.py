@@ -26,20 +26,22 @@ from pdl_multiline import install_pdl_multiline_tail
 from pushover_destinations import install_pushover_destinations
 from ric_sms_remote import install_ric_sms
 from rss_updates import install_rss_updates
+from system_overview import install_system_overview
 
 
 # Pushover destination management must wrap the core sender before alarm_rules
 # adds its alarm-time decoration. Burst consensus wraps the final ingest path.
 # Alarmfeed v2 then observes the stored duplicate result and may promote a cleaner
 # copy to the already-approved root display row without changing raw history.
-# Operations wraps the Pushover channel first; RIC SMS is intentionally installed
-# afterwards so the SMS trigger remains independent of whether Pushover is enabled.
-# This also lets one multi-RIC burst create only one SMS per configured phone.
+# Operations owns delivery/quality telemetry; system overview extends that status
+# with the actual end-to-end scanner -> SMS/GSM chain. RIC SMS is intentionally
+# installed afterwards so its trigger remains independent of Pushover state.
 pushover_destinations = install_pushover_destinations(core)
 alarm_rules = install_alarm_rules(core)
 burst_consensus = install_burst_consensus(core, alarm_rules)
 alarm_feed_v2 = install_alarm_feed_v2(core)
 operations = install_operations(core)
+system_overview = install_system_overview(core)
 ric_sms = install_ric_sms(core, core.auth_required)
 rss_updates = install_rss_updates(core)
 install_pdl_multiline_tail(core.source)
@@ -61,6 +63,7 @@ _ALARM_MAP_SCRIPT = '<script src="/static/alarm-map.js" defer></script>'
 _ALARM_FILTER_SCRIPT = '<script src="/static/alarm-filter-ui.js" defer></script>'
 _PUSHOVER_ADMIN_SCRIPT = '<script src="/static/pushover-admin.js" defer></script>'
 _RIC_SMS_ADMIN_SCRIPT = '<script src="/static/ric-sms-admin.js" defer></script>'
+_SYSTEM_OVERVIEW_SCRIPT = '<script src="/static/system-overview.js" defer></script>'
 _ALARM_FILTER_CARD = """
           <article class="card" id="alarm-filter-card">
             <span class="label">Manuelt alarmfilter</span>
@@ -136,6 +139,8 @@ def _enhance_home_html(body: str) -> str:
             helpers.append(_PUSHOVER_ADMIN_SCRIPT)
         if is_admin_page and "ric-sms-admin.js" not in body:
             helpers.append(_RIC_SMS_ADMIN_SCRIPT)
+        if is_admin_page and "system-overview.js" not in body:
+            helpers.append(_SYSTEM_OVERVIEW_SCRIPT)
         if "alarm-map.js" not in body:
             helpers.append(_ALARM_MAP_SCRIPT)
         if helpers:
