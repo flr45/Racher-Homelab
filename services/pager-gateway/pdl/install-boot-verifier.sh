@@ -23,6 +23,7 @@ Wants=network-online.target docker.service racher-pdl.service racher-pager-syste
 [Service]
 Type=oneshot
 User=root
+UMask=0007
 WorkingDirectory=$RUNTIME_REPO/services/pager-gateway
 Environment=PAGER_DB_PATH=$DATA_DIR/pager.db
 EnvironmentFile=-/etc/racher-pager/gateway.env
