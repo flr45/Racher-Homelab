@@ -47,7 +47,17 @@ def http_json(url: str, timeout: float = 2.5) -> dict[str, Any] | None:
             raw = response.read().decode("utf-8")
         payload = json.loads(raw) if raw else {}
         return payload if isinstance(payload, dict) else None
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError):
+    except (
+        TimeoutError,
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+        json.JSONDecodeError,
+        ValueError,
+    ):
+        # During boot, Tailscale/network/Gunicorn can accept a TCP connection a
+        # few seconds before the peer is ready to answer HTTP. urllib may raise a
+        # bare TimeoutError while reading the HTTP status line; treat that exactly
+        # like an ordinary not-ready probe so the outer boot loop can retry.
         return None
 
 
