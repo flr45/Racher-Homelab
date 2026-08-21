@@ -11,7 +11,7 @@ from pathlib import Path
 
 import serial
 
-from gsm0338 import encode_gsm0338
+from gsm0338 import encode_gsm0338, prepare_gsm0338_sms
 from sms_pdu import parse_cmgl_response
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -179,6 +179,10 @@ def initialize(port):
 
 
 def send_outgoing_sms(port, recipient, body):
+    body = prepare_gsm0338_sms(body)
+    if not body:
+        raise ValueError("SMS-teksten er tom efter GSM 03.38-normalisering")
+
     if SMS_DRY_RUN:
         log.info("DRY RUN SMS til %s: %s", recipient, body)
         return

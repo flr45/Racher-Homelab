@@ -1,0 +1,21 @@
+name: SMS Gateway CI
+
+on:
+  pull_request:
+    paths:
+      - 'services/sms-gateway/**'
+      - 'compose/sms-gateway/**'
+      - '.github/workflows/sms-gateway-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-auth-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose
+        run: docker compose -f compose/sms-gateway/docker-compose.yml config --quiet
+        env:
+          VAGTBYTTE_ALARM_FEED_INGEST_TOKEN: ci-placeholder
+      - name: Build SMS gateway
+        run: docker build -t racher-sms-gateway-ci services/sms-gateway

@@ -1,0 +1,44 @@
+services:
+  pager-gateway:
+    build:
+      context: ../../services/pager-gateway
+    container_name: racher-pager-gateway
+    restart: unless-stopped
+    init: true
+    # Normal appliance starts go through pager-compose.sh, which supplies the
+    # state-directory uid/gid. Root is only the compatibility fallback for the
+    # one upgrade where the previously-installed helper does not know these vars;
+    # install-system-agent.sh immediately recreates the container unprivileged.
+    user: "${PAGER_RUNTIME_UID:-0}:${PAGER_RUNTIME_GID:-0}"
+    read_only: true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    environment:
+      PAGER_DATA_DIR: /data
+      PORT: 8088
+      PAGER_COOKIE_SECURE: ${PAGER_COOKIE_SECURE:-0}
+      PAGER_VAPID_SUBJECT: ${PAGER_VAPID_SUBJECT:-mailto:admin@racher.local}
+      PAGER_SMS_GATEWAY_URL: ${PAGER_SMS_GATEWAY_URL:-}
+      PAGER_SMS_GATEWAY_TOKEN: ${PAGER_SMS_GATEWAY_TOKEN:-}
+    volumes:
+      # På den dedikerede Pi sættes PAGER_DATA_HOST_PATH=/var/lib/racher-pager,
+      # så den native PDL-service, host-agenten og webgatewayen deler data.
+      - ${PAGER_DATA_HOST_PATH:-../../data/pager-gateway}:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    ports:
+      - "${PAGER_GATEWAY_PORT:-8088}:8088"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

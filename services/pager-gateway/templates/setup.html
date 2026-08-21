@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0d10">
+  <title>Første opsætning · Racher Pager Gateway</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="auth-card">
+      <div class="eyebrow">FØRSTE OPSÆTNING</div>
+      <h1>Opret administrator</h1>
+      <p class="muted">Denne side er kun tilgængelig, indtil den første konto er oprettet. Derefter kan kun en administrator oprette flere brugere.</p>
+      {% if error %}<div class="alert danger">{{ error }}</div>{% endif %}
+      <form method="post" class="auth-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Navn<input name="display_name" autocomplete="name" required></label>
+        <label>Brugernavn<input name="username" autocomplete="username" minlength="3" maxlength="40" required></label>
+        <label>Adgangskode<input type="password" name="password" autocomplete="new-password" minlength="10" required></label>
+        <button class="primary" type="submit">Opret administrator</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

@@ -30,6 +30,63 @@ _DEFAULT_REVERSE = {
 }
 _EXTENSION_REVERSE = {character: index for index, character in _EXTENSION_ALPHABET.items()}
 
+# Pager/public text may contain typographic Unicode which the Huawei modem cannot
+# send while configured for GSM 03.38 text mode. Preserve Danish GSM characters,
+# normalize common punctuation and replace any remaining unsupported character
+# instead of failing an otherwise valid alarm SMS.
+_TEXT_REPLACEMENTS = {
+    "\u00a0": " ",
+    "\u00b7": "-",
+    "\u2022": "-",
+    "\u2010": "-",
+    "\u2011": "-",
+    "\u2012": "-",
+    "\u2013": "-",
+    "\u2014": "-",
+    "\u2212": "-",
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201c": '"',
+    "\u201d": '"',
+    "\u2026": "...",
+    "\t": " ",
+}
+
+
+def _gsm0338_units(character: str) -> int | None:
+    if character in _DEFAULT_REVERSE:
+        return 1
+    if character in _EXTENSION_REVERSE:
+        return 2
+    return None
+
+
+def prepare_gsm0338_sms(value: str, max_septets: int = 160) -> str:
+    """Return safe single-part GSM 03.38 text without raising on pager noise.
+
+    Extension-table characters consume two septets. The returned text therefore
+    respects the actual GSM single-SMS budget rather than merely Python character
+    length. Unsupported characters are replaced with ``?``.
+    """
+
+    budget = max(1, int(max_septets))
+    output: list[str] = []
+    used = 0
+
+    for source_character in str(value or ""):
+        replacement = _TEXT_REPLACEMENTS.get(source_character, source_character)
+        for character in replacement:
+            units = _gsm0338_units(character)
+            if units is None:
+                character = "?"
+                units = 1
+            if used + units > budget:
+                return "".join(output).rstrip()
+            output.append(character)
+            used += units
+
+    return "".join(output).rstrip()
+
 
 def decode_septets(values) -> str:
     """Decode unpacked GSM 03.38 septets."""
