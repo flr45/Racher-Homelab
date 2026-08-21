@@ -28,6 +28,15 @@ class BootVerifierTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_http_timeout_is_treated_as_not_ready(self):
+        with patch(
+            "boot_verifier.urllib.request.urlopen",
+            side_effect=TimeoutError("timed out"),
+        ):
+            self.assertIsNone(
+                boot_verifier.http_json("http://100.111.28.12:8090/health", timeout=0.1)
+            )
+
     def test_end_to_end_boot_check_can_become_ready(self):
         def fake_http(url, timeout=0):
             if url.endswith("/healthz"):
@@ -46,6 +55,25 @@ class BootVerifierTests(unittest.TestCase):
         self.assertTrue(result["end_to_end_ready"])
         self.assertTrue(result["checks"]["tailscale"])
         self.assertTrue(result["checks"]["gsm_modem"])
+
+    def test_transient_sms_timeout_does_not_crash_check(self):
+        def fake_http(url, timeout=0):
+            if url.endswith("/healthz"):
+                return {"ok": True}
+            return None
+
+        with patch.object(boot_verifier, "DB_PATH", self.db), \
+             patch.object(boot_verifier, "SMS_GATEWAY_URL", "http://100.111.28.12:8090"), \
+             patch.object(boot_verifier, "service_active", return_value=True), \
+             patch.object(boot_verifier, "http_json", side_effect=fake_http), \
+             patch.object(boot_verifier, "tailscale_status", return_value={"installed": True, "service": "active", "ip": "100.81.169.71"}):
+            result = boot_verifier.check_once()
+
+        self.assertTrue(result["local_ready"])
+        self.assertFalse(result["remote_ready"])
+        self.assertFalse(result["end_to_end_ready"])
+        self.assertFalse(result["checks"]["sms_gateway"])
+        self.assertFalse(result["checks"]["gsm_modem"])
 
     def test_result_is_persisted_for_dashboard(self):
         result = {
