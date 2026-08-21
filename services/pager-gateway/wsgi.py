@@ -18,6 +18,7 @@ try:
 finally:
     FileTailSource.start = _real_file_tail_start
 
+from alarm_feed_v2 import install_alarm_feed_v2
 from alarm_rules import install_alarm_rules
 from burst_consensus import install_burst_consensus
 from operations import install_operations
@@ -29,12 +30,15 @@ from rss_updates import install_rss_updates
 
 # Pushover destination management must wrap the core sender before alarm_rules
 # adds its alarm-time decoration. Burst consensus wraps the final ingest path.
+# Alarmfeed v2 then observes the stored duplicate result and may promote a cleaner
+# copy to the already-approved root display row without changing raw history.
 # Operations wraps the Pushover channel first; RIC SMS is intentionally installed
 # afterwards so the SMS trigger remains independent of whether Pushover is enabled.
 # This also lets one multi-RIC burst create only one SMS per configured phone.
 pushover_destinations = install_pushover_destinations(core)
 alarm_rules = install_alarm_rules(core)
 burst_consensus = install_burst_consensus(core, alarm_rules)
+alarm_feed_v2 = install_alarm_feed_v2(core)
 operations = install_operations(core)
 ric_sms = install_ric_sms(core, core.auth_required)
 rss_updates = install_rss_updates(core)
