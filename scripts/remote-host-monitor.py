@@ -55,6 +55,9 @@ def save_state(value: dict) -> None:
 def api_json(url: str, method: str = "GET", payload: dict | None = None) -> dict | None:
     data = None
     headers = {}
+    token = os.getenv("SMS_GATEWAY_API_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
