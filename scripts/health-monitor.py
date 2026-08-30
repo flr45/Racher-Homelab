@@ -211,6 +211,38 @@ def collect_issues() -> list[str]:
     return sorted(set(issues))
 
 
+def collect_host_status() -> dict:
+    """Collect the same sanitized host snapshot used by the SMS status command."""
+
+    script = ROOT / "scripts" / "host-status.py"
+    try:
+        result = run(["python3", str(script), "--json"], timeout=20)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "hostname": os.uname().nodename,
+            "status": "unknown",
+            "issues": [f"Host-status kunne ikke køres: {exc}"],
+        }
+
+    for line in reversed(result.stdout.splitlines()):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+
+    detail = (result.stderr or result.stdout).strip().splitlines()
+    reason = detail[-1] if detail else f"host-status exit {result.returncode}"
+    return {
+        "hostname": os.uname().nodename,
+        "status": "unknown",
+        "issues": [reason[:180]],
+    }
+
+
 def smtp_context() -> ssl.SSLContext:
     context = ssl.create_default_context()
     if env_bool("VAGTBYTTE_SMTP_ALLOW_SELF_SIGNED"):
@@ -258,11 +290,24 @@ def sms_text(value: str) -> str:
     return " ".join(value.replace("\n", " ").split())[:155]
 
 
-def send_sms(body: str) -> None:
-    recipient = os.getenv("RACHER_MONITOR_SMS_TO", "").strip()
-    if not recipient:
-        raise RuntimeError("RACHER_MONITOR_SMS_TO mangler")
+def queue_sms(body: str, recipient: str) -> None:
+    api_base = os.getenv("SMS_GATEWAY_LOCAL_URL", "http://127.0.0.1:8090").rstrip("/")
+    payload = json.dumps(
+        {"recipient": recipient, "body": sms_text(body)}, ensure_ascii=False
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{api_base}/api/outgoing",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        value = json.loads(response.read().decode("utf-8"))
+    if not isinstance(value, dict) or not value.get("id"):
+        raise RuntimeError("SMS-gatewayen kvitterede ikke for alarmen")
 
+
+def send_sms_direct(body: str, recipient: str) -> None:
     code = (
         "import os; from app import send_sms; "
         "send_sms(os.environ['ALERT_TO'], os.environ['ALERT_BODY'])"
@@ -284,7 +329,27 @@ def send_sms(body: str) -> None:
     )
     if result.returncode != 0:
         details = (result.stderr or result.stdout).strip()[-500:]
-        raise RuntimeError(details or "SMS-afsendelsen fejlede")
+        raise RuntimeError(details or "Direkte SMS-afsendelse fejlede")
+
+
+def send_sms(body: str) -> None:
+    recipient = os.getenv("RACHER_MONITOR_SMS_TO", "").strip()
+    if not recipient:
+        raise RuntimeError("RACHER_MONITOR_SMS_TO mangler")
+
+    queue_error = None
+    try:
+        queue_sms(body, recipient)
+        return
+    except Exception as exc:  # noqa: BLE001
+        queue_error = exc
+
+    # Queue API is preferred because it is durable.  Keep the old direct path
+    # as a best-effort fallback during gateway/API problems and staged rollout.
+    try:
+        send_sms_direct(body, recipient)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"Kø: {queue_error}; direkte: {exc}") from exc
 
 
 def notify(subject: str, body: str, sms_body: str) -> tuple[bool, list[str]]:
@@ -353,6 +418,7 @@ def main() -> int:
         return 0 if delivered and not errors else 1
 
     issues = collect_issues()
+    host_status = collect_host_status()
     status = "error" if issues else "ok"
     fingerprint = hashlib.sha256("\n".join(issues).encode("utf-8")).hexdigest()
     now = int(time.time())
@@ -401,6 +467,7 @@ def main() -> int:
             "issues": issues,
             "checked_at": now,
             "last_notified": last_notified,
+            "last_status": host_status,
         }
     )
 

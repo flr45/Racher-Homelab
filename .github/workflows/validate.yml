@@ -24,6 +24,9 @@ jobs:
             bash -n "$script"
           done < <(find scripts -type f -name '*.sh' -print0)
 
+      - name: Validate Python syntax
+        run: python -m compileall -q scripts
+
       - name: Validate Docker Compose files
         shell: bash
         run: |

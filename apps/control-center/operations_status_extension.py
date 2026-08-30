@@ -12,6 +12,7 @@ from backup_verification_extension import build_backup_verification_report
 from rbac_extension import current_identity
 from services import module_registry_service
 from services.docker_service import docker_client, docker_status
+from services.host_monitor_service import read_monitor_state
 from services.rbac_service import has_permission
 
 operations_status_blueprint = Blueprint("operations_status", __name__)
@@ -19,7 +20,7 @@ operations_status_blueprint = Blueprint("operations_status", __name__)
 OPERATIONS_STATUS_MODULE = {
     "id": "operations-status",
     "name": "Driftsstatus",
-    "description": "Samlet live-status for modem, SMS-kø, Vagtbytte, backups, Cloudflare og containere.",
+    "description": "Samlet live-status for PI, MINI, modem, SMS-kø, Vagtbytte, backups, Cloudflare og containere.",
     "href": "/operations-status",
     "category": "overview",
     "permission": "system.read",
@@ -212,6 +213,95 @@ def _card(identifier, title, description, state, metrics, details=None):
         "metrics": metrics,
         "details": details or [],
     }
+
+
+def _human_uptime(seconds):
+    try:
+        value = max(0, int(seconds))
+    except (TypeError, ValueError):
+        return "–"
+    days, remainder = divmod(value, 86400)
+    hours = remainder // 3600
+    if days:
+        return f"{days}d {hours}t"
+    minutes = (remainder % 3600) // 60
+    return f"{hours}t {minutes}m"
+
+
+def _host_card(identifier, label, monitor):
+    snapshot = monitor.get("snapshot") or {}
+    docker_value = snapshot.get("docker") or {}
+    status = monitor.get("monitor_status", "unknown")
+
+    if not monitor.get("available"):
+        state = "warning"
+    elif status in {"error", "offline", "critical", "failed"}:
+        state = "critical"
+    elif monitor.get("stale"):
+        state = "warning"
+    elif status == "ok":
+        state = "healthy"
+    else:
+        state = "warning"
+
+    details = []
+    if monitor.get("error"):
+        details.append(f"Monitorstatus kan ikke læses: {monitor['error']}")
+    if monitor.get("stale") and monitor.get("available"):
+        age = monitor.get("age_seconds")
+        if age is None:
+            details.append("Monitoren har ikke registreret et gyldigt kontroltidspunkt endnu.")
+        else:
+            details.append(f"Monitorstatus er {round(age / 60)} min gammel.")
+    details.extend(monitor.get("issues", [])[:3])
+
+    checked_at = monitor.get("checked_at")
+    checked_text = "–"
+    if checked_at:
+        checked_text = datetime.fromtimestamp(checked_at, tz=timezone.utc).astimezone().strftime("%H:%M:%S")
+
+    docker_running = docker_value.get("running", "–")
+    docker_total = docker_value.get("total", "–")
+    return _card(
+        f"host-{identifier}",
+        label,
+        "Serverstatus fra den separate host-monitor. Control Center har kun read-only adgang til statusfilen.",
+        state,
+        [
+            {"label": "Temperatur", "value": f"{snapshot.get('temperature_c')} °C" if snapshot.get("temperature_c") is not None else "–"},
+            {"label": "Disk", "value": f"{snapshot.get('disk_percent')}%" if snapshot.get("disk_percent") is not None else "–"},
+            {"label": "RAM", "value": f"{snapshot.get('memory_percent')}%" if snapshot.get("memory_percent") is not None else "–"},
+            {"label": "Load", "value": snapshot.get("load1", "–")},
+            {"label": "Docker", "value": f"{docker_running}/{docker_total}"},
+            {"label": "Oppetid", "value": _human_uptime(snapshot.get("uptime_seconds"))},
+            {"label": "Kontrolleret", "value": checked_text},
+            {"label": "Alarm", "value": "aktiv" if monitor.get("alerted") else "ingen"},
+            {"label": "Status", "value": status},
+        ],
+        details,
+    )
+
+
+def _host_cards():
+    stale_seconds = _integer_setting(
+        "HOST_MONITOR_STALE_SECONDS", 900, minimum=60, maximum=86400
+    )
+    local_path = str(
+        _setting(
+            "LOCAL_MONITOR_STATE_FILE",
+            "/host-monitor-data/health-monitor/state.json",
+        )
+    )
+    remote_path = str(
+        _setting(
+            "REMOTE_MONITOR_STATE_FILE",
+            "/host-monitor-data/remote-host-monitor/state.json",
+        )
+    )
+    return [
+        _host_card("pi", "PI · racher-pi", read_monitor_state(local_path, stale_seconds)),
+        _host_card("mini", "MINI · racherserver", read_monitor_state(remote_path, stale_seconds)),
+    ]
 
 
 def _sms_card(result, container):
@@ -413,6 +503,7 @@ def build_operations_status_report():
     containers_card, required_rows = _containers_card(container_map, docker_error)
 
     cards = [
+        *_host_cards(),
         _sms_card(sms_result, container_map.get("racher-sms-gateway")),
         _vagtbytte_card(vagtbytte_result, container_map.get("vagtbytte-web")),
         _backup_card(homelab_backup, vagtbytte_backup),
