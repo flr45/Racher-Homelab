@@ -36,6 +36,9 @@ def _bounded_float(name: str, default: float, minimum: float, maximum: float) ->
 
 _BURST_WAIT_SECONDS = _bounded_float("PAGER_NR_BURST_WAIT_SECONDS", 4.5, 1.0, 8.0)
 _BURST_EARLY_FLUSH_SECONDS = _bounded_float("PAGER_NR_BURST_EARLY_FLUSH_SECONDS", 0.35, 0.1, 2.0)
+_BURST_EARLY_MIN_CONFIDENCE = _bounded_float(
+    "PAGER_NR_BURST_EARLY_MIN_CONFIDENCE", 0.82, 0.55, 0.98
+)
 _BURST_RECENT_SECONDS = _bounded_float("PAGER_NR_BURST_RECENT_SECONDS", 10.0, 4.0, 30.0)
 _MAX_BURST_CANDIDATES = 12
 
@@ -221,6 +224,50 @@ def consensus_message(messages: list[str]) -> str:
     return "".join(output).strip()
 
 
+def consensus_quality(messages: list[str]) -> dict[str, Any]:
+    """Return an explainable agreement score for a reconstructed burst.
+
+    The score is deliberately *not* a probability that the text is correct. It
+    only expresses how strongly the independently received copies support the
+    resulting consensus. Evidence is capped for one/two-copy bursts so a single
+    clean-looking decoder line can never be labelled high confidence.
+    """
+    values = [str(value or "").strip() for value in messages if str(value or "").strip()]
+    copy_count = len(values)
+    if not values:
+        return {
+            "copy_count": 0,
+            "agreement": 0.0,
+            "confidence": 0.0,
+            "label": "unknown",
+        }
+
+    consensus = consensus_message(values)
+    normalized_consensus = _normalized_text(consensus)
+    similarities = []
+    for value in values:
+        normalized = _normalized_text(value)
+        if not normalized_consensus or not normalized:
+            similarities.append(0.0)
+        else:
+            similarities.append(
+                SequenceMatcher(
+                    None, normalized_consensus, normalized, autojunk=False
+                ).ratio()
+            )
+
+    agreement = sum(similarities) / max(1, len(similarities))
+    evidence_factor = 0.45 if copy_count == 1 else 0.72 if copy_count == 2 else 0.90 if copy_count == 3 else 1.0
+    confidence = max(0.0, min(1.0, agreement * evidence_factor))
+    label = "high" if confidence >= 0.85 else "medium" if confidence >= 0.65 else "low"
+    return {
+        "copy_count": copy_count,
+        "agreement": round(agreement, 3),
+        "confidence": round(confidence, 3),
+        "label": label,
+    }
+
+
 def _parse_moment(value: Any) -> datetime | None:
     try:
         moment = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
@@ -353,11 +400,16 @@ class PocsagBurstConsensus:
                 self._mark_duplicate(message_id, burst.candidates[0].message_id)
                 return message_id
 
-            # Three independent copies are enough for a real majority vote. This
-            # keeps the alarm delay around the normal 2-3 s multi-RIC burst rather
-            # than always waiting the full fallback window.
+            # Three copies are enough for a majority only when they also agree
+            # strongly. If one copy is truncated/corrupt, keep the original
+            # fallback timer alive and wait for a fourth copy instead of rushing
+            # out a half-reconstructed message.
             if len(burst.candidates) >= 3:
-                self._schedule_locked(burst, _BURST_EARLY_FLUSH_SECONDS)
+                quality = consensus_quality(
+                    [item.data["message"] for item in burst.candidates]
+                )
+                if quality["confidence"] >= _BURST_EARLY_MIN_CONFIDENCE:
+                    self._schedule_locked(burst, _BURST_EARLY_FLUSH_SECONDS)
         return message_id
 
     def _previous_deliverable_duplicate(self, message: str, received_at: str, exclude_ids: set[int]) -> int | None:
@@ -469,6 +521,7 @@ class PocsagBurstConsensus:
         candidates = burst.candidates
         messages = [candidate.data["message"] for candidate in candidates]
         consensus = self.core.public_message(consensus_message(messages))
+        quality = consensus_quality(messages)
         representative = candidates[0]
         candidate_ids = {candidate.message_id for candidate in candidates}
         decision = self._decision(consensus, representative.data, candidate_ids)
@@ -477,8 +530,12 @@ class PocsagBurstConsensus:
         )
         copy_count = len(candidates)
         base_reason = str(decision.get("decision_reason") or "")
+        confidence_percent = round(float(quality["confidence"]) * 100)
+        agreement_percent = round(float(quality["agreement"]) * 100)
         decision["decision_reason"] = (
-            f"POCSAG burst-samling: {copy_count} rå kopier -> én melding; {base_reason}"
+            f"POCSAG burst-samling: {copy_count} rå kopier -> én melding; "
+            f"dekodekvalitet {confidence_percent}% ({agreement_percent}% overensstemmelse); "
+            f"{base_reason}"
         )[:500]
 
         with self.core.storage.connect() as conn:
