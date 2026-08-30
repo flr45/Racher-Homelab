@@ -19,6 +19,7 @@ finally:
     FileTailSource.start = _real_file_tail_start
 
 from alarm_feed_v2 import install_alarm_feed_v2
+from alarm_retention import install_alarm_retention
 from alarm_rules import install_alarm_rules
 from burst_consensus import install_burst_consensus
 from operations import install_operations
@@ -36,6 +37,8 @@ from system_overview import install_system_overview
 # payloads are marked as decoder noise before they can become public alarms.
 # Alarmfeed v2 then observes stored duplicate results and may promote a cleaner
 # copy to the already-approved root display row without changing raw history.
+# Alarm retention makes the normal Alarmfeed a rolling seven-day view while raw
+# admin history and diagnostics remain available for longer.
 # Operations owns delivery/quality telemetry; system overview extends that status
 # with the actual end-to-end scanner -> SMS/GSM chain. RIC SMS is intentionally
 # installed afterwards so its trigger remains independent of Pushover state.
@@ -44,6 +47,7 @@ alarm_rules = install_alarm_rules(core)
 burst_consensus = install_burst_consensus(core, alarm_rules)
 gibberish_filter = install_gibberish_filter(core)
 alarm_feed_v2 = install_alarm_feed_v2(core)
+alarm_retention = install_alarm_retention(core)
 operations = install_operations(core)
 system_overview = install_system_overview(core)
 ric_sms = install_ric_sms(core, core.auth_required)
@@ -119,6 +123,14 @@ STATIC_ASSET_VERSION = _static_asset_version()
 
 
 def _enhance_home_html(body: str) -> str:
+    # The Alarmfeed is a rolling seven-day operator view. Raw/admin history is
+    # retained separately and is intentionally not deleted after seven days.
+    body = body.replace(
+        '<span class="label">Seneste</span><h2>Alarmfeed</h2>',
+        '<span class="label">Seneste 7 dage</span><h2>Alarmfeed</h2>',
+        1,
+    )
+
     # The manual filter is server-rendered in the template. Keep this fallback so
     # older/custom templates still expose it after an appliance update.
     if 'id="alarm-filter-card"' not in body:
