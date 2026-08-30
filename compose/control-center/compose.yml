@@ -11,6 +11,9 @@ services:
       TZ: ${TZ:-Europe/Copenhagen}
       RACHER_OS_DATA: /data
       BACKUP_ROOT: /backups
+      LOCAL_MONITOR_STATE_FILE: /host-monitor-data/health-monitor/state.json
+      REMOTE_MONITOR_STATE_FILE: /host-monitor-data/remote-host-monitor/state.json
+      HOST_MONITOR_STALE_SECONDS: ${HOST_MONITOR_STALE_SECONDS:-900}
       VAGTBYTTE_URL: ${CONTROL_CENTER_VAGTBYTTE_URL:-#}
       INDSATSBRIEF_URL: ${CONTROL_CENTER_INDSATSBRIEF_URL:-#}
       MINUTREGNSKAB_URL: ${CONTROL_CENTER_MINUTREGNSKAB_URL:-#}
@@ -31,6 +34,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /sys:/host-sys:ro
       - ${BACKUP_ROOT:-/home/pi/homelab/backups}:/backups:ro
+      - ${RACHER_MONITOR_DATA_ROOT:-/home/racher/homelab/data}:/host-monitor-data:ro
       - control-center-data:/data
     networks:
       - proxy
