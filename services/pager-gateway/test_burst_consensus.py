@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from burst_consensus import consensus_message, same_nr_burst
+from burst_consensus import consensus_message, consensus_quality, same_nr_burst
 
 
 class BurstConsensusTests(unittest.TestCase):
@@ -45,6 +45,29 @@ class BurstConsensusTests(unittest.TestCase):
                 "$9 ISL-Forespørgsel · 4100 Ringsted · lugt af brændt plastic",
             )
         )
+
+    def test_single_copy_can_never_claim_high_decode_confidence(self):
+        quality = consensus_quality([self.expected])
+        self.assertEqual(quality["copy_count"], 1)
+        self.assertEqual(quality["label"], "low")
+        self.assertLess(quality["confidence"], 0.50)
+
+    def test_three_observed_copies_wait_for_more_evidence(self):
+        quality = consensus_quality(self.copies[:3])
+        self.assertEqual(quality["copy_count"], 3)
+        self.assertEqual(quality["label"], "medium")
+        self.assertLess(quality["confidence"], 0.82)
+
+    def test_four_observed_copies_reach_high_decode_confidence(self):
+        quality = consensus_quality(self.copies)
+        self.assertEqual(quality["copy_count"], 4)
+        self.assertEqual(quality["label"], "high")
+        self.assertGreaterEqual(quality["confidence"], 0.85)
+
+    def test_three_clean_copies_can_flush_early(self):
+        quality = consensus_quality([self.expected, self.expected, self.expected])
+        self.assertEqual(quality["copy_count"], 3)
+        self.assertGreaterEqual(quality["confidence"], 0.82)
 
 
 if __name__ == "__main__":
