@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block title %}Gennemførte · Ordberedskab{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <div>
+    <div class="eyebrow">DIN HISTORIK</div>
+    <h1>Gennemførte sætninger</h1>
+    <p>Her kan du se de sætninger, du allerede har arbejdet med, og hvilke ord du selv stavede korrekt.</p>
+  </div>
+  <a class="primary" href="{{ url_for('practice') }}">Fortsæt træning →</a>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div><div class="eyebrow">ALLE</div><h2>{{ completed_rows|length }} gennemførte</h2></div>
+  </div>
+  {% if completed_rows %}
+    <div class="completed-list">
+      {% for row in completed_rows %}
+        <div class="completed-row">
+          <div class="completion-icon {{ row['result'] }}">{{ '✓' if row['result'] == 'correct' else '→' }}</div>
+          <div class="completion-text">
+            <b>{{ row['sentence'].replace('______', row['answer']) }}</b>
+            <small>{{ row['category'] }} · Niveau {{ row['difficulty'] }} · {{ row['attempts'] }} forsøg · {{ 'Korrekt' if row['result'] == 'correct' else 'Svar vist' }}</small>
+          </div>
+          <span class="completion-answer">{{ row['answer'] }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty">Du har ikke gennemført nogen sætninger endnu.</div>
+  {% endif %}
+</section>
+{% endblock %}

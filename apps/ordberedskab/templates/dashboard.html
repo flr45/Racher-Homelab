@@ -10,23 +10,76 @@
   <a class="primary big" href="{{ url_for('practice') }}">Start øvelse →</a>
 </section>
 
+<section class="level-panel panel">
+  <div>
+    <div class="eyebrow">SVÆRHEDSGRAD</div>
+    <h2>Niveau {{ difficulty }} · {{ difficulty_labels[difficulty] }}</h2>
+    <p>Du kan altid skrue op eller ned. Nye sætninger vælges på det niveau, du har valgt.</p>
+  </div>
+  <form method="post" action="{{ url_for('set_difficulty') }}" class="difficulty-form">
+    {% for level,label in difficulty_labels.items() %}
+      <button type="submit" name="difficulty" value="{{ level }}" class="difficulty-choice {{ 'active' if level == difficulty else '' }}">
+        <strong>{{ level }}</strong>
+        <span>{{ label }}</span>
+      </button>
+    {% endfor %}
+  </form>
+  <div class="level-progress">
+    <div>
+      <b>{{ completed_level }} / {{ available_level }}</b>
+      <span>gennemført på niveau {{ difficulty }}</span>
+    </div>
+    <div class="progress-track"><span style="width: {{ ((completed_level / available_level * 100) if available_level else 0)|round }}%"></span></div>
+    <small>{{ remaining_level }} nye sætninger tilbage lige nu. Når du når slutningen, laver AI automatisk flere.</small>
+  </div>
+</section>
+
 <section class="stats-grid">
-  <article class="stat"><span>Øvelsesforsøg</span><strong>{{ total }}</strong></article>
-  <article class="stat"><span>Korrekte svar</span><strong>{{ correct }}</strong></article>
+  <article class="stat"><span>Gennemførte</span><strong>{{ completed_count }}</strong></article>
+  <article class="stat"><span>Korrekte selv</span><strong>{{ learned }}</strong></article>
   <article class="stat"><span>Præcision</span><strong>{{ accuracy }}%</strong></article>
-  <article class="stat"><span>Ord løst</span><strong>{{ learned }}</strong></article>
+  <article class="stat"><span>Sætninger i banken</span><strong>{{ bank_total }}</strong></article>
 </section>
 
 <section class="panel">
-  <div class="panel-head"><div><div class="eyebrow">PERSONLIG TRÆNING</div><h2>Ord der fortjener en ekstra runde</h2></div></div>
+  <div class="panel-head">
+    <div><div class="eyebrow">PERSONLIG TRÆNING</div><h2>Ord der fortjener en ekstra runde</h2></div>
+  </div>
   {% if problem_words %}
     <div class="word-list">
       {% for word in problem_words %}
-        <div class="word-row"><b>{{ word['answer'] }}</b><span>{{ word['category'] }}</span><small>{{ word['wrong_count'] }} fejl · {{ word['correct_count'] }} rigtige</small></div>
+        <div class="word-row">
+          <b>{{ word['answer'] }}</b>
+          <span>{{ word['category'] }} · Niveau {{ word['difficulty'] }}</span>
+          <small>{{ word['wrong_count'] }} fejl · {{ word['correct_count'] }} rigtige</small>
+        </div>
       {% endfor %}
     </div>
   {% else %}
-    <div class="empty">Når et ord driller, dukker det automatisk op her og oftere i træningen.</div>
+    <div class="empty">Når et ord driller, dukker det automatisk op her.</div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div><div class="eyebrow">HISTORIK</div><h2>Senest gennemførte sætninger</h2></div>
+    <a class="quiet-link" href="{{ url_for('completed') }}">Se alle →</a>
+  </div>
+  {% if completed_recent %}
+    <div class="completed-list">
+      {% for row in completed_recent %}
+        <div class="completed-row">
+          <div class="completion-icon {{ row['result'] }}">{{ '✓' if row['result'] == 'correct' else '→' }}</div>
+          <div class="completion-text">
+            <b>{{ row['sentence'].replace('______', row['answer']) }}</b>
+            <small>{{ row['category'] }} · Niveau {{ row['difficulty'] }} · {{ 'Korrekt' if row['result'] == 'correct' else 'Svar vist efter 2 forsøg' }}</small>
+          </div>
+          <span class="completion-answer">{{ row['answer'] }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty">Dine gennemførte sætninger kommer til at stå her.</div>
   {% endif %}
 </section>
 {% endblock %}

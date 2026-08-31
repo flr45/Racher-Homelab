@@ -1,6 +1,6 @@
-# Ordberedskab v1
+# Ordberedskab
 
-Et Flask-baseret diktat- og stavetræningsprogram med politi, brand, ambulance og redningsberedskab som tema.
+Et Flask-baseret diktat- og stavetræningsprogram til en ordblind elev i 9. klasse med politi, brand, ambulance og redningsberedskab som tema.
 
 ## Funktioner
 - Elev-login og admin-login
@@ -8,13 +8,26 @@ Et Flask-baseret diktat- og stavetræningsprogram med politi, brand, ambulance o
 - Naturlig dansk oplæsning via OpenAI `gpt-4o-mini-tts`
 - Normal og langsom oplæsning
 - Lokal lyd-cache, så samme sætning ikke genereres igen og igen
-- Browserens danske systemstemme som fallback
-- Grøn markering ved korrekt svar
-- Hints efter flere forkerte forsøg
-- Progression og ord, der kræver ekstra træning
-- Adaptiv udvælgelse: svære/ukendte ord vises oftere
-- Adminpanel til at oprette og aktivere/deaktivere øvelser
-- 20 medfølgende eksempeløvelser
+- Næste øvelse og dens lyd forberedes i baggrunden
+- To staveforsøg; derefter vises det korrekte ord
+- Individuel sværhedsgrad 1-4
+- Historik over gennemførte sætninger
+- Personlig progression og ord der kræver ekstra træning
+- 500 faste startøvelser fordelt på fire fagområder og niveau 1-4
+- Automatisk OpenAI-generering af nye sætninger, når en elev har gennemført alle nye sætninger på sit valgte niveau
+- Manuel AI-generering fra adminpanelet
+- Browserens danske systemstemme som fallback ved TTS-fejl
+
+## Øvelsesbank
+Grundbanken indeholder 500 faste øvelser:
+- 125 Politi
+- 125 Brand
+- 125 Ambulance
+- 125 Redningsberedskab
+
+De ligger som TSV-filer under `seed/`. Ved opstart tilføjes kun sætninger, der ikke allerede findes, så eksisterende brugere, progression og egne admin-øvelser bevares.
+
+Når en bruger ikke har flere nye øvelser på sit valgte niveau, genererer OpenAI som standard 20 nye øvelser. Hvis genereringen fejler, fortsætter programmet med relevante repetitionsøvelser i stedet for at gå i stå.
 
 ## Docker på Racher-Homelab
 Tilføj disse værdier til repoets `.env`:
@@ -30,9 +43,11 @@ ORDBEREDSKAB_TTS_MODEL=gpt-4o-mini-tts
 ORDBEREDSKAB_TTS_VOICE=marin
 ORDBEREDSKAB_TTS_SPEED_NORMAL=0.96
 ORDBEREDSKAB_TTS_SPEED_SLOW=0.72
+ORDBEREDSKAB_GENERATION_MODEL=gpt-5.4-mini
+ORDBEREDSKAB_GENERATION_BATCH=20
 ```
 
-Start derefter fra roden af `Racher-Homelab`:
+Start eller opdatér derefter fra roden af `Racher-Homelab`:
 
 ```bash
 docker compose --env-file .env -f compose/ordberedskab/compose.yml up -d --build
@@ -51,10 +66,10 @@ docker logs --tail=100 ordberedskab-web
 http://SERVER-IP:5050
 ```
 
-Databasen og TTS-cachen gemmes i Docker-volumen `ordberedskab_ordberedskab_data`, så brugere, progression og allerede genererede lydfiler overlever genstart og nye builds.
+Databasen og TTS-cachen gemmes i Docker-volumen `ordberedskab_ordberedskab_data`, så brugere, progression og genererede lydfiler overlever genstart og nye builds.
 
 ## OpenAI TTS
-Ved første tryk på en oplæsningsknap genereres en MP3-fil med OpenAI Speech API. Filen caches under `/data/tts-cache`. Næste gang samme sætning afspilles med samme stemme, model og hastighed, bruges den lokale fil uden et nyt API-kald.
+Ved første oplæsning genereres en MP3-fil med OpenAI Speech API. Filen caches under `/data/tts-cache`. Næste gang samme sætning afspilles med samme stemme, model og hastighed, bruges den lokale fil uden et nyt API-kald.
 
 Standardindstillinger:
 - Model: `gpt-4o-mini-tts`
@@ -62,9 +77,13 @@ Standardindstillinger:
 - Normal hastighed: `0.96`
 - Langsom hastighed: `0.72`
 
-Hvis OpenAI API ikke er tilgængeligt, returnerer serveren teksten til browseren, som forsøger at bruge en dansk Web Speech-stemme som fallback.
+## Automatisk AI-generering
+Generatoren bruger samme `ORDBEREDSKAB_OPENAI_API_KEY` som TTS. Den genererer valideret, struktureret indhold med præcis én blank `______`, ét svarord, en gyldig kategori og det valgte niveau.
 
-Det korrekte svarord ligger ikke længere direkte i JavaScript-koden ved normal drift; serveren sammensætter hele sætningen og sender kun lydfilen til browseren.
+Standard:
+- Genereringsmodel: `gpt-5.4-mini`
+- Batch: 20 nye øvelser
+- Maksimalt 40 ved manuel generering i admin
 
 ## Lokal udvikling uden Docker
 ```bash
@@ -86,4 +105,4 @@ Admin:
 - Brugernavn: `admin`
 - Adgangskode: værdien i `ORDBEREDSKAB_ADMIN_PASSWORD` (fallback `admin123`)
 
-Skift adgangskoderne i `.env` før første produktionsstart.
+Skift adgangskoderne i `.env` før egentlig brug.
