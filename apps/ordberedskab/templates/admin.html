@@ -34,7 +34,7 @@
 
   <div class="panel ai-panel">
     <div class="panel-head"><div><div class="eyebrow">OPENAI</div><h2>Lav flere sætninger</h2></div></div>
-    <p>Programmet genererer automatisk nye sætninger, når en elev har været igennem alle på sit niveau. Her kan du også gøre det manuelt.</p>
+    <p>Nye AI-øvelser får nu unikke svarord og bliver sprogrevideret, før de gemmes. Programmet genererer automatisk flere, når en elev har været igennem alle på sit niveau.</p>
     <form method="post" action="{{ url_for('admin_generate') }}" class="stack">
       <div class="form-grid">
         <label>Niveau<select name="difficulty">{% for level,label in difficulty_labels.items() %}<option value="{{ level }}" {{ 'selected' if level == 2 else '' }}>{{ level }} · {{ label }}</option>{% endfor %}</select></label>
@@ -68,23 +68,45 @@
   </div>
 </section>
 
+{% set active_exercises = exercises|selectattr('active')|list %}
+{% set inactive_exercises = exercises|rejectattr('active')|list %}
 <section class="panel">
   <div class="panel-head">
-    <div><div class="eyebrow">ØVELSESBANK</div><h2>{{ exercises|length }} sætninger</h2></div>
+    <div><div class="eyebrow">ØVELSESBANK</div><h2>{{ active_exercises|length }} aktive sætninger</h2></div>
   </div>
   <div class="exercise-table">
-    {% for e in exercises %}
-      <div class="exercise-row {{ '' if e['active'] else 'disabled-row' }}">
+    {% for e in active_exercises %}
+      <div class="exercise-row">
         <div>
           <b>{{ e['sentence'] }}</b>
           <small>Svar: {{ e['answer'] }} · {{ e['category'] }} · Niveau {{ e['difficulty'] }}</small>
         </div>
         <div class="row-actions">
-          <form method="post" action="{{ url_for('toggle_exercise', exercise_id=e['id']) }}"><button class="mini" type="submit">{{ 'Deaktivér' if e['active'] else 'Aktivér' }}</button></form>
+          <form method="post" action="{{ url_for('toggle_exercise', exercise_id=e['id']) }}"><button class="mini" type="submit">Deaktivér</button></form>
           <form method="post" action="{{ url_for('delete_exercise', exercise_id=e['id']) }}" onsubmit="return confirm('Slet denne øvelse?')"><button class="mini danger" type="submit">Slet</button></form>
         </div>
       </div>
     {% endfor %}
   </div>
+
+  {% if inactive_exercises %}
+    <details class="archived-exercises">
+      <summary>{{ inactive_exercises|length }} arkiverede/deaktiverede sætninger</summary>
+      <div class="exercise-table archived-table">
+        {% for e in inactive_exercises %}
+          <div class="exercise-row disabled-row">
+            <div>
+              <b>{{ e['sentence'] }}</b>
+              <small>Svar: {{ e['answer'] }} · {{ e['category'] }} · Niveau {{ e['difficulty'] }}</small>
+            </div>
+            <div class="row-actions">
+              <form method="post" action="{{ url_for('toggle_exercise', exercise_id=e['id']) }}"><button class="mini" type="submit">Aktivér</button></form>
+              <form method="post" action="{{ url_for('delete_exercise', exercise_id=e['id']) }}" onsubmit="return confirm('Slet denne øvelse?')"><button class="mini danger" type="submit">Slet</button></form>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </details>
+  {% endif %}
 </section>
 {% endblock %}
