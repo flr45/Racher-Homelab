@@ -1,0 +1,125 @@
+1	båre	Patienten blev lagt på en ______.
+1	båre	Redderne kørte en ______ hen til patienten.
+1	båre	En ______ blev gjort klar ved ambulancen.
+1	båre	Patienten blev spændt sikkert fast på en ______.
+1	båre	Redderne løftede forsigtigt ______ ind i bilen.
+1	puls	Redderen målte patientens ______ ved håndleddet.
+1	puls	En hurtig ______ kunne mærkes ved håndleddet.
+1	puls	Patientens ______ blev kontrolleret igen ved håndleddet.
+1	puls	Monitoren viste patientens ______.
+1	puls	Redderen noterede en regelmæssig ______.
+1	ilt	Patienten fik ekstra ______.
+1	ilt	Redderen gjorde udstyr til ______ klar.
+1	ilt	Der blev givet ______ gennem en maske.
+1	ilt	Patienten havde behov for mere ______.
+1	ilt	Ambulancen havde flasker med ______ om bord.
+1	maske	Redderen satte en ______ foran patientens ansigt.
+1	maske	En ______ blev koblet til ilten.
+1	maske	Patienten fik ilt gennem en ______.
+1	maske	Redderen valgte en passende ______.
+1	maske	Efter brug blev den anvendte ______ kasseret.
+1	ambulance	En ______ blev sendt til adressen.
+1	ambulance	Patienten blev kørt til hospitalet i en ______.
+1	ambulance	Redderne gjorde deres ______ klar.
+1	ambulance	En gul ______ ankom med blå blink.
+1	ambulance	Udstyret blev hentet fra ______.
+1	smerter	Patienten fortalte om stærke ______.
+1	smerter	Redderen spurgte, hvor patientens ______ sad.
+1	smerter	Patientens ______ var begyndt pludseligt.
+1	smerter	Redderen vurderede graden af ______.
+1	blink	Ambulancen kørte med blå ______.
+2	blodtryk	Ambulancepersonalet målte patientens ______ med en manchet.
+2	blodtryk	Et lavt ______ kan være vigtigt at opdage.
+2	blodtryk	Redderen gentog målingen af ______ efter nogle minutter.
+2	blodtryk	Manchetten blev brugt til at måle ______.
+2	blodtryk	Patientens målte ______ blev skrevet i journalen.
+2	temperatur	Redderen målte patientens ______ med et termometer.
+2	temperatur	En høj ______ kan være tegn på feber.
+2	temperatur	Patientens ______ blev kontrolleret igen med termometeret.
+2	temperatur	Termometeret viste en normal ______.
+2	temperatur	Redderen noterede den målte ______.
+2	bevidsthed	Redderen vurderede patientens ______ ved at stille spørgsmål.
+2	bevidsthed	Patientens ______ ændrede sig under transporten.
+2	bevidsthed	En påvirket ______ kræver tæt observation.
+2	bevidsthed	Redderne kontrollerede løbende patientens ______.
+2	bevidsthed	Spørgsmål blev brugt til at vurdere patientens ______.
+2	monitor	Redderen tilsluttede patienten til en ______.
+2	monitor	En ______ viste flere af patientens værdier.
+2	monitor	Patientens rytme kunne ses på ______.
+2	monitor	Redderen kontrollerede skærmen på sin ______.
+2	monitor	Under transporten blev ______ fulgt tæt.
+2	journal	Redderen skrev oplysningerne i patientens ______.
+2	journal	En ______ samlede data fra hele forløbet.
+2	journal	Patientens værdier blev gemt i ______.
+2	journal	Redderen afsluttede sin ______ efter afleveringen.
+2	journal	Hospitalet modtog relevante oplysninger fra ambulancens ______.
+2	patient	Redderne undersøgte en ______ på stedet.
+2	patient	En ______ fortalte om svimmelhed.
+2	patient	Ambulancen transporterede sin ______ til hospitalet.
+2	patient	Redderen forklarede behandlingen til sin ______.
+2	patient	Den stabile ______ blev fulgt under hele turen.
+2	vejrtrækning	Redderen vurderede patientens ______ ved at se på brystkassen.
+2	vejrtrækning	Patientens ______ var hurtigere end normalt.
+2	vejrtrækning	En rolig ______ blev observeret under transporten.
+2	vejrtrækning	Redderen talte antallet af ______.
+2	blodtryk	Ambulancepersonalet målte patientens ______.
+3	iltmætning	Redderen målte patientens ______ med en sensor på fingeren.
+3	iltmætning	En lav ______ kan kræve ekstra opmærksomhed.
+3	iltmætning	Sensoren viste patientens ______.
+3	iltmætning	Patientens ______ steg efter behandlingen.
+3	iltmætning	Redderen fulgte ______ under transporten.
+3	blodsukker	Ambulancepersonalet målte patientens ______ med et måleapparat.
+3	blodsukker	Et lavt ______ kunne forklare symptomerne.
+3	blodsukker	Redderen gentog målingen af ______ efter behandlingen.
+3	blodsukker	En lille bloddråbe blev brugt til at måle ______.
+3	blodsukker	Patientens aktuelle ______ blev skrevet i journalen.
+3	hjertestarter	Redderen gjorde en ______ klar.
+3	hjertestarter	En ______ kan analysere en hjerterytme.
+3	hjertestarter	Elektroderne blev koblet til en ______.
+3	hjertestarter	Holdet kontrollerede deres ______ før vagten.
+3	hjertestarter	Ved hjertestop blev en ______ hurtigt hentet.
+3	elektrode	Redderen satte en ______ på patientens hud.
+3	elektrode	En løs ______ blev sat fast igen.
+3	elektrode	Monitoren modtog signal gennem en ______.
+3	elektrode	Huden blev tørret før hver ______ blev placeret.
+3	elektrode	Redderen kontrollerede placeringen af en ______.
+3	symptomer	Redderen spurgte ind til patientens ______.
+3	symptomer	Nye ______ opstod under transporten.
+3	symptomer	Patientens ______ blev gennemgået systematisk.
+3	symptomer	Journalen beskrev de vigtigste ______.
+3	symptomer	Ændringer i ______ blev meldt til hospitalet.
+3	observation	Patienten krævede tæt ______ under turen.
+3	observation	En vigtig ______ blev skrevet i journalen.
+3	observation	Redderen gjorde en ny ______ af patientens tilstand.
+3	observation	Kontinuerlig ______ gjorde ændringer lettere at opdage.
+3	observation	Hospitalet fik besked om reddernes seneste ______.
+3	smertelindring	Patienten fik ______ efter vurdering.
+3	smertelindring	Redderen vurderede effekten af ______.
+3	smertelindring	God ______ gjorde transporten mere behagelig.
+3	smertelindring	Patientens behov for ______ blev vurderet løbende.
+3	smertelindring	Efter ______ faldt patientens smerter.
+4	respirationsfrekvens	Redderen målte patientens ______ ved at tælle vejrtrækningerne.
+4	respirationsfrekvens	En høj ______ kan være et vigtigt tegn.
+4	respirationsfrekvens	Patientens ______ blev talt i et helt minut.
+4	respirationsfrekvens	Journalen indeholdt den målte ______.
+4	respirationsfrekvens	Under transporten ændrede patientens ______ sig.
+4	bevidsthedsniveau	Redderen vurderede patientens ______ med en fast skala.
+4	bevidsthedsniveau	Et faldende ______ kræver hurtig opmærksomhed.
+4	bevidsthedsniveau	Patientens ______ blev kontrolleret flere gange.
+4	bevidsthedsniveau	Hospitalet fik besked om ændret ______.
+4	bevidsthedsniveau	Redderen dokumenterede patientens ______ i journalen.
+4	patientoverdragelse	Redderen gav en kort ______ på hospitalet.
+4	patientoverdragelse	En tydelig ______ sikrede, at vigtige oplysninger kom med.
+4	patientoverdragelse	Ved ankomsten begyndte en struktureret ______.
+4	patientoverdragelse	Hospitalets personale lyttede til redderens ______.
+4	patientoverdragelse	Efter ______ overtog hospitalet ansvaret.
+4	elektrokardiogram	Redderen optog et ______ på patienten.
+4	elektrokardiogram	Et ______ viste hjertets elektriske aktivitet.
+4	elektrokardiogram	Patienten lå stille under optagelsen af et ______.
+4	elektrokardiogram	Hospitalet modtog patientens ______.
+4	elektrokardiogram	Redderen kontrollerede kvaliteten af det optagne ______.
+4	tilskadekomne	Redderne undersøgte den ______ person.
+4	tilskadekomne	Den ______ blev hjulpet væk fra vejen.
+4	tilskadekomne	Ambulancen transporterede den ______ til hospitalet.
+4	tilskadekomne	Den ______ havde brug for hurtig behandling.
+4	tilskadekomne	Brandfolkene hjalp med at frigøre den ______.
