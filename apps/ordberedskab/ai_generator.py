@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import threading
+from pathlib import Path
 from typing import Iterable
 
 from openai import OpenAI
@@ -85,6 +87,30 @@ def _review_schema(count: int) -> dict:
 
 def _normalise_answer(answer: str) -> str:
     return answer.strip().casefold()
+
+
+def _active_database_answers() -> set[str]:
+    db_value = os.environ.get("ORDBEREDSKAB_DB", "").strip()
+    if not db_value:
+        return set()
+    db_path = Path(db_value)
+    if not db_path.exists():
+        return set()
+
+    try:
+        db = sqlite3.connect(db_path, timeout=5)
+        rows = db.execute(
+            "SELECT DISTINCT answer FROM exercises WHERE active=1"
+        ).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return set()
+
+    return {
+        _normalise_answer(str(row[0]))
+        for row in rows
+        if row and str(row[0]).strip()
+    }
 
 
 def _validate_item(
@@ -220,6 +246,9 @@ def generate_exercises(
         for answer in avoid_answers
         if str(answer).strip()
     }
+    # En ny AI-øvelse må aldrig genbruge et svarord, der allerede er aktivt i banken.
+    forbidden_answers.update(_active_database_answers())
+
     forbidden_sentences = {
         str(sentence).strip().casefold()
         for sentence in avoid_sentences
