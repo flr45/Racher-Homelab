@@ -1,12 +1,14 @@
 # Ordberedskab v1
 
-Et lille Flask-baseret diktat- og stavetræningsprogram med politi, brand, ambulance og redningsberedskab som tema.
+Et Flask-baseret diktat- og stavetræningsprogram med politi, brand, ambulance og redningsberedskab som tema.
 
 ## Funktioner
 - Elev-login og admin-login
 - Én sætning ad gangen med ét manglende ord
-- Dansk oplæsning via browserens Web Speech API
+- Naturlig dansk oplæsning via OpenAI `gpt-4o-mini-tts`
 - Normal og langsom oplæsning
+- Lokal lyd-cache, så samme sætning ikke genereres igen og igen
+- Browserens danske systemstemme som fallback
 - Grøn markering ved korrekt svar
 - Hints efter flere forkerte forsøg
 - Progression og ord, der kræver ekstra træning
@@ -22,6 +24,12 @@ ORDBEREDSKAB_SECRET_KEY=skift-denne-til-en-lang-tilfaeldig-noegle
 ORDBEREDSKAB_ADMIN_PASSWORD=skift-admin-adgangskoden
 ORDBEREDSKAB_STUDENT_PASSWORD=skift-elev-adgangskoden
 ORDBEREDSKAB_PORT=5050
+
+ORDBEREDSKAB_OPENAI_API_KEY=skift-til-din-api-noegle
+ORDBEREDSKAB_TTS_MODEL=gpt-4o-mini-tts
+ORDBEREDSKAB_TTS_VOICE=marin
+ORDBEREDSKAB_TTS_SPEED_NORMAL=0.96
+ORDBEREDSKAB_TTS_SPEED_SLOW=0.72
 ```
 
 Start derefter fra roden af `Racher-Homelab`:
@@ -43,14 +51,28 @@ docker logs --tail=100 ordberedskab-web
 http://SERVER-IP:5050
 ```
 
-Databasen gemmes i Docker-volumen `ordberedskab_ordberedskab_data`, så brugere, øvelser og progression overlever genstart og nye builds.
+Databasen og TTS-cachen gemmes i Docker-volumen `ordberedskab_ordberedskab_data`, så brugere, progression og allerede genererede lydfiler overlever genstart og nye builds.
+
+## OpenAI TTS
+Ved første tryk på en oplæsningsknap genereres en MP3-fil med OpenAI Speech API. Filen caches under `/data/tts-cache`. Næste gang samme sætning afspilles med samme stemme, model og hastighed, bruges den lokale fil uden et nyt API-kald.
+
+Standardindstillinger:
+- Model: `gpt-4o-mini-tts`
+- Stemme: `marin`
+- Normal hastighed: `0.96`
+- Langsom hastighed: `0.72`
+
+Hvis OpenAI API ikke er tilgængeligt, returnerer serveren teksten til browseren, som forsøger at bruge en dansk Web Speech-stemme som fallback.
+
+Det korrekte svarord ligger ikke længere direkte i JavaScript-koden ved normal drift; serveren sammensætter hele sætningen og sender kun lydfilen til browseren.
 
 ## Lokal udvikling uden Docker
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python app.py
+export OPENAI_API_KEY='...'
+flask --app wsgi run --host 0.0.0.0 --port 5050
 ```
 
 ## Første login
@@ -65,6 +87,3 @@ Admin:
 - Adgangskode: værdien i `ORDBEREDSKAB_ADMIN_PASSWORD` (fallback `admin123`)
 
 Skift adgangskoderne i `.env` før første produktionsstart.
-
-## Oplæsning
-Oplæsningen bruger stemmer fra elevens browser/enhed. På iPhone/iPad/Safari vil den normalt vælge en dansk systemstemme, hvis en sådan er installeret. Det skjulte ord er stadig med i den oplæste sætning, så øvelsen fungerer som diktat.
