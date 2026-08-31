@@ -10,9 +10,10 @@
     <div class="eyebrow">LYT · SKRIV · LÆR</div>
     <h1>{{ exercise['sentence'] }}</h1>
     <div class="audio-actions">
-      <button class="audio-btn" type="button" data-rate="0.92">🔊 Hør sætningen</button>
-      <button class="audio-btn secondary" type="button" data-rate="0.68">🐢 Langsomt</button>
+      <button class="audio-btn" type="button" data-mode="normal">🔊 Hør sætningen</button>
+      <button class="audio-btn secondary" type="button" data-mode="slow">🐢 Langsomt</button>
     </div>
+    <div class="audio-note">Oplæsningen er AI-genereret. Hvis den ikke kan hentes, bruges enhedens danske stemme som reserve.</div>
     <form id="answerForm" class="answer-form">
       <label for="answer">Skriv det manglende ord</label>
       <input id="answer" name="answer" autocomplete="off" autocapitalize="none" spellcheck="false" autofocus>
@@ -23,11 +24,98 @@
   </div>
 </section>
 <script>
-const fullSentence={{ exercise['sentence'].replace('______', exercise['answer'])|tojson }};
-const form=document.getElementById('answerForm'),input=document.getElementById('answer'),feedback=document.getElementById('feedback'),checkBtn=document.getElementById('checkBtn'),nextBtn=document.getElementById('nextBtn');
-function speak(rate){if(!('speechSynthesis' in window)){feedback.textContent='Denne browser understøtter desværre ikke oplæsning.';return;}speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(fullSentence);u.lang='da-DK';u.rate=rate;const da=speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('da'));if(da)u.voice=da;speechSynthesis.speak(u);}
-document.querySelectorAll('.audio-btn').forEach(btn=>btn.addEventListener('click',()=>speak(parseFloat(btn.dataset.rate||'0.92'))));
-form.addEventListener('submit',async e=>{e.preventDefault();const r=await fetch({{ url_for('check_answer')|tojson }},{method:'POST',body:new FormData(form)});const result=await r.json();if(result.correct){input.classList.add('correct');feedback.className='feedback success';feedback.textContent='✓ '+result.message;input.disabled=true;checkBtn.classList.add('hidden');nextBtn.classList.remove('hidden');}else{input.classList.add('wrong');feedback.className='feedback warning';feedback.textContent=result.message;input.select();setTimeout(()=>input.classList.remove('wrong'),650);}});
+const audioUrls={
+  normal:{{ url_for('tts.exercise_audio', exercise_id=exercise['id'], mode='normal')|tojson }},
+  slow:{{ url_for('tts.exercise_audio', exercise_id=exercise['id'], mode='slow')|tojson }}
+};
+const form=document.getElementById('answerForm');
+const input=document.getElementById('answer');
+const feedback=document.getElementById('feedback');
+const checkBtn=document.getElementById('checkBtn');
+const nextBtn=document.getElementById('nextBtn');
+let currentAudio=null;
+let currentObjectUrl=null;
+
+function stopCurrentAudio(){
+  if(currentAudio){currentAudio.pause();currentAudio=null;}
+  if(currentObjectUrl){URL.revokeObjectURL(currentObjectUrl);currentObjectUrl=null;}
+  if('speechSynthesis' in window)speechSynthesis.cancel();
+}
+
+function browserSpeak(text,mode){
+  if(!text||!('speechSynthesis' in window)){
+    feedback.className='feedback warning';
+    feedback.textContent='Oplæsningen kunne ikke startes. Prøv igen om lidt.';
+    return;
+  }
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text);
+  u.lang='da-DK';
+  u.rate=mode==='slow'?0.68:0.92;
+  const da=speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('da'));
+  if(da)u.voice=da;
+  speechSynthesis.speak(u);
+}
+
+async function playSentence(mode){
+  const button=document.querySelector(`.audio-btn[data-mode="${mode}"]`);
+  const original=button.textContent;
+  button.disabled=true;
+  button.textContent=mode==='slow'?'🐢 Henter…':'🔊 Henter…';
+  stopCurrentAudio();
+
+  try{
+    const response=await fetch(audioUrls[mode],{cache:'no-store'});
+    if(response.ok){
+      const blob=await response.blob();
+      currentObjectUrl=URL.createObjectURL(blob);
+      currentAudio=new Audio(currentObjectUrl);
+      currentAudio.addEventListener('ended',stopCurrentAudio,{once:true});
+      currentAudio.addEventListener('error',stopCurrentAudio,{once:true});
+      await currentAudio.play();
+      return;
+    }
+
+    let errorData={};
+    try{errorData=await response.json();}catch(_err){}
+    if(errorData.fallback_text){
+      browserSpeak(errorData.fallback_text,mode);
+      feedback.className='feedback warning';
+      feedback.textContent='AI-oplæsningen kunne ikke hentes, så reservestemmen bruges.';
+      return;
+    }
+    throw new Error(errorData.message||'Oplæsningen kunne ikke hentes.');
+  }catch(_err){
+    feedback.className='feedback warning';
+    feedback.textContent='Oplæsningen kunne ikke startes. Prøv igen.';
+  }finally{
+    button.disabled=false;
+    button.textContent=original;
+  }
+}
+
+document.querySelectorAll('.audio-btn').forEach(btn=>btn.addEventListener('click',()=>playSentence(btn.dataset.mode)));
+
+form.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const r=await fetch({{ url_for('check_answer')|tojson }},{method:'POST',body:new FormData(form)});
+  const result=await r.json();
+  if(result.correct){
+    input.classList.add('correct');
+    feedback.className='feedback success';
+    feedback.textContent='✓ '+result.message;
+    input.disabled=true;
+    checkBtn.classList.add('hidden');
+    nextBtn.classList.remove('hidden');
+  }else{
+    input.classList.add('wrong');
+    feedback.className='feedback warning';
+    feedback.textContent=result.message;
+    input.select();
+    setTimeout(()=>input.classList.remove('wrong'),650);
+  }
+});
+
 if('speechSynthesis' in window)speechSynthesis.getVoices();
 </script>
 {% endblock %}
