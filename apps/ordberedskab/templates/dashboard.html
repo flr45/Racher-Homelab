@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}Overblik · Ordberedskab{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <div>
+    <div class="eyebrow">DAGENS TRÆNING</div>
+    <h1>Hej {{ current_user['display_name'] }}</h1>
+    <p>Tag én sætning ad gangen. Hør den, skriv ordet og byg din sikkerhed op.</p>
+  </div>
+  <a class="primary big" href="{{ url_for('practice') }}">Start øvelse →</a>
+</section>
+
+<section class="stats-grid">
+  <article class="stat"><span>Øvelsesforsøg</span><strong>{{ total }}</strong></article>
+  <article class="stat"><span>Korrekte svar</span><strong>{{ correct }}</strong></article>
+  <article class="stat"><span>Præcision</span><strong>{{ accuracy }}%</strong></article>
+  <article class="stat"><span>Ord løst</span><strong>{{ learned }}</strong></article>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><div><div class="eyebrow">PERSONLIG TRÆNING</div><h2>Ord der fortjener en ekstra runde</h2></div></div>
+  {% if problem_words %}
+    <div class="word-list">
+      {% for word in problem_words %}
+        <div class="word-row"><b>{{ word['answer'] }}</b><span>{{ word['category'] }}</span><small>{{ word['wrong_count'] }} fejl · {{ word['correct_count'] }} rigtige</small></div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty">Når et ord driller, dukker det automatisk op her og oftere i træningen.</div>
+  {% endif %}
+</section>
+{% endblock %}

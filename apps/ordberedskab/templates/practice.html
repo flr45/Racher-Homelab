@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}Øvelse · Ordberedskab{% endblock %}
+{% block content %}
+<section class="practice-shell">
+  <div class="practice-top">
+    <div><span class="pill">{{ exercise['category'] }}</span><span class="pill muted">Niveau {{ exercise['difficulty'] }}</span></div>
+    <a class="quiet-link" href="{{ url_for('dashboard') }}">Afslut</a>
+  </div>
+  <div class="practice-card">
+    <div class="eyebrow">LYT · SKRIV · LÆR</div>
+    <h1>{{ exercise['sentence'] }}</h1>
+    <div class="audio-actions">
+      <button class="audio-btn" type="button" data-rate="0.92">🔊 Hør sætningen</button>
+      <button class="audio-btn secondary" type="button" data-rate="0.68">🐢 Langsomt</button>
+    </div>
+    <form id="answerForm" class="answer-form">
+      <label for="answer">Skriv det manglende ord</label>
+      <input id="answer" name="answer" autocomplete="off" autocapitalize="none" spellcheck="false" autofocus>
+      <div id="feedback" class="feedback" aria-live="polite">Du kan høre sætningen så mange gange, du vil.</div>
+      <button id="checkBtn" class="primary big" type="submit">Tjek ord</button>
+      <a id="nextBtn" class="primary big hidden" href="{{ url_for('practice') }}">Næste sætning →</a>
+    </form>
+  </div>
+</section>
+<script>
+const fullSentence={{ exercise['sentence'].replace('______', exercise['answer'])|tojson }};
+const form=document.getElementById('answerForm'),input=document.getElementById('answer'),feedback=document.getElementById('feedback'),checkBtn=document.getElementById('checkBtn'),nextBtn=document.getElementById('nextBtn');
+function speak(rate){if(!('speechSynthesis' in window)){feedback.textContent='Denne browser understøtter desværre ikke oplæsning.';return;}speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(fullSentence);u.lang='da-DK';u.rate=rate;const da=speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('da'));if(da)u.voice=da;speechSynthesis.speak(u);}
+document.querySelectorAll('.audio-btn').forEach(btn=>btn.addEventListener('click',()=>speak(parseFloat(btn.dataset.rate||'0.92'))));
+form.addEventListener('submit',async e=>{e.preventDefault();const r=await fetch({{ url_for('check_answer')|tojson }},{method:'POST',body:new FormData(form)});const result=await r.json();if(result.correct){input.classList.add('correct');feedback.className='feedback success';feedback.textContent='✓ '+result.message;input.disabled=true;checkBtn.classList.add('hidden');nextBtn.classList.remove('hidden');}else{input.classList.add('wrong');feedback.className='feedback warning';feedback.textContent=result.message;input.select();setTimeout(()=>input.classList.remove('wrong'),650);}});
+if('speechSynthesis' in window)speechSynthesis.getVoices();
+</script>
+{% endblock %}
