@@ -1,0 +1,35 @@
+name: ordberedskab
+
+services:
+  ordberedskab-web:
+    build:
+      context: ../../apps/ordberedskab
+      dockerfile: Dockerfile
+    container_name: ordberedskab-web
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Copenhagen}
+      PORT: 5050
+      SECRET_KEY: ${ORDBEREDSKAB_SECRET_KEY:?ORDBEREDSKAB_SECRET_KEY must be set}
+      ORDBEREDSKAB_ADMIN_PASSWORD: ${ORDBEREDSKAB_ADMIN_PASSWORD:-admin123}
+      ORDBEREDSKAB_STUDENT_PASSWORD: ${ORDBEREDSKAB_STUDENT_PASSWORD:-elev123}
+      ORDBEREDSKAB_DB: /data/ordberedskab.db
+    ports:
+      - "${ORDBEREDSKAB_PORT:-5050}:5050"
+    volumes:
+      - ordberedskab_data:/data
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5050/login', timeout=5).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  ordberedskab_data:
+
+networks:
+  proxy:
+    external: true
