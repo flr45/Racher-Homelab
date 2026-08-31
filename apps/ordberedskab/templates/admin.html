@@ -1,7 +1,23 @@
 {% extends 'base.html' %}
 {% block title %}Admin · Ordberedskab{% endblock %}
 {% block content %}
-<section class="hero compact"><div><div class="eyebrow">ADMINISTRATION</div><h1>Indhold og elever</h1><p>Tilføj øvelser, opret elevkonti og følg den grundlæggende aktivitet.</p></div></section>
+<section class="hero compact">
+  <div>
+    <div class="eyebrow">ADMINISTRATION</div>
+    <h1>Indhold og elever</h1>
+    <p>Tilføj øvelser, opret elevkonti og udvid øvelsesbanken med AI.</p>
+  </div>
+</section>
+
+<section class="stats-grid">
+  {% for level,label in difficulty_labels.items() %}
+    <article class="stat">
+      <span>Niveau {{ level }} · {{ label }}</span>
+      <strong>{{ level_counts[level] }}</strong>
+    </article>
+  {% endfor %}
+</section>
+
 <section class="two-col">
   <div class="panel">
     <div class="panel-head"><div><div class="eyebrow">NY ØVELSE</div><h2>Tilføj en sætning</h2></div></div>
@@ -10,25 +26,65 @@
       <label>Svarord<input name="answer" placeholder="afspærring" required></label>
       <div class="form-grid">
         <label>Kategori<select name="category"><option>Politi</option><option>Brand</option><option>Ambulance</option><option>Redningsberedskab</option></select></label>
-        <label>Niveau<select name="difficulty"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+        <label>Niveau<select name="difficulty">{% for level,label in difficulty_labels.items() %}<option value="{{ level }}">{{ level }} · {{ label }}</option>{% endfor %}</select></label>
       </div>
       <button class="primary" type="submit">Gem øvelse</button>
     </form>
   </div>
-  <div class="panel">
-    <div class="panel-head"><div><div class="eyebrow">NY ELEV</div><h2>Opret elevkonto</h2></div></div>
-    <form method="post" action="{{ url_for('add_user') }}" class="stack">
-      <label>Navn<input name="display_name" placeholder="Fornavn" required></label>
-      <label>Brugernavn<input name="username" placeholder="elevnavn" required></label>
-      <label>Adgangskode<input name="password" type="password" minlength="6" placeholder="Mindst 6 tegn" required></label>
-      <button class="primary" type="submit">Opret elev</button>
+
+  <div class="panel ai-panel">
+    <div class="panel-head"><div><div class="eyebrow">OPENAI</div><h2>Lav flere sætninger</h2></div></div>
+    <p>Programmet genererer automatisk nye sætninger, når en elev har været igennem alle på sit niveau. Her kan du også gøre det manuelt.</p>
+    <form method="post" action="{{ url_for('admin_generate') }}" class="stack">
+      <div class="form-grid">
+        <label>Niveau<select name="difficulty">{% for level,label in difficulty_labels.items() %}<option value="{{ level }}" {{ 'selected' if level == 2 else '' }}>{{ level }} · {{ label }}</option>{% endfor %}</select></label>
+        <label>Antal<select name="count"><option value="10">10</option><option value="20" selected>20</option><option value="30">30</option><option value="40">40</option></select></label>
+      </div>
+      <button class="primary" type="submit">✨ Generér nye sætninger</button>
     </form>
   </div>
 </section>
-<section class="panel"><div class="panel-head"><div><div class="eyebrow">BRUGERE</div><h2>Aktivitet</h2></div></div><div class="word-list">
-{% for user in users %}<div class="word-row"><b>{{ user['display_name'] }}</b><span>{{ 'Admin' if user['is_admin'] else 'Elev' }}</span><small>{{ user['attempts'] }} forsøg · {{ user['correct'] or 0 }} rigtige</small></div>{% endfor %}
-</div></section>
-<section class="panel"><div class="panel-head"><div><div class="eyebrow">ØVELSESBANK</div><h2>{{ exercises|length }} sætninger</h2></div></div><div class="exercise-table">
-{% for e in exercises %}<div class="exercise-row {{ '' if e['active'] else 'disabled-row' }}"><div><b>{{ e['sentence'] }}</b><small>Svar: {{ e['answer'] }} · {{ e['category'] }} · Niveau {{ e['difficulty'] }}</small></div><div class="row-actions"><form method="post" action="{{ url_for('toggle_exercise', exercise_id=e['id']) }}"><button class="mini" type="submit">{{ 'Deaktivér' if e['active'] else 'Aktivér' }}</button></form><form method="post" action="{{ url_for('delete_exercise', exercise_id=e['id']) }}" onsubmit="return confirm('Slet denne øvelse?')"><button class="mini danger" type="submit">Slet</button></form></div></div>{% endfor %}
-</div></section>
+
+<section class="panel">
+  <div class="panel-head"><div><div class="eyebrow">NY ELEV</div><h2>Opret elevkonto</h2></div></div>
+  <form method="post" action="{{ url_for('add_user') }}" class="form-grid user-create-form">
+    <label>Navn<input name="display_name" placeholder="Fornavn" required></label>
+    <label>Brugernavn<input name="username" placeholder="elevnavn" required></label>
+    <label>Adgangskode<input name="password" type="password" minlength="6" placeholder="Mindst 6 tegn" required></label>
+    <button class="primary" type="submit">Opret elev</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><div><div class="eyebrow">BRUGERE</div><h2>Aktivitet</h2></div></div>
+  <div class="word-list">
+    {% for user in users %}
+      <div class="word-row">
+        <b>{{ user['display_name'] }}</b>
+        <span>{{ 'Admin' if user['is_admin'] else 'Elev' }}</span>
+        <small>{{ user['attempts'] }} forsøg · {{ user['correct'] or 0 }} rigtige</small>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div><div class="eyebrow">ØVELSESBANK</div><h2>{{ exercises|length }} sætninger</h2></div>
+  </div>
+  <div class="exercise-table">
+    {% for e in exercises %}
+      <div class="exercise-row {{ '' if e['active'] else 'disabled-row' }}">
+        <div>
+          <b>{{ e['sentence'] }}</b>
+          <small>Svar: {{ e['answer'] }} · {{ e['category'] }} · Niveau {{ e['difficulty'] }}</small>
+        </div>
+        <div class="row-actions">
+          <form method="post" action="{{ url_for('toggle_exercise', exercise_id=e['id']) }}"><button class="mini" type="submit">{{ 'Deaktivér' if e['active'] else 'Aktivér' }}</button></form>
+          <form method="post" action="{{ url_for('delete_exercise', exercise_id=e['id']) }}" onsubmit="return confirm('Slet denne øvelse?')"><button class="mini danger" type="submit">Slet</button></form>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</section>
 {% endblock %}
