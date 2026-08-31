@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}Login · Ordberedskab{% endblock %}
+{% block content %}
+<section class="login-wrap">
+  <div class="login-card">
+    <div class="eyebrow">STAVETRÆNING MED BLÅ BLINK</div>
+    <h1>Velkommen til<br>Ordberedskab</h1>
+    <p>Træn stavning med sætninger fra politi, brand og ambulance.</p>
+    <form method="post" class="stack">
+      <label>Brugernavn<input name="username" autocomplete="username" required></label>
+      <label>Adgangskode<input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="primary" type="submit">Log ind</button>
+    </form>
+    <div class="demo">Demo: <b>elev / elev123</b> · Admin: <b>admin / admin123</b></div>
+  </div>
+</section>
+{% endblock %}
