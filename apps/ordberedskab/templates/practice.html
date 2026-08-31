@@ -3,38 +3,50 @@
 {% block content %}
 <section class="practice-shell">
   <div class="practice-top">
-    <div><span class="pill">{{ exercise['category'] }}</span><span class="pill muted">Niveau {{ exercise['difficulty'] }}</span></div>
+    <div>
+      <span class="pill">{{ exercise['category'] }}</span>
+      <span class="pill muted">Niveau {{ exercise['difficulty'] }} · {{ difficulty_labels[exercise['difficulty']] }}</span>
+    </div>
     <a class="quiet-link" href="{{ url_for('dashboard') }}">Afslut</a>
   </div>
+
   <div class="practice-card">
     <div class="eyebrow">LYT · SKRIV · LÆR</div>
     <h1>{{ exercise['sentence'] }}</h1>
+
     <div class="audio-actions">
       <button class="audio-btn" type="button" data-mode="normal">🔊 Hør sætningen</button>
       <button class="audio-btn secondary" type="button" data-mode="slow">🐢 Langsomt</button>
     </div>
-    <div class="audio-note">Oplæsningen er AI-genereret. Hvis den ikke kan hentes, bruges enhedens danske stemme som reserve.</div>
+    <div class="audio-note">Oplæsningen er AI-genereret. Næste sætning og dens lyd gøres klar i baggrunden.</div>
+
     <form id="answerForm" class="answer-form">
       <label for="answer">Skriv det manglende ord</label>
       <input id="answer" name="answer" autocomplete="off" autocapitalize="none" spellcheck="false" autofocus>
-      <div id="feedback" class="feedback" aria-live="polite">Du kan høre sætningen så mange gange, du vil.</div>
+      <div id="feedback" class="feedback" aria-live="polite">Du har to forsøg. Derefter viser vi det rigtige ord.</div>
       <button id="checkBtn" class="primary big" type="submit">Tjek ord</button>
       <a id="nextBtn" class="primary big hidden" href="{{ url_for('practice') }}">Næste sætning →</a>
     </form>
   </div>
 </section>
+
 <script>
 const audioUrls={
   normal:{{ url_for('tts.exercise_audio', exercise_id=exercise['id'], mode='normal')|tojson }},
   slow:{{ url_for('tts.exercise_audio', exercise_id=exercise['id'], mode='slow')|tojson }}
 };
+const prepareNextUrl={{ url_for('prepare_next')|tojson }};
+const fallbackNextUrl={{ url_for('practice')|tojson }};
 const form=document.getElementById('answerForm');
 const input=document.getElementById('answer');
 const feedback=document.getElementById('feedback');
 const checkBtn=document.getElementById('checkBtn');
 const nextBtn=document.getElementById('nextBtn');
+
 let currentAudio=null;
 let currentObjectUrl=null;
+let nextReady=false;
+let exerciseFinished=false;
 
 function stopCurrentAudio(){
   if(currentAudio){currentAudio.pause();currentAudio=null;}
@@ -94,27 +106,97 @@ async function playSentence(mode){
   }
 }
 
-document.querySelectorAll('.audio-btn').forEach(btn=>btn.addEventListener('click',()=>playSentence(btn.dataset.mode)));
+async function prepareNext(){
+  try{
+    const response=await fetch(prepareNextUrl,{method:'POST'});
+    if(!response.ok)throw new Error('next');
+    const data=await response.json();
+    if(!data.ok)throw new Error('next');
+
+    nextBtn.href=data.next_url||fallbackNextUrl;
+    nextReady=true;
+
+    if(data.audio){
+      if(data.audio.normal)fetch(data.audio.normal,{cache:'no-store'}).catch(()=>{});
+      if(data.audio.slow)fetch(data.audio.slow,{cache:'no-store'}).catch(()=>{});
+    }
+
+    if(exerciseFinished){
+      nextBtn.textContent='Næste sætning →';
+      nextBtn.classList.remove('waiting');
+    }
+  }catch(_err){
+    nextReady=true;
+    nextBtn.href=fallbackNextUrl;
+    if(exerciseFinished){
+      nextBtn.textContent='Næste sætning →';
+      nextBtn.classList.remove('waiting');
+    }
+  }
+}
+
+document.querySelectorAll('.audio-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>playSentence(btn.dataset.mode));
+});
+
+const nextPreparation=prepareNext();
 
 form.addEventListener('submit',async e=>{
   e.preventDefault();
-  const r=await fetch({{ url_for('check_answer')|tojson }},{method:'POST',body:new FormData(form)});
-  const result=await r.json();
-  if(result.correct){
-    input.classList.add('correct');
-    feedback.className='feedback success';
-    feedback.textContent='✓ '+result.message;
-    input.disabled=true;
-    checkBtn.classList.add('hidden');
-    nextBtn.classList.remove('hidden');
-  }else{
-    input.classList.add('wrong');
+  checkBtn.disabled=true;
+
+  try{
+    const r=await fetch({{ url_for('check_answer')|tojson }},{
+      method:'POST',
+      body:new FormData(form)
+    });
+    const result=await r.json();
+
+    if(result.correct){
+      exerciseFinished=true;
+      input.classList.remove('wrong','revealed');
+      input.classList.add('correct');
+      feedback.className='feedback success';
+      feedback.textContent='✓ '+result.message;
+      input.disabled=true;
+      checkBtn.classList.add('hidden');
+      nextBtn.classList.remove('hidden');
+    }else if(result.revealed){
+      exerciseFinished=true;
+      input.value=result.answer||'';
+      input.classList.remove('wrong');
+      input.classList.add('revealed');
+      input.disabled=true;
+      feedback.className='feedback reveal';
+      feedback.innerHTML='Det rigtige ord er <strong>'+escapeHtml(result.answer||'')+'</strong>. Kig på stavningen, og gå videre når du er klar.';
+      checkBtn.classList.add('hidden');
+      nextBtn.classList.remove('hidden');
+    }else{
+      input.classList.add('wrong');
+      feedback.className='feedback warning';
+      feedback.textContent=result.message;
+      input.select();
+      setTimeout(()=>input.classList.remove('wrong'),650);
+    }
+
+    if(exerciseFinished&&!nextReady){
+      nextBtn.textContent='Gør næste klar…';
+      nextBtn.classList.add('waiting');
+      await nextPreparation;
+    }
+  }catch(_err){
     feedback.className='feedback warning';
-    feedback.textContent=result.message;
-    input.select();
-    setTimeout(()=>input.classList.remove('wrong'),650);
+    feedback.textContent='Svaret kunne ikke kontrolleres. Prøv igen.';
+  }finally{
+    checkBtn.disabled=false;
   }
 });
+
+function escapeHtml(value){
+  const div=document.createElement('div');
+  div.textContent=value;
+  return div.innerHTML;
+}
 
 if('speechSynthesis' in window)speechSynthesis.getVoices();
 </script>
