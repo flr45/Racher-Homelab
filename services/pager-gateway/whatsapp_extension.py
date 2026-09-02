@@ -20,6 +20,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "ja", "on"}
+
+
 def normalize_phone(value: Any) -> str:
     phone = re.sub(r"[\s().-]", "", str(value or "").strip())
     if phone.startswith("00"):
@@ -136,6 +144,23 @@ class WhatsAppDelivery:
             )
         return self.get_preference(user_id)
 
+    def list_user_preferences(self) -> list[dict[str, Any]]:
+        with self.storage.connect() as conn:
+            rows = conn.execute(
+                """SELECT u.id AS user_id, u.username, u.display_name, u.active,
+                          COALESCE(w.enabled,0) AS enabled, COALESCE(w.phone_e164,'') AS phone_e164,
+                          w.updated_at
+                   FROM users u
+                   LEFT JOIN user_whatsapp_preferences w ON w.user_id=u.id
+                   ORDER BY u.role, u.display_name COLLATE NOCASE"""
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["enabled"] = bool(item["enabled"])
+            result.append(item)
+        return result
+
     def recipients_for_event(self, station: str | None) -> list[dict[str, Any]]:
         key = self.routing.station_key(station)
         with self.storage.connect() as conn:
@@ -207,7 +232,7 @@ class WhatsAppDelivery:
     def dispatch(self, message_id: int, event: dict[str, Any]) -> None:
         if not event.get("delivery_eligible", True):
             return
-        if os.getenv("PAGER_WHATSAPP_ENABLED", "0").strip().lower() not in {"1", "true", "yes", "on"}:
+        if not _as_bool(os.getenv("PAGER_WHATSAPP_ENABLED", "0")):
             return
         if not self.client.configured:
             self.app.logger.warning("WhatsApp delivery enabled but OpenWA is not configured")
@@ -261,9 +286,11 @@ def install_whatsapp(app, storage, routing, auth_required) -> WhatsAppDelivery:
     def ingest_with_whatsapp(event):
         message_id = original_ingest(event)
         try:
-            row = next((item for item in storage.list_messages(limit=1) if int(item["id"]) == int(message_id)), None)
-            if row and row.get("delivery_eligible"):
-                delivery.dispatch_async(message_id, row)
+            with storage.connect() as conn:
+                row = conn.execute("SELECT * FROM messages WHERE id=?", (int(message_id),)).fetchone()
+            event_row = dict(row) if row else None
+            if event_row and event_row.get("delivery_eligible"):
+                delivery.dispatch_async(message_id, event_row)
         except Exception:
             app.logger.exception("Unable to queue WhatsApp delivery for message %s", message_id)
         return message_id
@@ -275,7 +302,7 @@ def install_whatsapp(app, storage, routing, auth_required) -> WhatsAppDelivery:
     def whatsapp_me_get():
         return jsonify({
             **delivery.get_preference(int(g.user["id"])),
-            "gateway_enabled": os.getenv("PAGER_WHATSAPP_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"},
+            "gateway_enabled": _as_bool(os.getenv("PAGER_WHATSAPP_ENABLED", "0")),
             "gateway_configured": delivery.client.configured,
         })
 
@@ -286,12 +313,34 @@ def install_whatsapp(app, storage, routing, auth_required) -> WhatsAppDelivery:
         try:
             preference = delivery.set_preference(
                 int(g.user["id"]),
-                enabled=bool(payload.get("enabled")),
+                enabled=_as_bool(payload.get("enabled")),
                 phone=str(payload.get("phone_e164") or ""),
             )
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         storage.add_audit(int(g.user["id"]), "whatsapp-preference", f"enabled={int(preference['enabled'])}")
+        return jsonify({"ok": True, **preference})
+
+    @app.get("/api/whatsapp/users")
+    @auth_required(admin=True)
+    def whatsapp_users():
+        return jsonify(delivery.list_user_preferences())
+
+    @app.put("/api/whatsapp/users/<int:user_id>")
+    @auth_required(admin=True)
+    def whatsapp_user_admin_update(user_id: int):
+        if not storage.get_user(user_id):
+            return jsonify({"ok": False, "error": "Brugeren findes ikke."}), 404
+        payload = request.get_json(silent=True) or {}
+        try:
+            preference = delivery.set_preference(
+                user_id,
+                enabled=_as_bool(payload.get("enabled")),
+                phone=str(payload.get("phone_e164") or ""),
+            )
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        storage.add_audit(int(g.user["id"]), "whatsapp-user-update", f"user_id={user_id}; enabled={int(preference['enabled'])}")
         return jsonify({"ok": True, **preference})
 
     @app.post("/api/whatsapp/test")
@@ -317,9 +366,8 @@ def install_whatsapp(app, storage, routing, auth_required) -> WhatsAppDelivery:
     @app.get("/api/whatsapp/status")
     @auth_required(admin=True)
     def whatsapp_status():
-        enabled = os.getenv("PAGER_WHATSAPP_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
         return jsonify({
-            "enabled": enabled,
+            "enabled": _as_bool(os.getenv("PAGER_WHATSAPP_ENABLED", "0")),
             "configured": delivery.client.configured,
             "url": delivery.client.base_url,
             "session": delivery.client.session_id,
@@ -328,9 +376,8 @@ def install_whatsapp(app, storage, routing, auth_required) -> WhatsAppDelivery:
 
     @app.after_request
     def inject_whatsapp_ui(response):
-        if request.path != "/" or response.status_code != 200 or not response.is_json and not response.content_type.startswith("text/html"):
-            return response
-        if not response.content_type.startswith("text/html"):
+        content_type = str(response.content_type or "")
+        if request.path != "/" or response.status_code != 200 or not content_type.startswith("text/html"):
             return response
         html = response.get_data(as_text=True)
         marker = "</body>"
