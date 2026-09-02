@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Racher Pager Gateway">
+  <rect width="512" height="512" rx="112" fill="#0b0d10"/>
+  <rect x="112" y="84" width="288" height="344" rx="48" fill="#171c23" stroke="#3b4553" stroke-width="12"/>
+  <rect x="146" y="128" width="220" height="128" rx="18" fill="#08110b" stroke="#66e58c" stroke-width="8"/>
+  <path d="M180 194h34l18-34 34 68 22-44 18 10h28" fill="none" stroke="#66e58c" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="184" cy="322" r="20" fill="#66e58c"/>
+  <circle cx="256" cy="322" r="20" fill="#8e98a6"/>
+  <circle cx="328" cy="322" r="20" fill="#8e98a6"/>
+  <rect x="168" y="370" width="176" height="16" rx="8" fill="#8e98a6"/>
+</svg>

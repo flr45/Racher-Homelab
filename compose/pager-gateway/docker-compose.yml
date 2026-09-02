@@ -1,0 +1,85 @@
+services:
+  pager-gateway:
+    build:
+      context: ../../services/pager-gateway
+    container_name: racher-pager-gateway
+    restart: unless-stopped
+    init: true
+    # Normal appliance starts go through pager-compose.sh, which supplies the
+    # state-directory uid/gid. Root is only the compatibility fallback for the
+    # one upgrade where the previously-installed helper does not know these vars;
+    # install-system-agent.sh immediately recreates the container unprivileged.
+    user: "${PAGER_RUNTIME_UID:-0}:${PAGER_RUNTIME_GID:-0}"
+    read_only: true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    environment:
+      PAGER_DATA_DIR: /data
+      PORT: 8088
+      PAGER_COOKIE_SECURE: ${PAGER_COOKIE_SECURE:-0}
+      PAGER_VAPID_SUBJECT: ${PAGER_VAPID_SUBJECT:-mailto:admin@racher.local}
+      PAGER_SMS_GATEWAY_URL: ${PAGER_SMS_GATEWAY_URL:-}
+      PAGER_SMS_GATEWAY_TOKEN: ${PAGER_SMS_GATEWAY_TOKEN:-}
+      PAGER_WHATSAPP_ENABLED: ${PAGER_WHATSAPP_ENABLED:-0}
+      PAGER_OPENWA_URL: ${PAGER_OPENWA_URL:-http://openwa:2785}
+      PAGER_OPENWA_API_KEY: ${PAGER_OPENWA_API_KEY:-}
+      PAGER_OPENWA_SESSION: ${PAGER_OPENWA_SESSION:-pager}
+      PAGER_OPENWA_TIMEOUT: ${PAGER_OPENWA_TIMEOUT:-10}
+    depends_on:
+      openwa:
+        condition: service_started
+    volumes:
+      # På den dedikerede Pi sættes PAGER_DATA_HOST_PATH=/var/lib/racher-pager,
+      # så den native PDL-service, host-agenten og webgatewayen deler data.
+      - ${PAGER_DATA_HOST_PATH:-../../data/pager-gateway}:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    ports:
+      - "${PAGER_GATEWAY_PORT:-8088}:8088"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  openwa:
+    image: ghcr.io/rmyndharis/openwa:latest
+    container_name: racher-pager-openwa
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: 2785
+      LOG_LEVEL: ${PAGER_OPENWA_LOG_LEVEL:-info}
+      # Dashboardet tilgås kun via localhost/SSH-tunnel under setup. Deaktivér
+      # production-CSP'ens HTTP->HTTPS-upgrade, ellers kan UI'et blive blankt.
+      CSP_UPGRADE_INSECURE_REQUESTS: "false"
+    volumes:
+      - openwa-data:/app/data
+    tmpfs:
+      - /tmp
+    # Dashboard/API bindes kun til localhost. Pager-containeren bruger det interne
+    # Docker-netværk via http://openwa:2785. Brug SSH/Tailscale-portforward ved setup.
+    ports:
+      - "127.0.0.1:${PAGER_OPENWA_PORT:-2785}:2785"
+    pids_limit: 1024
+    mem_limit: ${PAGER_OPENWA_MEM_LIMIT:-768m}
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  openwa-data:

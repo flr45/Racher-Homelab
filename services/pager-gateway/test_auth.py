@@ -1,0 +1,294 @@
+from __future__ import annotations
+
+import os
+import tempfile
+import unittest
+
+
+_TEST_DATA = tempfile.TemporaryDirectory()
+os.environ["PAGER_DATA_DIR"] = _TEST_DATA.name
+os.environ["PAGER_DB_PATH"] = os.path.join(_TEST_DATA.name, "pager-test.db")
+os.environ["PAGER_COOKIE_SECURE"] = "0"
+
+from app import app, routing, storage  # noqa: E402
+
+
+class AuthenticationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        app.config.update(TESTING=True)
+        cls.admin = app.test_client()
+
+        cls.admin.get("/setup")
+        with cls.admin.session_transaction() as sess:
+            csrf = sess["csrf_token"]
+        response = cls.admin.post(
+            "/setup",
+            data={
+                "csrf_token": csrf,
+                "display_name": "Admin",
+                "username": "admin",
+                "password": "meget-hemmelig-admin",
+            },
+        )
+        assert response.status_code == 302
+
+        with cls.admin.session_transaction() as sess:
+            cls.admin_csrf = sess["csrf_token"]
+
+        response = cls.admin.post(
+            "/api/users",
+            json={
+                "display_name": "Alarmbruger",
+                "username": "alarmuser",
+                "password": "meget-hemmelig-user",
+                "role": "user",
+                "stations": ["A"],
+            },
+            headers={"X-CSRF-Token": cls.admin_csrf},
+        )
+        assert response.status_code == 200
+
+        cls.user = app.test_client()
+        cls.user.get("/login")
+        with cls.user.session_transaction() as sess:
+            csrf = sess["csrf_token"]
+        response = cls.user.post(
+            "/login",
+            data={"csrf_token": csrf, "username": "alarmuser", "password": "meget-hemmelig-user"},
+        )
+        assert response.status_code == 302
+        with cls.user.session_transaction() as sess:
+            cls.user_csrf = sess["csrf_token"]
+
+    @classmethod
+    def tearDownClass(cls):
+        _TEST_DATA.cleanup()
+
+    def test_first_setup_is_closed_after_admin_exists(self):
+        response = self.user.get("/setup")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.location)
+
+    def test_user_ui_only_exposes_alarm_features(self):
+        response = self.user.get("/")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Alarmer", page)
+        self.assertIn("Historik", page)
+        self.assertNotIn('data-tab="system"', page)
+        self.assertNotIn('data-tab="users"', page)
+        self.assertNotIn('data-tab="ric"', page)
+        self.assertNotIn('data-tab="learning"', page)
+        self.assertNotIn('data-tab="settings"', page)
+        self.assertNotIn("RIC / Capcode", page)
+        self.assertNotIn("Send testalarm", page)
+        self.assertNotIn('id="readiness-list"', page)
+        self.assertNotIn("Network mobility", page)
+        self.assertNotIn("Backup & recovery", page)
+        self.assertNotIn("Update & rollback", page)
+
+    def test_admin_ui_contains_remote_appliance_routing_and_learning_features(self):
+        response = self.admin.get("/")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn('data-tab="system"', page)
+        self.assertIn('data-tab="users"', page)
+        self.assertIn('data-tab="ric"', page)
+        self.assertIn('data-tab="learning"', page)
+        self.assertIn('data-tab="settings"', page)
+        self.assertIn("RIC / Capcode", page)
+        self.assertIn("Områder pr. bruger", page)
+        self.assertIn("Alle meldinger", page)
+        self.assertIn("Adaptive Filter", page)
+        self.assertIn("Send testalarm", page)
+        self.assertIn('id="readiness-list"', page)
+        self.assertIn("Raspberry Pi-status", page)
+        self.assertIn("Network mobility", page)
+        self.assertIn("Backup & recovery", page)
+        self.assertIn("Update & rollback", page)
+        self.assertIn("Cloudflare Tunnel", page)
+
+    def test_admin_status_contains_readiness_and_adaptive_but_user_is_forbidden(self):
+        response = self.admin.get("/api/status")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("runtime", payload)
+        self.assertIn("readiness", payload)
+        self.assertIn("adaptive", payload)
+        self.assertTrue(any(item["key"] == "gateway" for item in payload["readiness"]))
+        self.assertTrue(any(item["key"] == "network" for item in payload["readiness"]))
+        self.assertTrue(any(item["key"] == "fsk-usb" for item in payload["readiness"]))
+        self.assertEqual(self.user.get("/api/status").status_code, 403)
+
+    def test_user_can_read_only_routed_alarms_and_never_gets_ric(self):
+        storage.add_message({
+            "protocol": "POCSAG", "ric": "1111111", "message": "A-routed",
+            "raw_line": "RIC 1111111 A-routed", "source": "test-auth", "station": "Slagelse",
+        })
+        storage.add_message({
+            "protocol": "POCSAG", "ric": "2222222", "message": "S-hidden",
+            "raw_line": "RIC 2222222 S-hidden", "source": "test-auth", "station": "Sorø",
+        })
+        response = self.user.get("/api/messages")
+        self.assertEqual(response.status_code, 200)
+        rows = response.get_json()
+        messages = [item["message"] for item in rows]
+        self.assertIn("A-routed", messages)
+        self.assertNotIn("S-hidden", messages)
+        routed = next(item for item in rows if item["message"] == "A-routed")
+        self.assertNotIn("ric", routed)
+        self.assertNotIn("raw_line", routed)
+        self.assertNotIn("function", routed)
+        self.assertNotIn("1111111", str(routed))
+
+    def test_user_cannot_read_admin_settings_users_status_audit_rics_learning_or_training(self):
+        self.assertEqual(self.user.get("/api/settings").status_code, 403)
+        self.assertEqual(self.user.get("/api/users").status_code, 403)
+        self.assertEqual(self.user.get("/api/status").status_code, 403)
+        self.assertEqual(self.user.get("/api/audit").status_code, 403)
+        self.assertEqual(self.user.get("/api/stations").status_code, 403)
+        self.assertEqual(self.user.get("/api/ric-codes").status_code, 403)
+        self.assertEqual(self.user.get("/api/ric-codes/unknown").status_code, 403)
+        self.assertEqual(self.user.get("/api/adaptive/status").status_code, 403)
+        self.assertEqual(self.user.get("/api/adaptive/review").status_code, 403)
+        self.assertEqual(self.user.get("/api/training/runs").status_code, 403)
+
+    def test_user_cannot_create_users_rics_stations_feedback_training_or_system_commands(self):
+        for url, body in (
+            ("/api/users", {"username": "forbidden", "password": "1234567890", "role": "user"}),
+            ("/api/ric-codes", {"ric": "9999999", "station_key": "A"}),
+            ("/api/stations", {"name": "Næstved"}),
+            ("/api/adaptive/messages/1/feedback", {"verdict": "noise"}),
+            ("/api/training/replay", {"name": "forbidden", "text": "test"}),
+            ("/api/training/ric-import/preview", {"text": "1234567;Slagelse"}),
+        ):
+            response = self.user.post(url, json=body, headers={"X-CSRF-Token": self.user_csrf})
+            self.assertEqual(response.status_code, 403)
+
+        response = self.user.post(
+            "/api/system/commands",
+            json={"action": "wifi-add", "payload": {"ssid": "Station WiFi", "password": "12345678"}},
+            headers={"X-CSRF-Token": self.user_csrf},
+        )
+        self.assertEqual(response.status_code, 403)
+        response = self.user.post(
+            "/api/mock", json={"message": "test"}, headers={"X-CSRF-Token": self.user_csrf}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_create_dynamic_station_and_ric_mapping(self):
+        response = self.admin.post(
+            "/api/stations",
+            json={"name": "Næstved"},
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        station_key = response.get_json()["station"]["key"]
+
+        response = self.admin.post(
+            "/api/ric-codes",
+            json={"ric": "9876543", "station_key": station_key, "label": "Test RIC", "active": True},
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        ric_id = response.get_json()["id"]
+        self.assertEqual(routing.get_ric_code(ric_id)["station"], "Næstved")
+
+        response = self.admin.patch(
+            f"/api/ric-codes/{ric_id}",
+            json={"station_key": "S", "label": "Flyttet"},
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["ric"]["station"], "Sorø")
+
+    def test_admin_can_change_user_routing_and_all_messages(self):
+        user = storage.get_user_by_username("alarmuser")
+        response = self.admin.patch(
+            f"/api/users/{user['id']}",
+            json={"stations": ["A", "K"], "receive_all": True},
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(routing.user_stations(user["id"])), {"A", "K"})
+        self.assertTrue(routing.user_receive_all(user["id"]))
+        routing.set_user_stations(user["id"], ["A"])
+        routing.set_user_receive_all(user["id"], False)
+
+    def test_admin_can_replay_without_touching_live_messages(self):
+        before = storage.message_count()
+        response = self.admin.post(
+            "/api/training/replay",
+            json={
+                "name": "Auth replay",
+                "text": (
+                    "8111111 12:00:00 14-08-2026 POCSAG-1 ALPHA 1200 Ringsted Brandvæsen TEST\n"
+                    "8222222 12:00:05 14-08-2026 POCSAG-1 ALPHA 1200 Ringsted Brandvæsen TEST"
+                ),
+            },
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        run = response.get_json()["run"]
+        self.assertEqual(run["parsed_count"], 2)
+        self.assertEqual(run["duplicate_count"], 1)
+        self.assertEqual(storage.message_count(), before)
+        self.assertEqual(self.admin.get(f"/api/training/runs/{run['id']}").status_code, 200)
+        self.assertEqual(self.user.get(f"/api/training/runs/{run['id']}").status_code, 403)
+
+    def test_admin_can_preview_bulk_ric_import(self):
+        response = self.admin.post(
+            "/api/training/ric-import/preview",
+            json={"text": "RIC;Område;Beskrivelse\n8333333;Kalundborg;Test"},
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        preview = response.get_json()["preview"]
+        self.assertEqual(preview["rows"][0]["ric"], "8333333")
+        self.assertEqual(preview["rows"][0]["station"], "Kalundborg")
+
+    def test_admin_can_queue_validated_wifi_action(self):
+        response = self.admin.post(
+            "/api/system/commands",
+            json={"action": "wifi-add", "payload": {"ssid": "Station WiFi", "password": "12345678"}},
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        invalid = self.admin.post(
+            "/api/system/commands",
+            json={"action": "wifi-add", "payload": {"ssid": "Station WiFi", "password": "kort"}},
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(invalid.status_code, 400)
+
+    def test_admin_can_create_user_with_all_messages(self):
+        response = self.admin.post(
+            "/api/users",
+            json={
+                "display_name": "Alle bruger", "username": "alluser-auth",
+                "password": "1234567890-ekstra", "role": "user", "receive_all": True,
+            },
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        created = storage.get_user_by_username("alluser-auth")
+        self.assertTrue(routing.user_receive_all(created["id"]))
+
+    def test_system_action_whitelist_rejects_arbitrary_commands(self):
+        response = self.admin.post(
+            "/api/system/commands",
+            json={"action": "rm-everything", "payload": {"command": "rm -rf /"}},
+            headers={"X-CSRF-Token": self.admin_csrf},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_csrf_is_required_for_mutations(self):
+        self.assertEqual(self.admin.post("/api/system/commands", json={"action": "restart-pdl"}).status_code, 400)
+        self.assertEqual(self.admin.post("/api/ric-codes", json={"ric": "5555555", "station_key": "A"}).status_code, 400)
+        self.assertEqual(self.admin.post("/api/stations", json={"name": "Holbæk"}).status_code, 400)
+        self.assertEqual(self.admin.post("/api/training/replay", json={"text": "test"}).status_code, 400)
+
+
+if __name__ == "__main__":
+    unittest.main()

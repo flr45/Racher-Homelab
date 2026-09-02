@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0d10">
+  <title>Log ind · Racher Pager Gateway</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="auth-card">
+      <div class="eyebrow">RACHER</div>
+      <h1>Pager Gateway</h1>
+      <p class="muted">Log ind for at se alarmmeldinger.</p>
+      {% if error %}<div class="alert danger">{{ error }}</div>{% endif %}
+      <form method="post" class="auth-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Brugernavn<input name="username" autocomplete="username" autofocus required></label>
+        <label>Adgangskode<input type="password" name="password" autocomplete="current-password" required></label>
+        <button class="primary" type="submit">Log ind</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

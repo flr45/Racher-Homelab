@@ -1,0 +1,190 @@
+name: Pager Gateway PDL
+
+on:
+  pull_request:
+    paths:
+      - 'services/pager-gateway/**'
+      - 'compose/pager-gateway/**'
+      - '.github/workflows/pager-gateway-pdl.yml'
+  workflow_dispatch:
+
+jobs:
+  gateway-tests:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Python dependencies
+        run: pip install -r services/pager-gateway/requirements.txt
+      - name: Run gateway tests
+        working-directory: services/pager-gateway
+        run: python -m unittest discover -v -p 'test_*.py'
+      - name: Validate host Python syntax
+        run: |
+          python -m py_compile \
+            services/pager-gateway/app.py \
+            services/pager-gateway/app_core.py \
+            services/pager-gateway/storage.py \
+            services/pager-gateway/routing.py \
+            services/pager-gateway/adaptive.py \
+            services/pager-gateway/adaptive_routes.py \
+            services/pager-gateway/ric_sms.py \
+            services/pager-gateway/training.py \
+            services/pager-gateway/training_routes.py \
+            services/pager-gateway/operations.py \
+            services/pager-gateway/rss_updates.py \
+            services/pager-gateway/alarm_rules.py \
+            services/pager-gateway/burst_consensus.py \
+            services/pager-gateway/pushover_destinations.py \
+            services/pager-gateway/wsgi.py \
+            services/pager-gateway/system_agent.py \
+            services/pager-gateway/fsk_status_agent.py \
+            services/pager-gateway/gateway_watchdog.py \
+            services/pager-gateway/external_monitor.py \
+            services/pager-gateway/network_portal.py \
+            services/pager-gateway/pdl/patch_headless.py \
+            services/pager-gateway/pdl/patch_pdw_clock_init.py \
+            services/pager-gateway/pdl/patch_headless_direct_decode.py \
+            services/pager-gateway/pdl/patch_hw_decode_diag.py \
+            services/pager-gateway/pdl/patch_rx_diag_periodic.py \
+            services/pager-gateway/pdl/patch_pocsag_512_diag.py \
+            services/pager-gateway/pdl/patch_pocsag_1200_preamble.py \
+            services/pager-gateway/pdl/patch_pocsag_1200_acquire.py \
+            services/pager-gateway/pdl/patch_pocsag_1200_diag.py
+      - name: Validate browser JavaScript syntax
+        run: |
+          node --check services/pager-gateway/static/app.js
+          node --check services/pager-gateway/static/fsk-status.js
+          node --check services/pager-gateway/static/ric-admin.js
+          node --check services/pager-gateway/static/ric-sms-admin.js
+          node --check services/pager-gateway/static/adaptive-admin.js
+          node --check services/pager-gateway/static/rss-updates.js
+          node --check services/pager-gateway/static/alarm-map.js
+          node --check services/pager-gateway/static/alarm-filter-ui.js
+          node --check services/pager-gateway/static/pushover-admin.js
+      - name: Validate shell syntax
+        run: |
+          for script in services/pager-gateway/*.sh services/pager-gateway/pdl/*.sh; do
+            bash -n "$script"
+          done
+
+  gateway-container-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start hardened gateway container
+        run: |
+          set -euo pipefail
+          STATE=/tmp/racher-pager-ci
+          mkdir -p "$STATE"
+          export PAGER_DATA_HOST_PATH="$STATE"
+          export PAGER_RUNTIME_UID="$(id -u)"
+          export PAGER_RUNTIME_GID="$(id -g)"
+          export PAGER_GATEWAY_PORT=18088
+          docker compose -f compose/pager-gateway/docker-compose.yml up -d --build
+          for _ in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:18088/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f compose/pager-gateway/docker-compose.yml logs pager-gateway
+          exit 1
+      - name: Verify container privilege boundaries
+        run: |
+          set -euo pipefail
+          expected="$(id -u):$(id -g)"
+          actual="$(docker inspect --format '{{.Config.User}}' racher-pager-gateway)"
+          readonly="$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' racher-pager-gateway)"
+          test "$actual" = "$expected"
+          test "$readonly" = "true"
+          docker exec racher-pager-gateway sh -c 'test -w /data && test -w /tmp && ! touch /app/should-not-write'
+          curl -fsS http://127.0.0.1:18088/healthz | grep -q '"ok":true'
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs racher-pager-gateway 2>&1 || true
+      - name: Stop container
+        if: always()
+        run: |
+          PAGER_DATA_HOST_PATH=/tmp/racher-pager-ci \
+          PAGER_RUNTIME_UID="$(id -u)" \
+          PAGER_RUNTIME_GID="$(id -g)" \
+          PAGER_GATEWAY_PORT=18088 \
+            docker compose -f compose/pager-gateway/docker-compose.yml down -v || true
+
+  pdl-linux-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PDL build dependencies
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+
+          apt_cmd=(
+            apt-get
+            -o Acquire::Retries=5
+            -o Acquire::http::Timeout=30
+            -o Acquire::https::Timeout=30
+            -o DPkg::Lock::Timeout=60
+            -o Dpkg::Use-Pty=0
+          )
+
+          sudo env DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none \
+            timeout --signal=TERM --kill-after=30s 4m \
+            "${apt_cmd[@]}" update
+
+          sudo env DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none \
+            timeout --signal=TERM --kill-after=30s 10m \
+            "${apt_cmd[@]}" install -y --no-install-recommends \
+              git cmake g++ pkg-config python3 ffmpeg \
+              libssl-dev libasound2-dev libpulse-dev libgtk-3-dev \
+              libwebkit2gtk-4.1-dev libcurl4-openssl-dev
+      - name: Fetch pinned PDL 3.2.0
+        run: |
+          git clone https://github.com/sqpp/PDL.git /tmp/PDL
+          git -C /tmp/PDL checkout --detach f37a24ee45b06f35703d513d48780c9334c4ff89
+      - name: Apply Racher headless and diagnostic patches
+        run: |
+          python3 services/pager-gateway/pdl/patch_headless.py /tmp/PDL
+          python3 services/pager-gateway/pdl/patch_pdw_clock_init.py /tmp/PDL
+          python3 services/pager-gateway/pdl/patch_headless_direct_decode.py /tmp/PDL
+          python3 services/pager-gateway/pdl/patch_hw_decode_diag.py /tmp/PDL
+          python3 services/pager-gateway/pdl/patch_rx_diag_periodic.py /tmp/PDL
+          python3 services/pager-gateway/pdl/patch_pocsag_512_diag.py /tmp/PDL
+          python3 services/pager-gateway/pdl/patch_pocsag_1200_preamble.py /tmp/PDL
+          python3 services/pager-gateway/pdl/patch_pocsag_1200_acquire.py /tmp/PDL
+          python3 services/pager-gateway/pdl/patch_pocsag_1200_diag.py /tmp/PDL
+          grep -F 'PDL_RS232_DEVICE' /tmp/PDL/linux/rs232_linux.cpp
+          grep -F 'RACHER_PDW_CLOCK_INIT' /tmp/PDL/linux/init_linux.cpp
+          grep -F '[PDW-CLOCK]' /tmp/PDL/linux/init_linux.cpp
+          grep -F 'RACHER_HEADLESS_DIRECT_RS232_DECODE' /tmp/PDL/linux/main_linux.cpp
+          grep -F '[HEADLESS-DECODE]' /tmp/PDL/linux/main_linux.cpp
+          grep -F 'RACHER_HW_DECODE_TICK_DIAG' /tmp/PDL/linux/hw_decode.cpp
+          grep -F '[PDL-TICK]' /tmp/PDL/linux/hw_decode.cpp
+          grep -F 'RACHER_FSK_RX_PERIODIC' /tmp/PDL/linux/rs232_linux.cpp
+          grep -F 'RACHER_POCSAG_512_DIAG' /tmp/PDL/Pocsag.cpp
+          grep -F 'RACHER_POCSAG_1200_DIAG' /tmp/PDL/Pocsag.cpp
+          grep -F 'RACHER_POCSAG_1200_PREAMBLE_DIAG' /tmp/PDL/decode.cpp
+          grep -F 'RACHER_POCSAG_1200_ACQUIRE_THRESHOLD' /tmp/PDL/decode.cpp
+          grep -F 'PDL_POCSAG_1200_ACQUIRE_THRESHOLD' /tmp/PDL/decode.cpp
+          grep -F 'pd_ct12 > racher_pocsag_1200_acquire_threshold()' /tmp/PDL/decode.cpp
+          grep -F '[POCSAG-SCAN]' /tmp/PDL/decode.cpp
+          grep -F '[POCSAG-PREAMBLE]' /tmp/PDL/decode.cpp
+          grep -F '[POCSAG-PRESYNC]' /tmp/PDL/Pocsag.cpp
+          grep -F '[POCSAG-DIAG]' /tmp/PDL/Pocsag.cpp
+      - name: Build PDL
+        timeout-minutes: 12
+        run: |
+          cmake -S /tmp/PDL -B /tmp/PDL/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/PDL/build --parallel 2
+      - name: Verify headless binary
+        run: |
+          /tmp/PDL/build/pdl --help | grep -- '--headless'
+          /tmp/PDL/build/pdl --help | grep 'PDL 3.2.0'

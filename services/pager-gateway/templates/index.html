@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d10">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>Racher Pager Gateway</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/routing.css">
+</head>
+<body data-admin="{{ '1' if is_admin else '0' }}">
+  <div class="shell">
+    <header class="topbar">
+      <div><div class="eyebrow">RACHER</div><h1>Pager Gateway</h1></div>
+      <div class="account">
+        <div class="account-text"><strong>{{ current_user.display_name }}</strong><small>{{ 'Administrator' if current_user.role == 'admin' else 'Bruger' }}</small></div>
+        <form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Log ud</button></form>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Navigation">
+      <button class="tab active" data-tab="alarms">Alarmer</button>
+      <button class="tab" data-tab="politi">Politi Update</button>
+      <button class="tab" data-tab="history">Historik</button>
+      {% if is_admin %}
+      <button class="tab" data-tab="system">System</button>
+      <button class="tab" data-tab="users">Brugere</button>
+      <button class="tab" data-tab="ric">RIC-koder</button>
+      <button class="tab" data-tab="learning">Læring</button>
+      <button class="tab" data-tab="settings">Indstillinger</button>
+      {% endif %}
+    </nav>
+
+    <main>
+      <section id="alarms" class="panel active">
+        <article class="card latest-card">
+          <div class="card-head"><div><span class="label">Seneste alarm</span><h2 id="latest-title">Ingen alarmer endnu</h2></div><span id="latest-time" class="muted">—</span></div>
+          <p id="latest-message" class="latest-message">Afventer en dekodet melding.</p><div id="latest-meta" class="meta"></div>
+        </article>
+        <article class="card notification-card">
+          <div><span class="label">PWA notifikationer</span><h2 id="push-title">Notifikationer ikke aktiveret</h2><p id="push-help" class="hint">Aktivér notifikationer på denne enhed for at få nye alarmer som push.</p></div>
+          <div class="actions push-actions"><button id="push-enable" class="primary">Aktivér notifikationer</button><button id="push-test" hidden>Send test</button><button id="push-disable" hidden>Deaktivér</button></div>
+        </article>
+        <article class="card"><div class="card-head"><div><span class="label">Seneste</span><h2>Alarmfeed</h2></div><button id="refresh-alarms">Opdater</button></div><div id="alarm-list" class="history-list"></div></article>
+      </section>
+
+      <section id="politi" class="panel">
+        <article class="card">
+          <div class="card-head"><div><span class="label">Officielle RSS-meldinger</span><h2>Politi Update</h2></div><div class="actions"><span id="rss-ui-refreshed" class="muted">—</span><button id="rss-refresh">Opdater</button></div></div>
+          <p class="hint">Visningen er helt adskilt fra pageralarmer. Du ser kun de RSS-feeds, der er tildelt din bruger.</p>
+          <div id="rss-feed-summary" class="station-pills"><span class="muted">Henter dine RSS-kilder…</span></div>
+        </article>
+        <article class="card"><div class="card-head"><div><span class="label">Seneste</span><h2>Politi Update-feed</h2></div></div><div id="rss-item-list" class="history-list"><p class="muted">Åbn fanen for at hente Politi Update.</p></div></article>
+        {% if is_admin %}
+        <article class="card">
+          <div class="card-head"><div><span class="label">RSS-kilder</span><h2>Feed-katalog</h2></div><button id="rss-fetch-now">Hent nu</button></div>
+          <p class="hint">De officielle Politi Update-feeds er klar fra start. Du kan også tilføje andre HTTPS RSS-feeds. Kun feeds med mindst én aktiv abonnent bliver hentet.</p>
+          <form id="rss-feed-form" class="form-grid">
+            <label>Navn<input name="name" maxlength="120" required placeholder="fx Kommunalt beredskab"></label>
+            <label>HTTPS RSS-feed<input name="url" type="url" required placeholder="https://example.dk/feed.xml"></label>
+            <div class="wide actions"><button class="primary" type="submit">Tilføj RSS-feed</button></div>
+          </form>
+          <div id="rss-admin-feed-list" class="command-list"><p class="muted">Henter RSS-katalog…</p></div>
+        </article>
+        {% endif %}
+      </section>
+
+      <section id="history" class="panel">
+        <article class="card"><div class="card-head"><div><span class="label">Historik</span><h2>Seneste 100 meldinger</h2></div><button id="refresh-history">Opdater</button></div><div id="history-list" class="history-list"></div></article>
+      </section>
+
+      {% if is_admin %}
+      <section id="system" class="panel">
+        <div class="grid stats">
+          <article class="card"><span class="label">Decoder</span><strong id="source-state">—</strong><small id="source-error">—</small></article>
+          <article class="card"><span class="label">Meldinger</span><strong id="message-count">0</strong><small>gemt i databasen</small></article>
+          <article class="card"><span class="label">Gateway uptime</span><strong id="uptime">—</strong><small id="hostname">—</small></article>
+        </div>
+        <article class="card readiness-card">
+          <div class="card-head"><div><span class="label">Systemklargøring</span><h2>Raspberry Pi-status</h2></div><span id="runtime-meta" class="muted">Afventer host-agent</span></div>
+          <p class="hint">Grøn betyder klar. FSK-USB eller scanner kan stå som afventende, mens Pi'en klargøres hjemme.</p>
+          <div id="readiness-list" class="readiness-list"><p class="muted">Henter systemstatus…</p></div><div id="host-metrics" class="host-metrics"></div>
+        </article>
+        <article class="card">
+          <div class="card-head"><div><span class="label">Pager input</span><h2>FSK-USB interface</h2></div><span id="fsk-state" class="status-badge">—</span></div>
+          <div class="ops-grid"><div><span class="label">Enhed</span><strong id="fsk-device">—</strong><small id="fsk-summary">—</small></div><div><span class="label">Seriel</span><strong id="fsk-serial-config">19200 8N1</strong><small id="fsk-driver">FTDI / Linux USB-serial</small></div><div><span class="label">PDL input</span><strong id="fsk-pdl-state">—</strong><small id="fsk-input-mode">fsk-usb</small></div></div>
+          <p id="fsk-meta" class="hint">Afventer hardwarestatus fra Raspberry Pi.</p>
+        </article>
+        <article class="card">
+          <div class="card-head"><div><span class="label">Network mobility</span><h2>Wi-Fi og fallback</h2></div><span id="network-state" class="status-badge">—</span></div>
+          <div class="ops-grid"><div><span class="label">Forbindelse</span><strong id="wifi-name">—</strong><small id="wifi-ip">—</small></div><div><span class="label">Signal</span><strong id="wifi-signal">—</strong><small>Wi-Fi signal</small></div><div><span class="label">Internet</span><strong id="internet-state">—</strong><small>udgående forbindelse</small></div></div>
+          <div class="split-section"><div><h3>Tilføj kendt Wi-Fi</h3><form id="wifi-form" class="form-grid compact-form"><label>SSID<input name="ssid" maxlength="32" required autocomplete="off"></label><label>Adgangskode<input name="password" type="password" minlength="8" maxlength="63" required autocomplete="new-password"></label><div class="wide actions"><button class="primary" type="submit">Gem og forbind</button></div></form><div id="wifi-profile-list" class="command-list"></div></div><div><h3>Fallback-hotspot</h3><p class="hint">Hvis Pi'en ikke kommer online, starter den automatisk et lokalt setup-netværk.</p><div class="credential-box"><span id="hotspot-ssid">Racher-Pager-Setup</span><code id="hotspot-password">••••••••••••••••</code><small id="hotspot-portal">http://10.42.0.1/</small></div><div class="actions wrap"><button id="reveal-hotspot">Vis Password/PIN</button><button data-system-action="hotspot-start">Start setup-hotspot</button><button data-system-action="hotspot-stop">Stop setup-hotspot</button></div></div></div>
+        </article>
+        <article class="card"><div class="card-head"><div><span class="label">Online adgang</span><h2>Cloudflare Tunnel</h2></div><span id="tunnel-state" class="status-badge">—</span></div><div class="ops-grid"><div><span class="label">Hostname</span><strong id="public-hostname">Ikke sat</strong><small>samme adresse efter netværksskift</small></div><div><span class="label">Service</span><strong id="tunnel-service">—</strong><small id="tunnel-version">—</small></div></div><p class="hint">Tunnel-token og offentligt hostname sættes én gang, når Pi'en er hjemme.</p><div class="actions"><button data-system-action="restart-tunnel">Genstart tunnel</button></div></article>
+        <article class="card"><div class="card-head"><div><span class="label">Backup & recovery</span><h2>Gendan uden SSH</h2></div><span id="backup-summary" class="muted">—</span></div><div class="actions"><button data-system-action="backup-now" class="primary">Lav backup nu</button></div><div id="backup-list" class="command-list"><p class="muted">Ingen backupdata endnu.</p></div></article>
+        <article class="card"><div class="card-head"><div><span class="label">Update & rollback</span><h2>Gateway-version</h2></div><span id="update-state" class="muted">—</span></div><div class="ops-grid"><div><span class="label">Installeret</span><strong id="deploy-current">—</strong><small id="deploy-branch">—</small></div><div><span class="label">Tilgængelig</span><strong id="deploy-remote">Tjekkes på Pi</strong><small>remote branch</small></div><div><span class="label">Rollback</span><strong id="deploy-previous">—</strong><small>forrige fungerende commit</small></div></div><p class="hint">En update laver backup først og ruller automatisk tilbage ved fejlet healthcheck.</p><div class="actions wrap"><button data-system-action="update-gateway" class="primary">Opdatér gateway</button><button data-system-action="rollback-gateway">Rul tilbage</button></div></article>
+        <article class="card"><span class="label">Simulator</span><h2>Test hele alarmflowet uden scanner</h2><div class="row"><input id="mock-message" value="$8 ISL KA MØ M1 + V1 (1+5) Naturbrand-Mark, Høstet mark" aria-label="Testmelding"><button id="send-mock" class="primary">Send testalarm</button></div><p class="hint">Testalarmen går gennem samme routing, dublet- og relevansregler som en rigtig melding.</p></article>
+        <article class="card"><div class="card-head"><div><span class="label">Audit</span><h2>Seneste admin-hændelser</h2></div><button id="refresh-audit">Opdater</button></div><div id="audit-list" class="command-list"></div></article>
+        <article class="card danger-zone"><span class="label">Systemstyring</span><h2>Genstart</h2><p class="hint">Handlingerne går gennem host-agentens faste whitelist.</p><div class="actions wrap"><button data-system-action="restart-pdl">Genstart PDL decoder</button><button data-system-action="restart-gateway">Genstart Pager Gateway</button><button class="danger-button" data-system-action="reboot">Genstart Raspberry Pi</button></div><div id="command-list" class="command-list"></div></article>
+      </section>
+
+      <section id="users" class="panel">
+        <article class="card">
+          <span class="label">Brugeradministration</span><h2>Opret bruger</h2><p class="hint">Vælg områder eller slå Alle meldinger til. Støj og umiddelbare dubletter sendes aldrig med i Alle meldinger.</p>
+          <form id="create-user-form" class="form-grid">
+            <label>Navn<input name="display_name" required></label><label>Brugernavn<input name="username" minlength="3" maxlength="40" required></label>
+            <label>Adgangskode<input type="password" name="password" minlength="10" autocomplete="new-password" required></label>
+            <label>Rolle<select name="role"><option value="user">Bruger</option><option value="admin">Administrator</option></select></label>
+            <label class="checkbox wide all-messages-toggle"><input type="checkbox" name="receive_all"> <strong>Alle meldinger</strong> · alle rigtige meldinger uanset område</label>
+            <div class="wide"><span class="label">Eller valgte områder</span><div id="create-user-stations" class="station-pills"><span class="muted">Henter områder…</span></div></div>
+            <div class="wide actions"><button class="primary" type="submit">Opret bruger</button></div>
+          </form>
+        </article>
+        <article class="card"><div class="card-head"><div><span class="label">Konti</span><h2>Brugere</h2></div><button id="refresh-users">Opdater</button></div><div id="user-list" class="user-list"></div></article>
+        <article class="card"><div class="card-head"><div><span class="label">Alarmrouting</span><h2>Områder pr. bruger</h2></div><button id="refresh-user-routing">Opdater</button></div><p class="hint">Alle meldinger overstyrer områdevalgene. Admin har fortsat adgang til hele råhistorikken.</p><div id="user-routing-list"><p class="muted">Åbn fanen for at hente brugere.</p></div></article>
+        <article class="card"><div class="card-head"><div><span class="label">RSS-routing</span><h2>Politi Update pr. bruger</h2></div><button id="refresh-user-rss-routing">Opdater</button></div><p class="hint">Vælg præcis hvilke RSS-feeds hver bruger må se. RSS Web Push er et separat valg og er slået fra som standard.</p><div id="user-rss-routing-list"><p class="muted">Åbn fanen for at hente RSS-routing.</p></div></article>
+      </section>
+
+      <section id="ric" class="panel">
+        <article class="card">
+          <div class="card-head"><div><span class="label">Dynamiske områder</span><h2>Stationer og grupper</h2></div></div>
+          <p class="routing-note">Listen er ikke begrænset til Slagelse-området. Admin kan oprette nye områder, og systemet kan selv oprette dem ved stærk gentagen stationslogik.</p>
+          <form id="station-create-form" class="row"><input name="name" maxlength="80" required placeholder="fx Næstved, Ringsted, Holbæk eller Fyn"><button class="primary" type="submit">Tilføj område</button></form>
+          <div id="station-list" class="command-list"></div>
+        </article>
+        <article class="card">
+          <span class="label">RIC / Capcode · kun admin</span><h2>Tilføj pageradresse</h2>
+          <p class="routing-note">RIC er intern routingmetadata. Den vises aldrig i brugerfeed, Web Push eller Pushover.</p>
+          <form id="ric-create-form" class="form-grid">
+            <label>RIC / capcode<input name="ric" inputmode="numeric" pattern="[0-9]{4,10}" minlength="4" maxlength="10" required placeholder="1234567"></label>
+            <label>Station / område<select id="ric-station" name="station_key" required></select></label>
+            <label class="wide">Navn / beskrivelse<input name="label" maxlength="120" placeholder="fx Primær alarmgruppe"></label>
+            <label class="checkbox wide"><input type="checkbox" name="active" checked> Aktiv routing</label>
+            <div class="wide actions"><button class="primary" type="submit">Tilføj RIC</button></div>
+          </form>
+        </article>
+        <article class="card"><div class="card-head"><div><span class="label">Register</span><h2>Gemte RIC-koder</h2></div><button id="refresh-ric">Opdater</button></div><div id="ric-list"><p class="muted">Åbn fanen for at hente RIC-registeret.</p></div></article>
+        <article class="card"><span class="label">RIC-læring</span><h2>Ukendte RIC-koder</h2><p class="hint">Ukendte RIC'er er kun synlige her for admin. De kan tildeles et dynamisk område med ét klik.</p><div id="unknown-ric-list"><p class="muted">Ingen data hentet endnu.</p></div></article>
+      </section>
+
+      <section id="learning" class="panel">
+        <div class="grid stats">
+          <article class="card"><span class="label">Lært fra</span><strong id="learn-messages">0</strong><small>modtagne meldinger</small></article>
+          <article class="card"><span class="label">Feedback</span><strong id="learn-feedback">0</strong><small>admin-vurderinger</small></article>
+          <article class="card"><span class="label">Sorteret fra</span><strong id="learn-suppressed">0</strong><small>støj + dubletter</small></article>
+        </div>
+        <article class="card"><div class="card-head"><div><span class="label">Adaptive Filter</span><h2>Læringskø</h2></div><button id="refresh-learning">Opdater</button></div><p class="hint">Ukendte mønstre behandles som rigtige meldinger. Først efter gentagen admin-feedback kan et mønster automatisk blive klassificeret som støj.</p><div id="learning-review" class="history-list"></div></article>
+        <article class="card"><span class="label">Automatisk områdeopdagelse</span><h2>Forslag og evidens</h2><p class="hint">Tydelige formuleringer som “Station X” eller “X Brandvæsen” kan opbygge evidens. Efter gentagen klar evidens må systemet selv oprette området.</p><div id="station-suggestions" class="command-list"></div></article>
+      </section>
+
+      <section id="settings" class="panel">
+        <form id="settings-form">
+          <article class="card"><span class="label">Gateway</span><h2>Decoder og input</h2><div class="form-grid"><label>Navn<input name="gateway_name"></label><label>Input<select name="source_mode"><option value="mock">Simulator</option><option value="pdl-file">PDL logfil</option></select></label><label class="wide">PDL logfil<input name="pdl_log_path" placeholder="/data/pdl.log"></label><label>POCSAG bitrate<select name="pocsag_baud"><option value="auto">Auto</option><option value="1200+2400">1200 + 2400</option><option value="512">512</option><option value="1200">1200</option><option value="2400">2400</option></select></label><label>Polaritet<select name="invert"><option value="auto">Auto / normal</option><option value="normal">Normal</option><option value="inverted">Inverteret</option></select></label></div><p class="hint">FSK-USB / RS232 er det primære hardwareinput. 1200 + 2400 matcher discriminator.nl-interfacets kombinerede hardwaretilstand og deaktiverer 512 i PDL.</p></article>
+          <article class="card"><span class="label">Adaptiv filtrering</span><h2>Støj og dubletter</h2><div class="form-grid"><label class="checkbox wide"><input type="checkbox" name="adaptive_filter_enabled"> Aktivér lokal læring og støjfilter</label><label>Dubletvindue<input type="number" name="duplicate_window_seconds" min="1" max="300" step="1"> <small>sekunder</small></label></div><p class="hint">To helt identiske meldinger lige efter hinanden undertrykkes uanset RIC. Begge råmeldinger gemmes stadig for admin.</p></article>
+          <article class="card" id="alarm-filter-card"><span class="label">Manuelt alarmfilter</span><h2>Filtrer alarmord</h2><p class="hint">Hvis en pageralarm indeholder et af ordene eller fraserne herunder, gemmes råmeldingen stadig i adminhistorikken, men den vises ikke i Alarmfeed og sendes ikke som Web Push eller Pushover.</p><div class="form-grid"><label class="wide">Ord eller fraser<input id="alarm-filter-terms" type="text" maxlength="4000" autocomplete="off" placeholder="fx TEST, ØVELSE, servicebesked"></label></div><p class="hint">Adskil flere filtre med komma eller semikolon. Store og små bogstaver behandles ens.</p><div class="actions"><button id="save-alarm-filters" class="primary" type="button">Gem alarmfilter</button><span id="alarm-filter-status" class="muted">Henter…</span></div></article>
+          <article class="card"><span class="label">Web Push</span><h2>PWA notifikationer</h2><div class="form-grid"><label class="wide">VAPID kontakt<input name="vapid_subject" placeholder="mailto:admin@example.dk"></label></div></article>
+          <article class="card"><span class="label">Pushover</span><h2>Ekstra operatørkanal</h2><div class="form-grid"><label class="checkbox wide"><input type="checkbox" name="pushover_enabled"> Aktivér Pushover</label><label>App token<input type="password" name="pushover_app_token" autocomplete="off" placeholder="Behold eksisterende hvis tom"></label><input type="hidden" name="pushover_user_key" value=""></div><p class="hint">Tilføjede Pushover-modtagere vises nedenfor med navn og maskeret user/group key. RIC sendes aldrig med, og støj/dubletter undertrykkes også her.</p><div class="actions"><button type="button" id="test-pushover">Send Pushover-test</button></div></article>
+          <article class="card"><span class="label">Driftsovervågning</span><h2>Ekstern fejl-SMS</h2><div class="form-grid"><label class="checkbox wide"><input type="checkbox" name="external_monitor_enabled"> Aktivér SMS ved længerevarende fejl</label><label>Fejl-SMS til<input type="tel" name="external_monitor_sms_to" autocomplete="tel" placeholder="+4512345678"></label><label>Fejl før alarm<input type="number" name="external_monitor_failure_threshold" min="1" max="10" step="1"></label></div><p class="hint">Den originale Pi kontrollerer Pager-Pi'en hvert 2. minut via Tailscale. Nummeret caches på monitor-Pi'en, så SMS stadig kan sendes ved strømsvigt eller netværksfejl på Pager-Pi'en.</p></article>
+          <div class="savebar"><span id="save-status"></span><button class="primary" type="submit">Gem indstillinger</button></div>
+        </form>
+      </section>
+      {% endif %}
+    </main>
+  </div>
+  <script src="/static/app.js" defer></script>
+  <script src="/static/fsk-status.js" defer></script>
+  <script src="/static/ric-admin.js" defer></script>
+  <script src="/static/adaptive-admin.js" defer></script>
+  <script src="/static/rss-updates.js" defer></script>
+  <script src="/static/alarm-filter-ui.js" defer></script>
+  <script src="/static/pushover-admin.js" defer></script>
+  <script src="/static/alarm-map.js" defer></script>
+</body>
+</html>
