@@ -132,3 +132,9 @@ def register_training_routes(app: Any, storage: Any, training: Any, auth_require
             ),
         )
         return jsonify({"ok": True, "result": result})
+
+    # WhatsApp is registered as an extension after the ordinary pager/training
+    # routes exist. It patches the shared app_core ingest hook, so simulator and
+    # live PDL input both pass through the exact same filter/routing decision.
+    from whatsapp_extension import install_whatsapp
+    install_whatsapp(app, storage, training.routing, auth_required)
