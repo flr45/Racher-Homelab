@@ -60,6 +60,9 @@ services:
       NODE_ENV: production
       PORT: 2785
       LOG_LEVEL: ${PAGER_OPENWA_LOG_LEVEL:-info}
+      # Dashboardet tilgås kun via localhost/SSH-tunnel under setup. Deaktivér
+      # production-CSP'ens HTTP->HTTPS-upgrade, ellers kan UI'et blive blankt.
+      CSP_UPGRADE_INSECURE_REQUESTS: "false"
     volumes:
       - openwa-data:/app/data
     tmpfs:
