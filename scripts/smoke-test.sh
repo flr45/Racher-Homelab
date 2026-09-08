@@ -18,8 +18,13 @@ grep -Eq '"status"[[:space:]]*:[[:space:]]*"(ok|healthy)"' /tmp/racher-health.js
 headers="$(mktemp)"
 body="$(mktemp)"
 trap 'rm -f "$headers" "$body" /tmp/racher-health.json' EXIT
-curl --silent --show-error --max-time 5 -D "$headers" -o "$body" "$BASE_URL/api/modules"
+modules_code="$(curl --silent --show-error --max-time 5 -D "$headers" -o "$body" --write-out '%{http_code}' "$BASE_URL/api/modules")"
+[[ "$modules_code" == "401" ]]
 grep -qi '^Cache-Control: no-store' "$headers"
-grep -q '"modules"' "$body"
+grep -q '"required_permission"' "$body"
+
+identity_code="$(curl --silent --output "$body" --write-out '%{http_code}' --max-time 5 "$BASE_URL/api/identity")"
+[[ "$identity_code" == "200" ]]
+grep -q '"identity"' "$body"
 
 echo "Racher OS smoke test passed"
