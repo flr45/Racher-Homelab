@@ -27,13 +27,12 @@ EOF
   exit 1
 fi
 
-for key in MINUTREGNSKAB_SECRET_KEY; do
-  value="$(sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n 1)"
-  if [[ -z "$value" || "$value" == CHANGE_ME* || ${#value} -lt 32 ]]; then
-    echo "$key mangler, bruger en placeholder eller er kortere end 32 tegn" >&2
-    exit 1
-  fi
-done
+key="MINUTREGNSKAB_SECRET_KEY"
+value="$(sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n 1)"
+if [[ -z "$value" || "$value" == CHANGE_ME* || ${#value} -lt 32 ]]; then
+  echo "$key mangler, bruger en placeholder eller er kortere end 32 tegn" >&2
+  exit 1
+fi
 
 timestamp="$(date +%Y%m%d-%H%M%S)"
 backup_root="${HOME}/homelab/manual-backups"
