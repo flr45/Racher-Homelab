@@ -295,10 +295,14 @@ def queue_sms(body: str, recipient: str) -> None:
     payload = json.dumps(
         {"recipient": recipient, "body": sms_text(body)}, ensure_ascii=False
     ).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    token = os.getenv("SMS_GATEWAY_API_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(
         f"{api_base}/api/outgoing",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=10) as response:

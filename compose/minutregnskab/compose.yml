@@ -9,6 +9,11 @@ services:
       com.centurylinklabs.watchtower.enable: "true"
     environment:
       TZ: ${TZ:-Europe/Copenhagen}
+      DATABASE_PATH: /app/data/minutregnskab.db
+      SECRET_KEY: ${MINUTREGNSKAB_SECRET_KEY:?MINUTREGNSKAB_SECRET_KEY must be set}
+      SESSION_COOKIE_SECURE: ${MINUTREGNSKAB_SESSION_COOKIE_SECURE:-true}
+    volumes:
+      - minutregnskab_data:/app/data
     expose:
       - "8000"
     networks:
@@ -23,3 +28,7 @@ services:
 networks:
   proxy:
     external: true
+
+volumes:
+  minutregnskab_data:
+    name: minutregnskab_data

@@ -74,3 +74,28 @@ def test_known_write_permissions_are_denied_before_route(tmp_path):
     anonymous = client.post("/api/maintenance", json={})
     assert anonymous.status_code == 403
     assert anonymous.get_json()["required_permission"] == "maintenance.manage"
+
+
+def test_sensitive_api_reads_require_a_known_identity(tmp_path):
+    app = create_app({
+        "TESTING": True,
+        "RBAC_ENFORCE_IN_TESTS": True,
+        "DATA_ROOT": tmp_path,
+        "DATABASE_PATH": tmp_path / "test.db",
+        "RBAC_VIEWER_EMAILS": {"viewer@example.test"},
+        "RBAC_DEFAULT_ROLE": "anonymous",
+    })
+    init_rbac(app)
+    client = app.test_client()
+
+    anonymous = client.get("/api/status")
+    assert anonymous.status_code == 401
+    assert anonymous.get_json()["required_permission"] == "system.read"
+    assert client.get("/").status_code == 401
+    assert client.get("/health").status_code == 200
+
+    viewer = client.get(
+        "/api/status",
+        headers={"Cf-Access-Authenticated-User-Email": "viewer@example.test"},
+    )
+    assert viewer.status_code == 200

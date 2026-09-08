@@ -51,6 +51,26 @@ def init_rbac(app):
 
     @app.before_request
     def enforce_known_write_permissions():
+        enforce_reads = current_app.config.get("RBAC_ENFORCE_READ_PERMISSIONS", True)
+        enforce_during_tests = current_app.config.get("RBAC_ENFORCE_IN_TESTS", False)
+        public_path = (
+            request.path in {"/health", "/api/identity", "/favicon.ico"}
+            or request.path.startswith("/static/")
+        )
+        if (
+            not public_path
+            and enforce_reads
+            and (not current_app.testing or enforce_during_tests)
+        ):
+            identity = current_identity()
+            if not has_permission(identity["role"], "system.read"):
+                return jsonify(
+                    {
+                        "error": "Godkendt adgang kræves.",
+                        "required_permission": "system.read",
+                    }
+                ), 401 if not identity["authenticated"] else 403
+
         if request.method in {"GET", "HEAD", "OPTIONS"}:
             return None
         identity = current_identity()

@@ -8,6 +8,14 @@ cd "$ROOT"
 
 [[ -f "$ENV_FILE" ]] || { echo "Miljøfilen mangler: $ENV_FILE" >&2; exit 1; }
 
+for key in RACHER_OS_SECRET_KEY MINUTREGNSKAB_SECRET_KEY; do
+  value="$(sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n 1)"
+  if [[ -z "$value" || "$value" == CHANGE_ME* || ${#value} -lt 32 ]]; then
+    echo "$key mangler, bruger en placeholder eller er kortere end 32 tegn" >&2
+    exit 1
+  fi
+done
+
 git pull --ff-only
 
 for stack in compose/core compose/data compose/minutregnskab compose/indsatsbrief compose/control-center compose/vagtbytte; do

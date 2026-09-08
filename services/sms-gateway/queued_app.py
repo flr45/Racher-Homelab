@@ -113,10 +113,14 @@ def send_sms(recipient: str, body: str):
         {"recipient": recipient, "body": body},
         ensure_ascii=False,
     ).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    token = os.getenv("SMS_GATEWAY_API_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     outgoing = urllib.request.Request(
         f"{api_base}/api/outgoing",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
@@ -134,10 +138,11 @@ def send_sms(recipient: str, body: str):
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(
+            status_request = urllib.request.Request(
                 f"{api_base}/api/outgoing/{message_id}",
-                timeout=8,
-            ) as response:
+                headers={"Authorization": f"Bearer {token}"} if token else {},
+            )
+            with urllib.request.urlopen(status_request, timeout=8) as response:
                 current = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             details = exc.read().decode("utf-8", errors="replace")
