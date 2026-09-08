@@ -1,5 +1,9 @@
 # SMS Alarm Gateway
 
+Alle `/api/*`-kald kræver `Authorization: Bearer $SMS_GATEWAY_API_TOKEN`.
+Healthchecket er fortsat offentligt, men API-kald afvises, hvis tokenet ikke er
+konfigureret.
+
 USB-modem-baseret SMS-tjeneste til Racher OS. Første melding videresendes straks, når den indeholder en stationskode. Efterfølgende meldinger fra samme afsender videresendes også straks i et tidsvindue; tidsvinduet bruges kun til at koble melding 2 til den aktive alarm og skaber ingen forsinkelse.
 
 ## Stationskoder

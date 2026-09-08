@@ -81,7 +81,11 @@ services:
     environment:
       TZ: ${TZ:-Europe/Copenhagen}
       RACHER_OS_DATA: /data
+      RACHER_OS_SECRET_KEY: ${RACHER_OS_SECRET_KEY:?RACHER_OS_SECRET_KEY must be set}
       BACKUP_ROOT: /backups
+      # File Browser is disabled by default. Add a dedicated, non-secret export
+      # directory here instead of exposing /data or /backups.
+      FILE_BROWSER_ROOTS: ""
       LOCAL_MONITOR_STATE_FILE: /host-monitor-data/health-monitor/state.json
       REMOTE_MONITOR_STATE_FILE: /host-monitor-data/remote-host-monitor/state.json
       HOST_MONITOR_STALE_SECONDS: ${HOST_MONITOR_STALE_SECONDS:-900}
@@ -100,6 +104,7 @@ services:
       RBAC_OPERATOR_EMAILS: ${RBAC_OPERATOR_EMAILS:-}
       RBAC_VIEWER_EMAILS: ${RBAC_VIEWER_EMAILS:-}
       RBAC_DEFAULT_ROLE: ${RBAC_DEFAULT_ROLE:-anonymous}
+      RBAC_ENFORCE_READ_PERMISSIONS: ${RBAC_ENFORCE_READ_PERMISSIONS:-true}
       ALLOWED_ADMIN_EMAILS: ${ALLOWED_ADMIN_EMAILS:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

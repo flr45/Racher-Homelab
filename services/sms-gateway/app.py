@@ -1,4 +1,5 @@
 import json
+import hmac
 import logging
 import os
 import re
@@ -37,6 +38,27 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("sms-gateway")
+
+
+@app.before_request
+def require_api_token():
+    if not request.path.startswith("/api/"):
+        return None
+
+    configured = os.getenv("SMS_GATEWAY_API_TOKEN", "").strip()
+    if not configured:
+        log.error("SMS_GATEWAY_API_TOKEN mangler; API-adgang afvises")
+        return jsonify(error="SMS Gateway API er ikke konfigureret"), 503
+
+    authorization = request.headers.get("Authorization", "")
+    scheme, separator, supplied = authorization.partition(" ")
+    if (
+        not separator
+        or scheme.lower() != "bearer"
+        or not hmac.compare_digest(supplied.strip(), configured)
+    ):
+        return jsonify(error="Ikke godkendt"), 401
+    return None
 
 
 firefighter_stations = db.Table(

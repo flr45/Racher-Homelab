@@ -13,6 +13,9 @@ def _csv_set(name, default="", *, lowercase=False):
 
 class Config:
     SECRET_KEY = os.getenv("RACHER_OS_SECRET_KEY")
+    RBAC_ENFORCE_READ_PERMISSIONS = os.getenv(
+        "RBAC_ENFORCE_READ_PERMISSIONS", "true"
+    ).lower() == "true"
 
     APP_LINKS = [
         {
@@ -87,7 +90,7 @@ class Config:
     DATABASE_PATH = DATA_ROOT / "racher-os.db"
     FILE_BROWSER_ROOTS = tuple(
         Path(value.strip())
-        for value in os.getenv("FILE_BROWSER_ROOTS", "/data,/backups").split(",")
+        for value in os.getenv("FILE_BROWSER_ROOTS", "").split(",")
         if value.strip()
     )
     FILE_BROWSER_MAX_DOWNLOAD_BYTES = min(

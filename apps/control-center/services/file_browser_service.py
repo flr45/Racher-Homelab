@@ -17,6 +17,7 @@ class FileTooLargeError(FileBrowserError):
 
 _BLOCKED_NAMES = {
     ".env",
+    "env.backup",
     ".git",
     ".ssh",
     "id_rsa",

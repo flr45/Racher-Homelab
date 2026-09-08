@@ -174,9 +174,14 @@ backup_volume racher-homelab-core_uptime_kuma_data uptime-kuma
 backup_volume racher-homelab-data_redis_data redis
 backup_volume vagtbytte_vagtbytte_backups vagtbytte-backups
 backup_volume vagtbytte_vagtbytte_operativ_portal vagtbytte-operativ-portal
+backup_volume sms-gateway_sms_gateway_data sms-gateway
+backup_volume minutregnskab_data minutregnskab
+backup_volume ordberedskab_ordberedskab_data ordberedskab
 
-cp "$ENV_FILE" "$DEST/env.backup"
-chmod 600 "$DEST/env.backup"
+# Secrets must not be copied into the backup archive. Keep only the variable
+# names so restore documentation can show which values must be supplied again.
+sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1=/p' "$ENV_FILE" > "$DEST/env.template"
+chmod 600 "$DEST/env.template"
 
 cat > "$DEST/MANIFEST.json" <<EOF
 {

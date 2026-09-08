@@ -22,6 +22,7 @@ def test_listing_hides_sensitive_and_hidden_files(tmp_path):
     (root / "folder").mkdir()
     (root / "normal.txt").write_text("hello")
     (root / ".env").write_text("SECRET=value")
+    (root / "env.backup").write_text("SECRET=value")
     (root / ".hidden").write_text("hidden")
     (root / "private.pem").write_text("private")
 
@@ -35,11 +36,14 @@ def test_path_traversal_and_sensitive_files_are_blocked(tmp_path):
     root = tmp_path / "files"
     root.mkdir()
     (root / ".env").write_text("SECRET=value")
+    (root / "env.backup").write_text("SECRET=value")
 
     with pytest.raises(FileNotAllowedError):
         resolve_path(root, "../outside")
     with pytest.raises(FileNotAllowedError):
         resolve_path(root, ".env")
+    with pytest.raises(FileNotAllowedError):
+        resolve_path(root, "env.backup")
 
 
 def test_external_and_internal_symlinks_are_blocked(tmp_path):

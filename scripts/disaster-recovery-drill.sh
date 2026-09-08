@@ -29,7 +29,7 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 data = json.loads(path.read_text(encoding="utf-8"))
-if data.get("format_version") != 1:
+if data.get("format_version") not in {1, 2}:
     raise SystemExit("Ukendt backupformat")
 for key in ("created_at", "host"):
     if not isinstance(data.get(key), str) or not data[key].strip():
