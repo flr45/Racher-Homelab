@@ -4,6 +4,13 @@ Every ordinary inbound SMS is delivered to SBR Pager directly from the modem
 worker before the existing SMS-gateway/Vagtbytte path runs. This keeps SBR
 Pager independent of the legacy application flow while retaining the existing
 SMS gateway for Vagtbytte, status commands and SMS forwarding.
+
+Huawei may mark an unread SMS as read when it is returned by AT+CMGL=0. That
+is unsafe for concatenated SMS: part 1 can become read before part 2 arrives,
+so a later unread-only poll never sees the complete message. Therefore this
+wrapper changes only the inbox listing command to AT+CMGL=4 (all stored SMS).
+Completed messages are still deleted by the existing modem reader after normal
+processing, while incomplete multipart groups stay on the SIM until complete.
 """
 
 import json
@@ -32,10 +39,20 @@ SBR_PAGER_IGNORE_COMMANDS = {
 }
 
 _original_post_message = reader.post_message
+_original_command = reader.command
 
 
 def normalized_command(body: str) -> str:
     return " ".join((body or "").strip().casefold().split())
+
+
+def modem_command(port, value, timeout=8, expected="\r\nOK\r\n"):
+    # List ALL stored SMS instead of only unread SMS. Some Huawei firmware marks
+    # a returned unread segment as read, which otherwise loses multipart groups
+    # when their segments arrive in different polling cycles.
+    if value == "AT+CMGL=0":
+        value = "AT+CMGL=4"
+    return _original_command(port, value, timeout=timeout, expected=expected)
 
 
 def post_to_sbr_pager(message: dict):
@@ -98,6 +115,7 @@ def post_message(message: dict):
     return _original_post_message(message)
 
 
+reader.command = modem_command
 reader.post_message = post_message
 
 
