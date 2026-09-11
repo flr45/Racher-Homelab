@@ -11,11 +11,16 @@ so a later unread-only poll never sees the complete message. Therefore this
 wrapper changes only the inbox listing command to AT+CMGL=4 (all stored SMS).
 Completed messages are still deleted by the existing modem reader after normal
 processing, while incomplete multipart groups stay on the SIM until complete.
+
+Non-phone/alphanumeric senders are consumed without sending them to SBR Pager.
+This prevents operator/service SMS messages from becoming permanently stuck on
+the SIM and blocking or slowing later alarm messages.
 """
 
 import json
 import logging
 import os
+import re
 import signal
 import urllib.error
 import urllib.request
@@ -40,10 +45,22 @@ SBR_PAGER_IGNORE_COMMANDS = {
 
 _original_post_message = reader.post_message
 _original_command = reader.command
+_PHONE_PATTERN = re.compile(r"^\+[1-9]\d{6,14}$")
 
 
 def normalized_command(body: str) -> str:
     return " ".join((body or "").strip().casefold().split())
+
+
+def normalize_phone_sender(value: str) -> str | None:
+    phone = re.sub(r"[\s().-]", "", value or "")
+    if phone.startswith("00"):
+        phone = "+" + phone[2:]
+    if phone.isdigit() and len(phone) == 8:
+        phone = "+45" + phone
+    if not _PHONE_PATTERN.fullmatch(phone):
+        return None
+    return phone
 
 
 def modem_command(port, value, timeout=8, expected="\r\nOK\r\n"):
@@ -96,6 +113,24 @@ def post_to_sbr_pager(message: dict):
 
 
 def post_message(message: dict):
+    normalized_sender = normalize_phone_sender(message.get("sender") or "")
+    if normalized_sender is None:
+        log.warning(
+            "Springer ikke-telefon SMS-afsender over og rydder beskeden fra modemmet: %r",
+            message.get("sender"),
+        )
+        # Return a normal-looking gateway result so modem_reader can delete the
+        # unsupported service/operator SMS instead of retrying it forever.
+        return {
+            "station": None,
+            "forwarded_immediately_to": 0,
+            "vagtbytte_created": False,
+        }
+
+    if normalized_sender != message.get("sender"):
+        message = dict(message)
+        message["sender"] = normalized_sender
+
     command = normalized_command(message.get("body") or "")
     if command in SBR_PAGER_IGNORE_COMMANDS:
         log.info("SBR Pager ignorerer SMS-kommando fra %s: %s", message["sender"], command)
