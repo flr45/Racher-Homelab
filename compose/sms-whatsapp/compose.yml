@@ -57,6 +57,7 @@ services:
       - "127.0.0.1:${SMS_WHATSAPP_PORT:-8091}:8080"
     networks:
       - backend
+      - proxy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
       interval: 30s
@@ -72,4 +73,6 @@ volumes:
 
 networks:
   backend:
+    external: true
+  proxy:
     external: true
