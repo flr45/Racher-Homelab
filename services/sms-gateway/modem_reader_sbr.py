@@ -223,6 +223,23 @@ def parse_cmgl_with_prealerts(response: str) -> list[dict]:
     return sms_pdu.assemble_parts(parts)
 
 
+def format_complete_for_whatsapp(message: dict) -> dict:
+    body = (message.get("body") or "").strip()
+    is_sending_2 = _SENDING_2_PATTERN.search(body) is not None
+    is_multipart = len(message.get("indices") or []) > 1
+
+    if not is_multipart and not is_sending_2:
+        return message
+
+    formatted = dict(message)
+    if is_sending_2:
+        heading = "📟 SENDING 2 – KOMPLET" if is_multipart else "📟 SENDING 2"
+    else:
+        heading = "🚨 KOMPLET ALARM"
+    formatted["body"] = f"{heading}\n{body}"
+    return formatted
+
+
 def post_message(message: dict):
     normalized_sender = normalize_phone_sender(message.get("sender") or "")
     if normalized_sender is None:
@@ -246,7 +263,7 @@ def post_message(message: dict):
     if command in SBR_PAGER_IGNORE_COMMANDS:
         log.info("SBR Pager ignorerer SMS-kommando fra %s: %s", message["sender"], command)
     else:
-        result = post_to_sbr_pager(message)
+        result = post_to_sbr_pager(format_complete_for_whatsapp(message))
         log.info(
             "SMS fra %s afleveret DIREKTE fra modem til SBR Pager, accepted=%s, sent=%s, failed=%s, duplicate=%s",
             message["sender"],
