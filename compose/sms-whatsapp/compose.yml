@@ -1,0 +1,41 @@
+services:
+  sms-whatsapp:
+    build:
+      context: ../../services/sms-whatsapp
+    container_name: racher-sms-whatsapp
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:////data/sms-whatsapp.db
+      SMS_GATEWAY_URL: ${SMS_WHATSAPP_SMS_GATEWAY_URL:-http://sms-gateway:8080}
+      SMS_GATEWAY_API_TOKEN: ${SMS_GATEWAY_API_TOKEN:?SMS_GATEWAY_API_TOKEN must be set}
+      SMS_WHATSAPP_POLL_SECONDS: ${SMS_WHATSAPP_POLL_SECONDS:-2}
+      SMS_WHATSAPP_IGNORE_COMMANDS: ${SMS_WHATSAPP_IGNORE_COMMANDS:-status,server status,serverstatus}
+      SMS_WHATSAPP_INGEST_TOKEN: ${SMS_WHATSAPP_INGEST_TOKEN:?SMS_WHATSAPP_INGEST_TOKEN must be set}
+      SMS_WHATSAPP_ADMIN_USERNAME: ${SMS_WHATSAPP_ADMIN_USERNAME:-admin}
+      SMS_WHATSAPP_ADMIN_PASSWORD: ${SMS_WHATSAPP_ADMIN_PASSWORD:?SMS_WHATSAPP_ADMIN_PASSWORD must be set}
+      SMS_WHATSAPP_SESSION_SECRET: ${SMS_WHATSAPP_SESSION_SECRET:?SMS_WHATSAPP_SESSION_SECRET must be set}
+      SMS_WHATSAPP_COOKIE_SECURE: ${SMS_WHATSAPP_COOKIE_SECURE:-false}
+      OPENWA_BASE_URL: ${SMS_WHATSAPP_OPENWA_URL:-http://openwa:2785/api}
+      OPENWA_API_KEY: ${SMS_WHATSAPP_OPENWA_API_KEY:?SMS_WHATSAPP_OPENWA_API_KEY must be set}
+      OPENWA_SESSION_ID: ${SMS_WHATSAPP_OPENWA_SESSION_ID:?SMS_WHATSAPP_OPENWA_SESSION_ID must be set}
+    volumes:
+      - sms_whatsapp_data:/data
+    ports:
+      - "127.0.0.1:${SMS_WHATSAPP_PORT:-8091}:8080"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  sms_whatsapp_data:
+
+networks:
+  backend:
+    external: true
