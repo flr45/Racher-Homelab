@@ -4,8 +4,8 @@ WORKDIR /app
 RUN useradd --create-home --uid 10001 appuser
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py poller.py ./
-RUN python -m py_compile app.py poller.py && mkdir -p /data && chown -R appuser:appuser /app /data
+COPY app.py events_app.py poller.py ./
+RUN python -m py_compile app.py events_app.py poller.py && mkdir -p /data && chown -R appuser:appuser /app /data
 USER appuser
 EXPOSE 8080
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "--timeout", "60", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "--timeout", "60", "events_app:app"]
