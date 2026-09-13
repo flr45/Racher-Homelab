@@ -12,9 +12,11 @@ wrapper changes only the inbox listing command to AT+CMGL=4 (all stored SMS).
 Completed messages are still deleted by the existing modem reader after normal
 processing, while incomplete multipart groups stay on the SIM until complete.
 
-For multipart alarm messages, part 1 is also sent immediately as a deduplicated
-pre-alert. When every segment has arrived, the normal complete message follows.
-A later multipart "Sending 2" gets its own immediate follow-up pre-alert.
+For multipart alarm messages we wait a configurable grace period before sending
+part 1 as a pre-alert. Normal short multipart alarms therefore usually arrive as
+one complete WhatsApp message, while genuinely long/delayed multipart alarms
+still produce an early warning. A later multipart "Sending 2" follows the same
+rule.
 
 Structured event metadata is sent together with each SBR Pager ingest so the
 admin panel can group pre-alert, complete alarm and later Sending 2 updates into
@@ -31,6 +33,7 @@ import logging
 import os
 import re
 import signal
+import time
 import urllib.error
 import urllib.request
 
@@ -44,6 +47,10 @@ SBR_PAGER_INGEST_URL = os.getenv(
     "http://sms-whatsapp:8080/api/incoming",
 ).strip()
 SBR_PAGER_INGEST_TOKEN = os.getenv("SBR_PAGER_INGEST_TOKEN", "").strip()
+SBR_PAGER_PREALERT_DELAY_SECONDS = max(
+    0.0,
+    float(os.getenv("SBR_PAGER_PREALERT_DELAY_SECONDS", "10")),
+)
 SBR_PAGER_IGNORE_COMMANDS = {
     " ".join(value.casefold().split())
     for value in os.getenv(
@@ -57,6 +64,8 @@ _original_post_message = reader.post_message
 _original_command = reader.command
 _PHONE_PATTERN = re.compile(r"^\+[1-9]\d{6,14}$")
 _SENDING_2_PATTERN = re.compile(r"\bsending\s*2\b", re.IGNORECASE)
+_multipart_first_seen: dict[str, float] = {}
+_multipart_prealert_sent: set[str] = set()
 
 
 def normalized_command(body: str) -> str:
@@ -75,9 +84,6 @@ def normalize_phone_sender(value: str) -> str | None:
 
 
 def modem_command(port, value, timeout=8, expected="\r\nOK\r\n"):
-    # List ALL stored SMS instead of only unread SMS. Some Huawei firmware marks
-    # a returned unread segment as read, which otherwise loses multipart groups
-    # when their segments arrive in different polling cycles.
     if value == "AT+CMGL=0":
         value = "AT+CMGL=4"
     return _original_command(port, value, timeout=timeout, expected=expected)
@@ -239,14 +245,28 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
             for part in grouped
             if part.concat_part is not None
         }
-
-        # The complete message is handled by the normal path below. Pre-alerts
-        # are only for the period where later fragments are still missing.
-        if set(by_sequence) == set(range(1, total + 1)):
-            continue
-
         first = by_sequence.get(1)
         if first is None:
+            continue
+
+        normalized_sender = normalize_phone_sender(first.sender) or first.sender
+        state_key = multipart_group_key(
+            normalized_sender,
+            first.concat_reference,
+            first.concat_total,
+            first.timestamp,
+        )
+
+        if set(by_sequence) == set(range(1, total + 1)):
+            _multipart_first_seen.pop(state_key, None)
+            _multipart_prealert_sent.discard(state_key)
+            continue
+
+        first_seen = _multipart_first_seen.setdefault(state_key, time.monotonic())
+        waited = max(0.0, time.monotonic() - first_seen)
+        if waited < SBR_PAGER_PREALERT_DELAY_SECONDS:
+            continue
+        if state_key in _multipart_prealert_sent:
             continue
 
         sender = normalize_phone_sender(first.sender)
@@ -265,12 +285,6 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
             f"{first_text}\n\n"
             f"⏳ Resten af meldingen er på vej · {visible_parts}/{total}"
         )
-        group_key = multipart_group_key(
-            sender,
-            first.concat_reference,
-            first.concat_total,
-            first.timestamp,
-        )
         message_kind = "sending2_prealert" if is_sending_2 else "alarm_prealert"
 
         try:
@@ -279,16 +293,19 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
                 body=body,
                 received_at=first.timestamp,
                 source_message_id=prealert_source_id(first),
-                event_key=group_key,
-                group_key=group_key,
+                event_key=state_key,
+                group_key=state_key,
                 message_kind=message_kind,
                 raw_body=first_text,
                 part_current=visible_parts,
                 part_total=total,
             )
+            if result is not None:
+                _multipart_prealert_sent.add(state_key)
             if result is not None and not result.get("duplicate", False):
                 log.info(
-                    "PRE-ALARM sendt straks for multipart SMS fra %s, del=%s/%s, accepted=%s, sent=%s, failed=%s",
+                    "PRE-ALARM sendt efter %.1f s ventetid for multipart SMS fra %s, del=%s/%s, accepted=%s, sent=%s, failed=%s",
+                    waited,
                     sender,
                     visible_parts,
                     total,
@@ -297,8 +314,6 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
                     result.get("failed"),
                 )
         except Exception:  # noqa: BLE001
-            # A failed pre-alert must never stop the modem reader. It will be
-            # retried on the next 0.5 s poll while the fragments remain stored.
             log.exception("Kunne ikke sende multipart PRE-ALARM til SBR Pager")
 
 
@@ -335,8 +350,6 @@ def post_message(message: dict):
             "Springer ikke-telefon SMS-afsender over og rydder beskeden fra modemmet: %r",
             message.get("sender"),
         )
-        # Return a normal-looking gateway result so modem_reader can delete the
-        # unsupported service/operator SMS instead of retrying it forever.
         return {
             "station": None,
             "forwarded_immediately_to": 0,
@@ -361,8 +374,6 @@ def post_message(message: dict):
             (result or {}).get("duplicate", False),
         )
 
-    # Keep the existing SMS-gateway/Vagtbytte flow as an independent secondary
-    # consumer. The modem message is only deleted after this returns normally.
     return _original_post_message(message)
 
 
@@ -372,6 +383,10 @@ reader.post_message = post_message
 
 
 if __name__ == "__main__":
+    log.info(
+        "SBR Pager multipart pre-alert ventetid: %.1f sekunder",
+        SBR_PAGER_PREALERT_DELAY_SECONDS,
+    )
     signal.signal(signal.SIGTERM, reader.stop)
     signal.signal(signal.SIGINT, reader.stop)
     reader.run()
