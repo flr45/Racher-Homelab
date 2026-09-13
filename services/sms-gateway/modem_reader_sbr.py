@@ -16,6 +16,10 @@ For multipart alarm messages, part 1 is also sent immediately as a deduplicated
 pre-alert. When every segment has arrived, the normal complete message follows.
 A later multipart "Sending 2" gets its own immediate follow-up pre-alert.
 
+Structured event metadata is sent together with each SBR Pager ingest so the
+admin panel can group pre-alert, complete alarm and later Sending 2 updates into
+one alarm event without changing the original alarm text.
+
 Non-phone/alphanumeric senders are consumed without sending them to SBR Pager.
 This prevents operator/service SMS messages from becoming permanently stuck on
 the SIM and blocking or slowing later alarm messages.
@@ -79,26 +83,60 @@ def modem_command(port, value, timeout=8, expected="\r\nOK\r\n"):
     return _original_command(port, value, timeout=timeout, expected=expected)
 
 
+def multipart_group_key(
+    sender: str,
+    concat_reference: int | None,
+    concat_total: int | None,
+    timestamp: str,
+) -> str:
+    stable = "|".join(
+        [
+            reader.MODEM_DEVICE,
+            sender,
+            str(concat_reference),
+            str(concat_total),
+            timestamp,
+        ]
+    )
+    digest = hashlib.sha256(stable.encode("utf-8")).hexdigest()
+    return f"huawei-group:{digest}"
+
+
 def post_sbr_payload(
     sender: str,
     body: str,
     received_at: str,
     source_message_id: str,
+    *,
+    event_key: str | None = None,
+    group_key: str | None = None,
+    message_kind: str | None = None,
+    raw_body: str | None = None,
+    part_current: int | None = None,
+    part_total: int | None = None,
 ):
     if not SBR_PAGER_INGEST_URL:
         return None
     if not SBR_PAGER_INGEST_TOKEN:
         raise RuntimeError("SBR_PAGER_INGEST_TOKEN mangler")
 
-    payload = json.dumps(
-        {
-            "sender": sender,
-            "body": body,
-            "receivedAt": received_at,
-            "sourceMessageId": source_message_id,
-        },
-        ensure_ascii=False,
-    ).encode("utf-8")
+    document = {
+        "sender": sender,
+        "body": body,
+        "receivedAt": received_at,
+        "sourceMessageId": source_message_id,
+    }
+    optional = {
+        "eventKey": event_key,
+        "groupKey": group_key,
+        "messageKind": message_kind,
+        "rawBody": raw_body,
+        "partCurrent": part_current,
+        "partTotal": part_total,
+    }
+    document.update({key: value for key, value in optional.items() if value is not None})
+
+    payload = json.dumps(document, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         SBR_PAGER_INGEST_URL,
         data=payload,
@@ -124,12 +162,46 @@ def post_sbr_payload(
         raise RuntimeError(f"Kunne ikke kontakte SBR Pager: {exc.reason}") from exc
 
 
+def complete_message_metadata(message: dict) -> tuple[str, str, str, int, int]:
+    raw_body = (message.get("body") or "").strip()
+    is_sending_2 = _SENDING_2_PATTERN.search(raw_body) is not None
+    is_multipart = len(message.get("indices") or []) > 1
+    source_id = reader.source_message_id(message)
+
+    if is_multipart and message.get("_event_group_key"):
+        group_key = str(message["_event_group_key"])
+        total = int(message.get("_concat_total") or len(message.get("indices") or []))
+    else:
+        group_key = source_id
+        total = 1
+
+    kind = "sending2_complete" if is_sending_2 else "alarm_complete"
+    if is_sending_2:
+        heading = "📟 *SENDING 2 – KOMPLET*" if is_multipart else "📟 *SENDING 2*"
+    elif is_multipart:
+        heading = "🚨 *KOMPLET ALARM*"
+    else:
+        heading = ""
+
+    formatted_body = f"{heading}\n{raw_body}" if heading else raw_body
+    return formatted_body, raw_body, kind, total, total
+
+
 def post_to_sbr_pager(message: dict):
+    formatted_body, raw_body, kind, current, total = complete_message_metadata(message)
+    source_id = reader.source_message_id(message)
+    group_key = str(message.get("_event_group_key") or source_id)
     return post_sbr_payload(
         sender=message["sender"],
-        body=message["body"],
+        body=formatted_body,
         received_at=message["timestamp"],
-        source_message_id=reader.source_message_id(message),
+        source_message_id=source_id,
+        event_key=group_key,
+        group_key=group_key,
+        message_kind=kind,
+        raw_body=raw_body,
+        part_current=current,
+        part_total=total,
     )
 
 
@@ -186,13 +258,20 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
             continue
 
         is_sending_2 = _SENDING_2_PATTERN.search(first_text) is not None
-        heading = "📟 SENDING 2 MODTAGET" if is_sending_2 else "🚨 ALARM MODTAGET"
+        heading = "📟 *SENDING 2 MODTAGET*" if is_sending_2 else "🚨 *ALARM MODTAGET*"
         visible_parts = len(by_sequence)
         body = (
             f"{heading}\n"
             f"{first_text}\n\n"
-            f"⏳ Afventer resten af meldingen ({visible_parts}/{total})"
+            f"⏳ Resten af meldingen er på vej · {visible_parts}/{total}"
         )
+        group_key = multipart_group_key(
+            sender,
+            first.concat_reference,
+            first.concat_total,
+            first.timestamp,
+        )
+        message_kind = "sending2_prealert" if is_sending_2 else "alarm_prealert"
 
         try:
             result = post_sbr_payload(
@@ -200,6 +279,12 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
                 body=body,
                 received_at=first.timestamp,
                 source_message_id=prealert_source_id(first),
+                event_key=group_key,
+                group_key=group_key,
+                message_kind=message_kind,
+                raw_body=first_text,
+                part_current=visible_parts,
+                part_total=total,
             )
             if result is not None and not result.get("duplicate", False):
                 log.info(
@@ -220,24 +305,27 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
 def parse_cmgl_with_prealerts(response: str) -> list[dict]:
     parts = sms_pdu.parse_cmgl_parts(response)
     send_multipart_prealerts(parts)
-    return sms_pdu.assemble_parts(parts)
+    messages = sms_pdu.assemble_parts(parts)
+    part_by_index = {part.index: part for part in parts}
 
+    for message in messages:
+        indices = message.get("indices") or []
+        if len(indices) <= 1:
+            continue
+        first = part_by_index.get(indices[0])
+        if first is None or first.concat_reference is None or first.concat_total is None:
+            continue
+        normalized_sender = normalize_phone_sender(first.sender) or first.sender
+        message["_concat_reference"] = first.concat_reference
+        message["_concat_total"] = first.concat_total
+        message["_event_group_key"] = multipart_group_key(
+            normalized_sender,
+            first.concat_reference,
+            first.concat_total,
+            first.timestamp,
+        )
 
-def format_complete_for_whatsapp(message: dict) -> dict:
-    body = (message.get("body") or "").strip()
-    is_sending_2 = _SENDING_2_PATTERN.search(body) is not None
-    is_multipart = len(message.get("indices") or []) > 1
-
-    if not is_multipart and not is_sending_2:
-        return message
-
-    formatted = dict(message)
-    if is_sending_2:
-        heading = "📟 SENDING 2 – KOMPLET" if is_multipart else "📟 SENDING 2"
-    else:
-        heading = "🚨 KOMPLET ALARM"
-    formatted["body"] = f"{heading}\n{body}"
-    return formatted
+    return messages
 
 
 def post_message(message: dict):
@@ -263,7 +351,7 @@ def post_message(message: dict):
     if command in SBR_PAGER_IGNORE_COMMANDS:
         log.info("SBR Pager ignorerer SMS-kommando fra %s: %s", message["sender"], command)
     else:
-        result = post_to_sbr_pager(format_complete_for_whatsapp(message))
+        result = post_to_sbr_pager(message)
         log.info(
             "SMS fra %s afleveret DIREKTE fra modem til SBR Pager, accepted=%s, sent=%s, failed=%s, duplicate=%s",
             message["sender"],
