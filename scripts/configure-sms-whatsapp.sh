@@ -55,10 +55,14 @@ if ! grep -Eq '^SMS_GATEWAY_API_TOKEN=.+' "$ENV_FILE"; then
 fi
 
 export SMSWA_SESSION_ID="$SESSION_ID"
-export SMSWA_OPERATOR_KEY="$(tr -d '\r\n' < "$OPERATOR_KEY_FILE")"
-export SMSWA_ADMIN_PASSWORD="$(tr -d '\r\n' < "$ADMIN_PASSWORD_FILE")"
-export SMSWA_INGEST_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
-export SMSWA_SESSION_SECRET="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+SMSWA_OPERATOR_KEY="$(tr -d '\r\n' < "$OPERATOR_KEY_FILE")"
+export SMSWA_OPERATOR_KEY
+SMSWA_ADMIN_PASSWORD="$(tr -d '\r\n' < "$ADMIN_PASSWORD_FILE")"
+export SMSWA_ADMIN_PASSWORD
+SMSWA_INGEST_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+export SMSWA_INGEST_TOKEN
+SMSWA_SESSION_SECRET="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+export SMSWA_SESSION_SECRET
 
 cp "$ENV_FILE" "$ENV_FILE.sms-whatsapp-backup"
 chmod 600 "$ENV_FILE.sms-whatsapp-backup"
