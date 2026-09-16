@@ -18,6 +18,7 @@ try:
 finally:
     FileTailSource.start = _real_file_tail_start
 
+from admin_user_stations import install_admin_user_stations
 from alarm_feed_v2 import install_alarm_feed_v2
 from alarm_retention import install_alarm_retention
 from alarm_rules import install_alarm_rules
@@ -50,6 +51,7 @@ alarm_feed_v2 = install_alarm_feed_v2(core)
 alarm_retention = install_alarm_retention(core)
 operations = install_operations(core)
 system_overview = install_system_overview(core)
+admin_user_stations = install_admin_user_stations(core)
 ric_sms = install_ric_sms(core, core.auth_required)
 rss_updates = install_rss_updates(core)
 install_pdl_multiline_tail(core.source)
@@ -72,6 +74,7 @@ _ALARM_FILTER_SCRIPT = '<script src="/static/alarm-filter-ui.js" defer></script>
 _PUSHOVER_ADMIN_SCRIPT = '<script src="/static/pushover-admin.js" defer></script>'
 _RIC_SMS_ADMIN_SCRIPT = '<script src="/static/ric-sms-admin.js" defer></script>'
 _SYSTEM_OVERVIEW_SCRIPT = '<script src="/static/system-overview.js" defer></script>'
+_ADMIN_USER_STATIONS_SCRIPT = '<script src="/static/admin-user-stations.js" defer></script>'
 _ALARM_FILTER_CARD = """
           <article class="card" id="alarm-filter-card">
             <span class="label">Manuelt alarmfilter</span>
@@ -157,6 +160,8 @@ def _enhance_home_html(body: str) -> str:
             helpers.append(_RIC_SMS_ADMIN_SCRIPT)
         if is_admin_page and "system-overview.js" not in body:
             helpers.append(_SYSTEM_OVERVIEW_SCRIPT)
+        if is_admin_page and "admin-user-stations.js" not in body:
+            helpers.append(_ADMIN_USER_STATIONS_SCRIPT)
         if "alarm-map.js" not in body:
             helpers.append(_ALARM_MAP_SCRIPT)
         if helpers:
