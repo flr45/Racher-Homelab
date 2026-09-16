@@ -28,8 +28,10 @@ services:
       - "${DIALOUT_GID:-20}"
     volumes:
       - sms_gateway_data:/data
+    # Default remains localhost-only. Set SMS_GATEWAY_BIND_IP to the host's
+    # Tailscale IP when the dedicated Pager host needs remote status access.
     ports:
-      - "127.0.0.1:${SMS_GATEWAY_PORT:-8090}:8080"
+      - "${SMS_GATEWAY_BIND_IP:-127.0.0.1}:${SMS_GATEWAY_PORT:-8090}:8080"
     networks:
       - backend
     healthcheck:
