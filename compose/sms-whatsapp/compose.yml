@@ -47,6 +47,9 @@ services:
       OPENWA_BASE_URL: ${SMS_WHATSAPP_OPENWA_URL:-http://openwa:2785/api}
       OPENWA_API_KEY: ${SMS_WHATSAPP_OPENWA_API_KEY:?SMS_WHATSAPP_OPENWA_API_KEY must be set}
       OPENWA_SESSION_ID: ${SMS_WHATSAPP_OPENWA_SESSION_ID:?SMS_WHATSAPP_OPENWA_SESSION_ID must be set}
+      SBR_PAGER_AUTO_GEOCODE: ${SMS_WHATSAPP_AUTO_GEOCODE:-true}
+      SBR_PAGER_GEOCODER_URL: ${SMS_WHATSAPP_GEOCODER_URL:-https://api.dataforsyningen.dk/datavask/adgangsadresser}
+      SBR_PAGER_GEOCODER_TIMEOUT_SECONDS: ${SMS_WHATSAPP_GEOCODER_TIMEOUT_SECONDS:-4}
     volumes:
       - sms_whatsapp_data:/data
     ports:
