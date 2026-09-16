@@ -72,19 +72,30 @@ def alarm_filter_map() -> dict[int, set[str]]:
     }
 
 
+def _remove_section(html: str, marker: str) -> str:
+    start = html.find(marker)
+    if start == -1:
+        return html
+    end = html.find("</section>", start)
+    if end == -1:
+        return html
+    return html[:start] + html[end + len("</section>"):]
+
+
 ADMIN_USERS_PAGE = base.BASE_HTML.replace(
     "{% block content %}{% endblock %}",
     r"""
 <style>
+.create-user{display:grid;grid-template-columns:minmax(180px,1fr) minmax(190px,1fr) minmax(180px,.8fr) auto;gap:10px;align-items:end}
 .station-create{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end}
 .station-block{margin-bottom:16px;padding:0;overflow:hidden}
 .station-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;background:#101a27;border-bottom:1px solid var(--border)}
 .station-name{font-weight:800;font-size:18px}.unassigned .station-head{background:#2b2412}.unassigned .station-name{color:#ffe49a}
 .user-card{border-bottom:1px solid #213044}.user-card:last-child{border-bottom:0}.user-card>summary{list-style:none;cursor:pointer;padding:14px 16px}.user-card>summary::-webkit-details-marker{display:none}.user-card[open]>summary{background:#0e1722}
 .user-summary{display:grid;grid-template-columns:minmax(170px,1.4fr) 110px minmax(150px,1fr) 34px;gap:12px;align-items:center}.user-name{font-weight:780}.user-phone{color:var(--muted);font-size:13px}.badge-active{color:#9cf0c4}.badge-inactive{color:#ffb0b0}.user-arrow{font-size:18px;color:var(--muted);transition:transform .18s ease;text-align:right}.user-card[open] .user-arrow{transform:rotate(180deg)}
-.user-editor{padding:0 16px 16px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.editor-box{background:#0d141e;border:1px solid var(--border);border-radius:13px;padding:14px}.editor-box h3{font-size:14px;margin:0 0 10px}.editor-row{display:grid;grid-template-columns:1fr 1fr;gap:9px}.editor-box label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}.editor-box input,.editor-box select{width:100%;background:#09111a;border:1px solid var(--border);color:var(--text);border-radius:10px;padding:9px 10px}.active-choice{display:flex!important;align-items:center;gap:8px;margin:10px 0 0!important;color:var(--text)!important;font-size:13px!important}.active-choice input{width:auto;margin:0}.editor-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:11px;flex-wrap:wrap}
+.user-editor{padding:0 16px 16px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.editor-box{background:#0d141e;border:1px solid var(--border);border-radius:13px;padding:14px}.editor-box h3{font-size:14px;margin:0 0 10px}.editor-row{display:grid;grid-template-columns:1fr 1fr;gap:9px}.editor-box label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}.editor-box input,.editor-box select,.create-user select{width:100%;background:#09111a;border:1px solid var(--border);color:var(--text);border-radius:10px;padding:9px 10px}.active-choice{display:flex!important;align-items:center;gap:8px;margin:10px 0 0!important;color:var(--text)!important;font-size:13px!important}.active-choice input{width:auto;margin:0}.editor-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:11px;flex-wrap:wrap}
 .alarm-box{grid-column:1/-1}.alarm-grid{display:grid;grid-template-columns:repeat(7,minmax(52px,1fr));gap:7px}.alarm-choice{display:flex!important;align-items:center;justify-content:center;gap:5px;background:#101a27;border:1px solid var(--border);border-radius:9px;padding:8px 5px;color:var(--text)!important;font-size:12px!important;cursor:pointer}.alarm-choice input{width:auto;margin:0}.alarm-summary{color:var(--muted);font-size:12px}.hint{margin-top:8px;color:var(--muted);font-size:13px}.danger-zone{grid-column:1/-1;border-color:#60313a;background:#24151a}.danger-layout{display:flex;justify-content:space-between;align-items:center;gap:15px}.danger-text{color:#ffb0b0;font-size:13px}
-@media(max-width:900px){.user-summary{grid-template-columns:1fr auto}.user-summary .alarm-summary{grid-column:1/-1}.user-editor{grid-template-columns:1fr}.editor-row{grid-template-columns:1fr}.station-create{grid-template-columns:1fr}.alarm-grid{grid-template-columns:repeat(4,1fr)}.alarm-box,.danger-zone{grid-column:auto}.danger-layout{align-items:flex-start;flex-direction:column}}
+@media(max-width:900px){.user-summary{grid-template-columns:1fr auto}.user-summary .alarm-summary{grid-column:1/-1}.user-editor{grid-template-columns:1fr}.editor-row{grid-template-columns:1fr}.create-user,.station-create{grid-template-columns:1fr}.alarm-grid{grid-template-columns:repeat(4,1fr)}.alarm-box,.danger-zone{grid-column:auto}.danger-layout{align-items:flex-start;flex-direction:column}}
 </style>
 
 {% macro user_card(recipient, current_station_id) -%}
@@ -155,12 +166,24 @@ ADMIN_USERS_PAGE = base.BASE_HTML.replace(
 <div class="wrap">
   <div class="top">
     <div class="brand"><h1>Brugere & stationer</h1><p>SBR Pager · administration af modtagere</p></div>
-    <div class="actions"><a class="btn" href="{{ url_for('dashboard') }}">← Administration</a><a class="btn" href="{{ url_for('station_filters_page') }}">Alarmfilter</a><a class="btn" href="{{ url_for('logout') }}">Log ud</a></div>
+    <div class="actions"><a class="btn" href="{{ url_for('dashboard') }}">← Administration</a><a class="btn" href="{{ url_for('logout') }}">Log ud</a></div>
   </div>
 
   {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
 
   <div class="grid">
+    <section class="card span12">
+      <h2>Tilføj bruger</h2>
+      <form class="create-user" method="post" action="{{ url_for('create_admin_user') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div><label>Navn</label><input name="name" maxlength="120" placeholder="F.eks. Frederik Racher" required></div>
+        <div><label>WhatsApp-nummer</label><input name="phone" placeholder="+4512345678" required></div>
+        <div><label>Administrativ station</label><select name="station_id"><option value="">Uden station</option>{% for item in station_groups %}<option value="{{ item.station.id }}">{{ item.station.name }}</option>{% endfor %}</select></div>
+        <button class="btn primary" type="submit">+ Tilføj bruger</button>
+      </form>
+      <div class="hint">Nye brugere er aktive og modtager alle alarmstationer som udgangspunkt. Det kan ændres på brugerens kort bagefter.</div>
+    </section>
+
     <section class="card span12">
       <h2>Opret administrativ station</h2>
       <form class="station-create" method="post" action="{{ url_for('create_admin_station') }}">
@@ -217,10 +240,24 @@ def dashboard_with_admin_user_link():
         return response
 
     html = response.get_data(as_text=True)
+
+    html = _remove_section(
+        html,
+        '<section class="card span12" id="stationsfilter">',
+    )
+    html = _remove_section(
+        html,
+        '<section class="card span6"><h2>WhatsApp-modtagere</h2>',
+    )
+
+    station_filter_link = f'<a class="btn" href="{url_for("station_filters_page")}">Stationsfilter</a>'
+    html = html.replace(station_filter_link, "", 1)
+
     logout_link = f'<a class="btn" href="{url_for("logout")}">Log ud</a>'
     user_link = f'<a class="btn" href="{url_for("admin_users_page")}">Brugere</a>'
     if user_link not in html:
         html = html.replace(logout_link, user_link + logout_link, 1)
+
     response.set_data(html)
     return response
 
@@ -245,6 +282,51 @@ def admin_users_page():
 @app.get("/personer")
 @base.login_required
 def old_personer_redirect():
+    return redirect(url_for("admin_users_page"))
+
+
+@app.post("/brugere/opret")
+@base.login_required
+def create_admin_user():
+    base.check_csrf()
+    try:
+        name = " ".join((request.form.get("name") or "").strip().split())
+        if not name:
+            raise ValueError("Navn mangler.")
+
+        phone = base.normalize_phone(request.form.get("phone", ""))
+        if base.Recipient.query.filter_by(phone=phone).first():
+            raise ValueError("Telefonnummeret bruges allerede af en anden bruger.")
+
+        station = None
+        raw_station_id = (request.form.get("station_id") or "").strip()
+        if raw_station_id:
+            try:
+                station_id = int(raw_station_id)
+            except ValueError as exc:
+                raise ValueError("Ugyldig administrativ station.") from exc
+            station = db.session.get(AdminStation, station_id)
+            if not station:
+                raise ValueError("Den valgte administrative station findes ikke længere.")
+
+        recipient = base.Recipient(name=name, phone=phone, active=True)
+        db.session.add(recipient)
+        db.session.flush()
+
+        if station:
+            db.session.add(
+                RecipientAdminStation(
+                    recipient_id=recipient.id,
+                    station_id=station.id,
+                )
+            )
+
+        db.session.commit()
+        flash(f"{recipient.name} er tilføjet som bruger.")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+
     return redirect(url_for("admin_users_page"))
 
 
