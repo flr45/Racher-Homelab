@@ -22,6 +22,9 @@ Structured event metadata is sent together with each SBR Pager ingest so the
 admin panel can group pre-alert, complete alarm and later Sending 2 updates into
 one alarm event without changing the original alarm text.
 
+Personal data is redacted in the SBR Pager payload before it leaves this modem
+worker. The legacy SMS-gateway/Vagtbytte path still receives the original SMS.
+
 Non-phone/alphanumeric senders are consumed without sending them to SBR Pager.
 This prevents operator/service SMS messages from becoming permanently stuck on
 the SIM and blocking or slowing later alarm messages.
@@ -38,6 +41,7 @@ import urllib.error
 import urllib.request
 
 import modem_reader as reader
+import privacy_filter
 import sms_pdu
 
 log = logging.getLogger("sms-modem-reader-sbr")
@@ -126,9 +130,12 @@ def post_sbr_payload(
     if not SBR_PAGER_INGEST_TOKEN:
         raise RuntimeError("SBR_PAGER_INGEST_TOKEN mangler")
 
+    safe_body = privacy_filter.redact_personal_data(body) or ""
+    safe_raw_body = privacy_filter.redact_personal_data(raw_body)
+
     document = {
         "sender": sender,
-        "body": body,
+        "body": safe_body,
         "receivedAt": received_at,
         "sourceMessageId": source_message_id,
     }
@@ -136,7 +143,7 @@ def post_sbr_payload(
         "eventKey": event_key,
         "groupKey": group_key,
         "messageKind": message_kind,
-        "rawBody": raw_body,
+        "rawBody": safe_raw_body,
         "partCurrent": part_current,
         "partTotal": part_total,
     }
