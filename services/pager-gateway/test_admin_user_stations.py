@@ -70,7 +70,7 @@ class AdminUserStationTests(unittest.TestCase):
                 ).fetchall()
             }
         self.assertIn("stations", table_names)
-        self.assertIn("user_stations", table_names)
+        self.assertIn("user_station_subscriptions", table_names)
         self.assertIn("admin_user_stations", table_names)
         self.assertIn("admin_user_station_memberships", table_names)
 
