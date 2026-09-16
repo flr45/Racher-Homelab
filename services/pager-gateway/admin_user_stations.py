@@ -173,7 +173,7 @@ def install_admin_user_stations(core):
     def api_admin_user_station_patch(user_id: int):
         data = request.get_json(silent=True) or {}
         raw_station_id = data.get("station_id")
-        station_id = None if raw_station_id in {None, ""} else raw_station_id
+        station_id = None if raw_station_id is None or raw_station_id == "" else raw_station_id
         try:
             assignment = store.set_user_station(
                 user_id,
