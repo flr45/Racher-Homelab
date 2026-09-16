@@ -132,8 +132,8 @@ STATION_FILTER_FRAGMENT = r"""
 .station-choice input{width:auto;margin:0}.recipient-filter{padding:12px 0;border-bottom:1px solid #213044}.recipient-filter:last-child{border-bottom:0}.recipient-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:9px}
 @media(max-width:880px){.station-grid{grid-template-columns:repeat(4,1fr)}.station-grid .btn{grid-column:span 4}}
 </style>
-<section class="card span12">
-  <div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Stationsfilter</h2><p class="muted" style="margin:5px 0 0">Vælg hvilke stationer hver WhatsApp-modtager får. “Alle” sender alt.</p></div></div>
+<section class="card span12" id="stationsfilter">
+  <div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Stationsfilter</h2><p class="muted" style="margin:5px 0 0">Vælg hvilke stationer hver WhatsApp-modtager får. “Alle” sender alt.</p></div><a class="btn small" href="{{ url_for('station_filters_page') }}">Åbn separat</a></div>
   {% for item in station_recipients %}
   <form class="recipient-filter" method="post" action="{{ url_for('update_recipient_stations', recipient_id=item.recipient.id) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -149,6 +149,43 @@ STATION_FILTER_FRAGMENT = r"""
 """
 
 
+STATION_FILTER_PAGE = base.BASE_HTML.replace(
+    "{% block content %}{% endblock %}",
+    r"""
+<style>
+.station-grid{display:grid;grid-template-columns:repeat(7,minmax(48px,1fr)) auto;gap:8px;align-items:center}
+.station-choice{display:flex;align-items:center;justify-content:center;gap:5px;background:#0d141e;border:1px solid var(--border);border-radius:10px;padding:10px;cursor:pointer}
+.station-choice input{width:auto;margin:0}.recipient-filter{padding:16px 0;border-bottom:1px solid #213044}.recipient-filter:last-child{border-bottom:0}.recipient-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:10px}
+@media(max-width:880px){.station-grid{grid-template-columns:repeat(4,1fr)}.station-grid .btn{grid-column:span 4}}
+</style>
+<div class="wrap">
+  <div class="top"><div class="brand"><h1>Stationsfilter</h1><p>SBR Pager · vælg alarmer pr. WhatsApp-modtager</p></div><div class="actions"><a class="btn" href="{{ url_for('dashboard') }}">← Administration</a><a class="btn" href="{{ url_for('logout') }}">Log ud</a></div></div>
+  <div class="grid"><section class="card span12">
+  {% for item in station_recipients %}
+  <form class="recipient-filter" method="post" action="{{ url_for('update_recipient_stations', recipient_id=item.recipient.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="recipient-head"><strong>{{ item.recipient.name }}</strong><span class="muted">{{ item.recipient.phone }}</span></div>
+    <div class="station-grid">
+      <label class="station-choice"><input type="checkbox" name="stations" value="*" {{ 'checked' if '*' in item.selected else '' }}>Alle</label>
+      {% for code in stations %}<label class="station-choice"><input type="checkbox" name="stations" value="{{ code }}" {{ 'checked' if code in item.selected else '' }}>{{ code }}</label>{% endfor %}
+      <button class="btn primary small" type="submit">Gem filter</button>
+    </div>
+  </form>
+  {% else %}<div class="empty">Ingen WhatsApp-modtagere endnu.</div>{% endfor %}
+  </section></div>
+</div>
+""",
+)
+
+
+def station_rows():
+    recipients = base.Recipient.query.order_by(base.Recipient.name).all()
+    return [
+        {"recipient": recipient, "selected": configured_stations(recipient.id)}
+        for recipient in recipients
+    ]
+
+
 _previous_dashboard = app.view_functions["dashboard"]
 
 
@@ -158,30 +195,57 @@ def dashboard_with_station_filters():
     if response.status_code != 200 or "text/html" not in response.content_type:
         return response
 
-    recipients = base.Recipient.query.order_by(base.Recipient.name).all()
-    rows = [
-        {"recipient": recipient, "selected": configured_stations(recipient.id)}
-        for recipient in recipients
-    ]
     fragment = render_template_string(
         STATION_FILTER_FRAGMENT,
-        station_recipients=rows,
+        station_recipients=station_rows(),
         stations=STATIONS,
     )
     html = response.get_data(as_text=True)
 
-    # Keep alarm events/statistics primary. Put station administration above the
-    # technical SMS log when possible, otherwise append before the footer.
-    marker = '<section class="card span12"><h2>Seneste SMS\'er</h2>'
-    if marker in html:
-        html = html.replace(marker, fragment + marker, 1)
-    else:
-        html = html.replace('</div><div class="footer">', fragment + '</div><div class="footer">', 1)
+    # stats_v2 renames the technical section, so support both the current and
+    # older heading. This was the reason the first version could disappear.
+    markers = [
+        '<section class="card span12"><h2>Teknisk SMS-log</h2>',
+        '<section class="card span12"><h2>Seneste SMS\'er</h2>',
+    ]
+    inserted = False
+    for marker in markers:
+        if marker in html:
+            html = html.replace(marker, fragment + marker, 1)
+            inserted = True
+            break
+
+    if not inserted:
+        # Last-resort: place it before the footer/closing grid without depending
+        # on a section heading.
+        footer_marker = '<div class="footer">'
+        if footer_marker in html:
+            html = html.replace(footer_marker, fragment + footer_marker, 1)
+            inserted = True
+
+    # Always expose a dedicated page from the top actions as well, so the
+    # setting stays reachable even if the dashboard layout changes later.
+    logout_link = f'<a class="btn" href="{url_for("logout")}">Log ud</a>'
+    filter_link = f'<a class="btn" href="{url_for("station_filters_page")}">Stationsfilter</a>'
+    if filter_link not in html:
+        html = html.replace(logout_link, filter_link + logout_link, 1)
+
     response.set_data(html)
     return response
 
 
 app.view_functions["dashboard"] = dashboard_with_station_filters
+
+
+@app.get("/stationsfilter")
+@base.login_required
+def station_filters_page():
+    return render_template_string(
+        STATION_FILTER_PAGE,
+        title="Stationsfilter",
+        station_recipients=station_rows(),
+        stations=STATIONS,
+    )
 
 
 @app.post("/recipients/<int:recipient_id>/stations")
@@ -203,7 +267,10 @@ def update_recipient_stations(recipient_id: int):
 
     label = "Alle" if ALL_STATIONS in selected else ", ".join(sorted(selected))
     flash(f"Stationsfilter for {recipient.name}: {label}")
-    return redirect(url_for("dashboard"))
+    next_url = request.form.get("next") or request.referrer
+    if next_url and request.host_url.rstrip("/") in next_url:
+        return redirect(next_url)
+    return redirect(url_for("station_filters_page"))
 
 
 with app.app_context():
