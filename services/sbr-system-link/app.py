@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import hmac
 import json
@@ -81,6 +82,19 @@ def init_database() -> None:
                 client_id TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS provision_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_hash TEXT NOT NULL UNIQUE,
+                label TEXT,
+                created_at TEXT NOT NULL,
+                consumed_at TEXT,
+                client_id TEXT,
+                revoked INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_provision_codes_state
+                ON provision_codes(revoked, consumed_at, created_at DESC);
+
             CREATE TABLE IF NOT EXISTS deliveries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 delivery_id TEXT NOT NULL UNIQUE,
@@ -119,6 +133,84 @@ def init_database() -> None:
             "CREATE INDEX IF NOT EXISTS idx_deliveries_client "
             "ON deliveries(client_id, receiver_received_at DESC)"
         )
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_provision_code(label: str = "") -> tuple[int, str]:
+    if not master_secret():
+        raise RuntimeError("SYSTEM_LINK_MASTER_SECRET mangler")
+    init_database()
+    token = secrets.token_urlsafe(32)
+    with connection() as db:
+        cursor = db.execute(
+            """
+            INSERT INTO provision_codes(token_hash, label, created_at)
+            VALUES(?,?,?)
+            """,
+            (_hash_token(token), label.strip()[:200] or None, utcnow_iso()),
+        )
+        code_id = int(cursor.lastrowid)
+    return code_id, token
+
+
+def list_provision_codes() -> list[dict]:
+    init_database()
+    with connection() as db:
+        rows = db.execute(
+            """
+            SELECT id, label, created_at, consumed_at, client_id, revoked
+            FROM provision_codes
+            ORDER BY id DESC
+            """
+        ).fetchall()
+    result: list[dict] = []
+    for row in rows:
+        status = "revoked" if int(row["revoked"] or 0) else ("used" if row["consumed_at"] else "active")
+        result.append(
+            {
+                "id": int(row["id"]),
+                "label": str(row["label"] or ""),
+                "status": status,
+                "created_at": str(row["created_at"] or ""),
+                "consumed_at": str(row["consumed_at"] or ""),
+                "client_id": str(row["client_id"] or ""),
+            }
+        )
+    return result
+
+
+def revoke_provision_code(code_id: int) -> bool:
+    init_database()
+    with connection() as db:
+        cursor = db.execute(
+            """
+            UPDATE provision_codes
+            SET revoked=1
+            WHERE id=? AND revoked=0 AND consumed_at IS NULL
+            """,
+            (int(code_id),),
+        )
+        return cursor.rowcount == 1
+
+
+def _active_provision_code_exists() -> bool:
+    try:
+        init_database()
+        with connection() as db:
+            row = db.execute(
+                """
+                SELECT 1
+                FROM provision_codes
+                WHERE revoked=0 AND consumed_at IS NULL
+                LIMIT 1
+                """
+            ).fetchone()
+        return row is not None
+    except sqlite3.Error:
+        return False
 
 
 def _derive_client_secret(client_id: str) -> str:
@@ -256,13 +348,15 @@ def health():
     return jsonify(
         status="ok",
         service="sbr-system-link",
-        provisioning=bool(master_secret() and provision_token()),
+        provisioning=bool(
+            master_secret() and (provision_token() or _active_provision_code_exists())
+        ),
     )
 
 
 @app.post("/api/provision")
 def provision_client():
-    if not master_secret() or not provision_token():
+    if not master_secret():
         return jsonify(ok=False, error="provisionering er ikke konfigureret"), 503
 
     raw_body = request.get_data(cache=False)
@@ -275,27 +369,54 @@ def provision_client():
     if not isinstance(payload, dict):
         return jsonify(ok=False, error="ugyldig payload"), 400
 
-    supplied_token = str(payload.get("token") or "")
-    expected_token = provision_token()
-    if not supplied_token or not hmac.compare_digest(supplied_token, expected_token):
+    supplied_token = str(payload.get("token") or "").strip()
+    if not supplied_token:
         return jsonify(ok=False, error="ugyldig provisioneringskode"), 401
 
-    token_hash = hashlib.sha256(supplied_token.encode("utf-8")).hexdigest()
+    token_hash = _hash_token(supplied_token)
     machine_name = str(payload.get("machineName") or "")[:200]
     app_version = str(payload.get("appVersion") or "")[:100]
     client_id = "gw-" + secrets.token_hex(12)
     client_secret = _derive_client_secret(client_id)
     now = utcnow_iso()
 
+    init_database()
     try:
         with connection() as db:
-            db.execute(
+            code = db.execute(
                 """
-                INSERT INTO provision_tokens(token_hash, consumed_at, client_id)
-                VALUES(?,?,?)
+                SELECT id, consumed_at, revoked
+                FROM provision_codes
+                WHERE token_hash=?
                 """,
-                (token_hash, now, client_id),
-            )
+                (token_hash,),
+            ).fetchone()
+
+            if code is not None:
+                if int(code["revoked"] or 0) or code["consumed_at"]:
+                    return jsonify(ok=False, error="provisioneringskoden er allerede brugt eller tilbagekaldt"), 409
+                consumed = db.execute(
+                    """
+                    UPDATE provision_codes
+                    SET consumed_at=?, client_id=?
+                    WHERE id=? AND revoked=0 AND consumed_at IS NULL
+                    """,
+                    (now, client_id, int(code["id"])),
+                )
+                if consumed.rowcount != 1:
+                    return jsonify(ok=False, error="provisioneringskoden er allerede brugt"), 409
+            else:
+                expected_token = provision_token()
+                if not expected_token or not hmac.compare_digest(supplied_token, expected_token):
+                    return jsonify(ok=False, error="ugyldig provisioneringskode"), 401
+                db.execute(
+                    """
+                    INSERT INTO provision_tokens(token_hash, consumed_at, client_id)
+                    VALUES(?,?,?)
+                    """,
+                    (token_hash, now, client_id),
+                )
+
             db.execute(
                 """
                 INSERT INTO installations(client_id, machine_name, app_version, created_at)
@@ -364,6 +485,57 @@ def receive_system_link():
     )
 
 
+def _run_cli() -> int | None:
+    parser = argparse.ArgumentParser(description="SBR System Link Receiver")
+    sub = parser.add_subparsers(dest="command")
+
+    create = sub.add_parser("create-token", help="Opret en ny engangs-provisioneringskode")
+    create.add_argument("--label", default="", help="Valgfrit navn, fx Station-PC-01")
+
+    sub.add_parser("list-tokens", help="Vis aktive, brugte og tilbagekaldte koder")
+
+    revoke = sub.add_parser("revoke-token", help="Tilbagekald en ubrugt kode")
+    revoke.add_argument("id", type=int, help="Kode-ID fra list-tokens")
+
+    args = parser.parse_args()
+    if args.command is None:
+        return None
+
+    if args.command == "create-token":
+        code_id, token = create_provision_code(args.label)
+        print(f"ID: {code_id}")
+        if args.label:
+            print(f"Label: {args.label}")
+        print(f"TOKEN: {token}")
+        print("Vises kun nu. Gem tokenet sikkert; det kan kun bruges én gang.")
+        return 0
+
+    if args.command == "list-tokens":
+        rows = list_provision_codes()
+        if not rows:
+            print("Ingen database-provisioneringskoder endnu.")
+            return 0
+        print("ID\tSTATUS\tLABEL\tCLIENT\tCREATED\tCONSUMED")
+        for row in rows:
+            print(
+                f"{row['id']}\t{row['status']}\t{row['label'] or '-'}\t"
+                f"{row['client_id'] or '-'}\t{row['created_at']}\t{row['consumed_at'] or '-'}"
+            )
+        return 0
+
+    if args.command == "revoke-token":
+        if revoke_provision_code(args.id):
+            print(f"Provisioneringskode {args.id} er tilbagekaldt.")
+            return 0
+        print(f"Kunne ikke tilbagekalde kode {args.id}; den findes ikke, er brugt eller allerede tilbagekaldt.")
+        return 1
+
+    return 2
+
+
 if __name__ == "__main__":
-    init_database()
-    app.run(host="0.0.0.0", port=8098)
+    cli_result = _run_cli()
+    if cli_result is None:
+        init_database()
+        app.run(host="0.0.0.0", port=8098)
+    raise SystemExit(cli_result)
