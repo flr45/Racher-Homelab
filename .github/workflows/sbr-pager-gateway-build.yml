@@ -60,23 +60,32 @@ jobs:
           SYSTEM_LINK_PROVISION_TOKEN: ${{ secrets.SBR_SYSTEM_LINK_PROVISION_TOKEN }}
           SBR_APP_VERSION: 0.1.${{ github.run_number }}
         run: |
+          $missing = @()
+          if ([string]::IsNullOrWhiteSpace($env:SYSTEM_LINK_PROVISION_URL)) { $missing += 'SBR_SYSTEM_LINK_PROVISION_URL' }
+          if ([string]::IsNullOrWhiteSpace($env:SYSTEM_LINK_MESSAGE_ENDPOINT)) { $missing += 'SBR_SYSTEM_LINK_MESSAGE_ENDPOINT' }
+          if ([string]::IsNullOrWhiteSpace($env:SYSTEM_LINK_PROVISION_TOKEN)) { $missing += 'SBR_SYSTEM_LINK_PROVISION_TOKEN' }
+
+          if ($missing.Count -gt 0) {
+            if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+              throw "Production/manual installer build mangler GitHub Actions secrets: $($missing -join ', ')"
+            }
+            Write-Warning "System Link bootstrap mangler: $($missing -join ', '). CI-testbuilden fortsætter uden auto-provisionering."
+          }
+
           function Escape-Python([string]$value) {
             if ($null -eq $value) { return '' }
             return $value.Replace('\', '\\').Replace('"', '\"')
           }
-          $version = Escape-Python $env:SBR_APP_VERSION
-          $provisionUrl = Escape-Python $env:SYSTEM_LINK_PROVISION_URL
-          $messageEndpoint = Escape-Python $env:SYSTEM_LINK_MESSAGE_ENDPOINT
-          $provisionToken = Escape-Python $env:SYSTEM_LINK_PROVISION_TOKEN
-          @"
-          APP_VERSION = "$version"
-          SYSTEM_LINK_PROVISION_URL = "$provisionUrl"
-          SYSTEM_LINK_MESSAGE_ENDPOINT = "$messageEndpoint"
-          SYSTEM_LINK_PROVISION_TOKEN = "$provisionToken"
-          "@ | Set-Content -Encoding UTF8 build_config.py
-          if ([string]::IsNullOrWhiteSpace($env:SYSTEM_LINK_PROVISION_TOKEN)) {
-            Write-Warning 'System Link provisioning secrets are not configured; build will require manual/migration credentials.'
-          } else {
+
+          $config = @(
+            "APP_VERSION = $([char]34)$(Escape-Python $env:SBR_APP_VERSION)$([char]34)",
+            "SYSTEM_LINK_PROVISION_URL = $([char]34)$(Escape-Python $env:SYSTEM_LINK_PROVISION_URL)$([char]34)",
+            "SYSTEM_LINK_MESSAGE_ENDPOINT = $([char]34)$(Escape-Python $env:SYSTEM_LINK_MESSAGE_ENDPOINT)$([char]34)",
+            "SYSTEM_LINK_PROVISION_TOKEN = $([char]34)$(Escape-Python $env:SYSTEM_LINK_PROVISION_TOKEN)$([char]34)"
+          )
+          $config | Set-Content -Encoding UTF8 build_config.py
+
+          if ($missing.Count -eq 0) {
             Write-Host 'System Link one-time bootstrap embedded in application.'
           }
 
