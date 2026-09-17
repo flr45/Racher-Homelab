@@ -111,12 +111,14 @@ def init_database() -> None:
                 ON deliveries(receiver_received_at DESC);
             CREATE INDEX IF NOT EXISTS idx_deliveries_station
                 ON deliveries(station, receiver_received_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_deliveries_client
-                ON deliveries(client_id, receiver_received_at DESC);
             """
         )
         if "client_id" not in _columns(db, "deliveries"):
             db.execute("ALTER TABLE deliveries ADD COLUMN client_id TEXT")
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_deliveries_client "
+            "ON deliveries(client_id, receiver_received_at DESC)"
+        )
 
 
 def _derive_client_secret(client_id: str) -> str:
