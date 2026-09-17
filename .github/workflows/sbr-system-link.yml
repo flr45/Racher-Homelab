@@ -1,0 +1,45 @@
+name: SBR System Link Receiver
+
+on:
+  push:
+    branches:
+      - feature/sbr-system-link-cloudflare
+    paths:
+      - 'services/sbr-system-link/**'
+      - 'compose/sbr-system-link/**'
+      - '.github/workflows/sbr-system-link.yml'
+  pull_request:
+    paths:
+      - 'services/sbr-system-link/**'
+      - 'compose/sbr-system-link/**'
+      - '.github/workflows/sbr-system-link.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install receiver dependencies
+        working-directory: services/sbr-system-link
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile receiver
+        working-directory: services/sbr-system-link
+        run: python -m py_compile app.py test_app.py
+
+      - name: Run receiver tests
+        working-directory: services/sbr-system-link
+        run: python -m unittest -v test_app.py
+
+      - name: Validate compose
+        env:
+          SBR_SYSTEM_LINK_SECRET: ci-test-secret
+        run: docker compose -f compose/sbr-system-link/compose.yml config >/dev/null
+
+      - name: Build receiver image
+        run: docker build -t sbr-system-link-ci services/sbr-system-link
