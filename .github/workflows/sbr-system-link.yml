@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/sbr-system-link-cloudflare
+      - feature/sbr-system-link-provisioning
     paths:
       - 'services/sbr-system-link/**'
       - 'compose/sbr-system-link/**'
@@ -38,7 +39,9 @@ jobs:
 
       - name: Validate compose
         env:
-          SBR_SYSTEM_LINK_SECRET: ci-test-secret
+          SBR_SYSTEM_LINK_MASTER_SECRET: ci-master-secret
+          SBR_SYSTEM_LINK_PROVISION_TOKEN: ci-provision-token
+          SBR_SYSTEM_LINK_PUBLIC_ENDPOINT: https://link.example.test/api/system-link
         run: docker compose -f compose/sbr-system-link/compose.yml config >/dev/null
 
       - name: Build receiver image
