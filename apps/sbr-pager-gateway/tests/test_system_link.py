@@ -16,10 +16,12 @@ class SystemLinkTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         os.environ["LOCALAPPDATA"] = self.temp.name
 
+        import build_config
         import storage
         import station_events
         import system_link
 
+        self.build_config = build_config
         self.storage = storage
         self.station_events = station_events
         self.system_link = system_link
@@ -52,7 +54,7 @@ class SystemLinkTests(unittest.TestCase):
         )
         return message_id
 
-    def test_system_link_queues_and_sends_accepted_alarm(self) -> None:
+    def test_system_link_queues_and_sends_accepted_alarm_legacy_mode(self) -> None:
         self.storage.set_setting("system_link_started_at", "2000-01-01T00:00:00Z")
         message_id = self._accepted_message()
         self.storage.set_setting("system_link_enabled", "1")
@@ -70,7 +72,7 @@ class SystemLinkTests(unittest.TestCase):
         self.assertEqual(payload["message"]["id"], message_id)
         self.assertEqual(payload["message"]["body"], "Alarm (S) · Bygningsbrand · Testvej 1, 4200 Slagelse")
         self.assertEqual(payload["event"]["station"], "S")
-        self.assertEqual(payload["deliveryId"], f"message:{message_id}")
+        self.assertEqual(payload["deliveryId"], "legacy:system-link-test")
 
         with self.storage.connection() as db:
             row = db.execute(
@@ -80,6 +82,31 @@ class SystemLinkTests(unittest.TestCase):
         self.assertEqual(row["status"], "sent")
         self.assertEqual(int(row["attempts"]), 1)
         self.assertTrue(row["delivered_at"])
+
+    @unittest.skipUnless(os.name == "nt", "DPAPI provisioning test requires Windows")
+    def test_installer_bootstrap_provisions_and_enables_system_link(self) -> None:
+        with (
+            patch.object(self.build_config, "SYSTEM_LINK_PROVISION_URL", "https://link.example.test/api/provision"),
+            patch.object(self.build_config, "SYSTEM_LINK_PROVISION_TOKEN", "single-use-token"),
+            patch.object(self.build_config, "SYSTEM_LINK_MESSAGE_ENDPOINT", "https://link.example.test/api/system-link"),
+            patch.object(self.system_link, "_json_request") as request_mock,
+        ):
+            request_mock.return_value = {
+                "ok": True,
+                "clientId": "gw-test123",
+                "clientSecret": "client-secret-123",
+                "messageEndpoint": "https://link.example.test/api/system-link",
+            }
+            credentials = self.system_link.ensure_provisioned()
+
+        self.assertIsNotNone(credentials)
+        self.assertEqual(credentials["client_id"], "gw-test123")
+        self.assertEqual(self.storage.get_setting("system_link_enabled"), "1")
+        status = self.system_link.system_link_status()
+        self.assertTrue(status["provisioned"])
+        self.assertEqual(status["client_id"], "gw-test123")
+        request_mock.assert_called_once()
+        self.assertEqual(request_mock.call_args.args[1]["token"], "single-use-token")
 
     def test_system_link_does_not_replay_messages_before_activation(self) -> None:
         message_id = self._accepted_message("old-before-link")
