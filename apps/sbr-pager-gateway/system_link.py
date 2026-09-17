@@ -116,6 +116,8 @@ def _payload_for_message(inbound_id: int) -> dict | None:
     payload = {
         "schema": "sbr-pager-gateway.system-link.v1",
         "gateway": "SBR Pager Gateway",
+        "deliveryId": f"message:{int(row['id'])}",
+        "sentAt": utcnow_iso(),
         "message": {
             "id": int(row["id"]),
             "sourceId": str(row["source_id"]),
@@ -151,7 +153,6 @@ def _request(payload: dict, *, endpoint: str, token: str, timeout: float) -> Non
     if token:
         signature = hmac.new(token.encode("utf-8"), body, hashlib.sha256).hexdigest()
         headers["X-System-Link-Signature"] = f"sha256={signature}"
-        headers["X-System-Link-Token"] = token
     request = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
@@ -171,6 +172,7 @@ def test_system_link(endpoint: str, token: str, timeout: float = 5.0) -> None:
     payload = {
         "schema": "sbr-pager-gateway.system-link.v1",
         "gateway": "SBR Pager Gateway",
+        "deliveryId": f"test:{utcnow_iso()}",
         "test": True,
         "sentAt": utcnow_iso(),
     }
