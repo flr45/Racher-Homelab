@@ -67,12 +67,9 @@ class SmsModemEngine:
                     timeout=0.30,
                     write_timeout=2,
                 ) as port:
-                    try:
-                        port.dtr = False
-                        port.rts = False
-                    except (OSError, ValueError):
-                        pass
-
+                    # Keep the driver's default DTR/RTS state. Several USB GSM
+                    # dongles use these control lines to keep the AT channel awake.
+                    time.sleep(0.15)
                     self._initialize(port)
                     retry_seconds = 2
                     self._status("online", f"SMS-modem online på {self.port_name}")
@@ -95,10 +92,18 @@ class SmsModemEngine:
         self._status("stopped", "Gateway stoppet")
 
     def _initialize(self, port: serial.Serial) -> None:
-        for value in ("AT", "ATE0", "AT+CMGF=0", 'AT+CPMS="SM","SM","SM"'):
+        for value in ("AT", "ATE0", "AT+CMGF=0"):
             response = self._command(port, value, timeout=8)
             if "ERROR" in response or "+CME ERROR:" in response or "+CMS ERROR:" in response:
                 raise RuntimeError(f"Modemmet afviste {value}: {response.strip()}")
+
+        storage_error = None
+        for value in ('AT+CPMS="SM","SM","SM"', 'AT+CPMS="ME","ME","ME"'):
+            response = self._command(port, value, timeout=8)
+            if not any(marker in response for marker in ("ERROR", "+CME ERROR:", "+CMS ERROR:")):
+                return
+            storage_error = f"Modemmet afviste {value}: {response.strip()}"
+        raise RuntimeError(storage_error or "Modemmet kunne ikke vælge SMS-lager")
 
     def _bootstrap_existing_sms(self, port: serial.Serial) -> None:
         """Archive and clear pre-existing unread SMS without forwarding them."""
