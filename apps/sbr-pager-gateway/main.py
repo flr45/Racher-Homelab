@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from management import RecipientsDialog, SendersDialog
 from modem import ModemInfo, discover_modems
 from sms_engine import SmsModemEngine
 from storage import init_database, recent_messages
@@ -32,7 +33,7 @@ QWidget {
     font-family: "Segoe UI";
     font-size: 14px;
 }
-QMainWindow { background: #f3f3f3; }
+QMainWindow, QDialog { background: #f3f3f3; }
 QLabel#appTitle { font-size: 27px; font-weight: 650; }
 QLabel#subtitle, QLabel#muted { color: #666666; }
 QFrame#card {
@@ -68,6 +69,12 @@ QPushButton#danger {
     color: white;
     background: #c42b1c;
     border-color: #c42b1c;
+}
+QLineEdit {
+    background: white;
+    border: 1px solid #c9c9c9;
+    border-radius: 5px;
+    padding: 7px;
 }
 QTableWidget {
     background: #ffffff;
@@ -198,7 +205,7 @@ class MainWindow(QMainWindow):
 
         self.modem_card = MetricCard("SMS MODEM", "Ikke fundet", "Tilslut et USB GSM/SMS-modem", "warn")
         self.signal_card = MetricCard("SIGNAL", "—", "Afventer modem", "warn")
-        self.whatsapp_card = MetricCard("WHATSAPP", "Ikke konfigureret", "WhatsApp-modulet kobles på næste", "warn")
+        self.whatsapp_card = MetricCard("WHATSAPP", "Ikke konfigureret", "WhatsApp-motoren kommer som næste hoveddel", "warn")
         self.gateway_card = MetricCard("GATEWAY", "Stoppet", "Ingen nye SMS læses endnu", "warn")
 
         card_grid.addWidget(self.modem_card, 0, 0)
@@ -226,7 +233,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(0, 145)
         self.table.setColumnWidth(1, 150)
         self.table.setColumnWidth(2, 490)
-        self.table.setColumnWidth(3, 160)
+        self.table.setColumnWidth(3, 185)
         main.addWidget(self.table, 1)
 
         bottom = QHBoxLayout()
@@ -236,17 +243,20 @@ class MainWindow(QMainWindow):
         bottom.addStretch()
 
         self.history_button = QPushButton("Historik")
+        self.history_button.clicked.connect(self.refresh_history)
+        bottom.addWidget(self.history_button)
+
         self.senders_button = QPushButton("Afsendere")
+        self.senders_button.clicked.connect(self.open_senders)
+        bottom.addWidget(self.senders_button)
+
         self.recipients_button = QPushButton("Modtagere")
+        self.recipients_button.clicked.connect(self.open_recipients)
+        bottom.addWidget(self.recipients_button)
+
         self.settings_button = QPushButton("Indstillinger")
-        for button in (
-            self.history_button,
-            self.senders_button,
-            self.recipients_button,
-            self.settings_button,
-        ):
-            button.clicked.connect(self.show_module_placeholder)
-            bottom.addWidget(button)
+        self.settings_button.clicked.connect(self.show_settings_placeholder)
+        bottom.addWidget(self.settings_button)
         main.addLayout(bottom)
 
         self.refresh_history()
@@ -350,6 +360,8 @@ class MainWindow(QMainWindow):
                 whatsapp = f"Sendt til {sent_count}"
             elif failed_count:
                 whatsapp = f"Fejl ({failed_count})"
+            elif row["processing_status"] == "accepted_pending_whatsapp":
+                whatsapp = "Afventer WhatsApp"
             else:
                 whatsapp = "—"
 
@@ -378,21 +390,26 @@ class MainWindow(QMainWindow):
         labels = {
             "received": "Modtaget",
             "bootstrap_skipped": "Gammel SMS · ikke sendt",
-            "accepted": "Godkendt",
-            "rejected": "Afvist",
+            "accepted_pending_whatsapp": "Godkendt",
+            "rejected_sender": "Afvist afsender",
+            "ignored_command": "Ignoreret kommando",
             "forwarded": "Videresendt",
             "failed": "Fejl",
         }
         return labels.get(value, value)
 
-    def show_module_placeholder(self) -> None:
-        sender = self.sender()
-        name = sender.text() if isinstance(sender, QPushButton) else "Modul"
+    def open_senders(self) -> None:
+        SendersDialog(self).exec()
+        self.refresh_history()
+
+    def open_recipients(self) -> None:
+        RecipientsDialog(self).exec()
+
+    def show_settings_placeholder(self) -> None:
         QMessageBox.information(
             self,
-            name,
-            f"{name}-modulet bygges som en separat del af SBR Pager Gateway.\n\n"
-            "SMS-modtagelse og lokal historik er den første aktive kerne.",
+            "Indstillinger",
+            "Indstillinger til autostart, WhatsApp og modem bliver næste del.",
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:
