@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+import station_events
 from storage import data_dir, get_setting, set_setting
 from system_link import system_link_status, test_system_link
 
@@ -185,7 +186,7 @@ class AdvancedSettingsDialog(QDialog):
         system_group = QGroupBox("System")
         system_form = QFormLayout(system_group)
         data_label = QLabel(str(data_dir()))
-        data_label.setTextInteractionFlags(data_label.textInteractionFlags() | data_label.TextSelectableByMouse)
+        data_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         system_form.addRow("Lokal data", data_label)
         root.addWidget(system_group)
 
@@ -224,6 +225,10 @@ class AdvancedSettingsDialog(QDialog):
         }
         for key, value in values.items():
             set_setting(key, value)
+
+        # station_events reads this module constant while grouping follow-up
+        # messages. Updating it here makes the setting effective immediately.
+        station_events.EVENT_LINK_MINUTES = int(self.sending2_window.value())
         self.accept()
 
     def test_link(self) -> None:
