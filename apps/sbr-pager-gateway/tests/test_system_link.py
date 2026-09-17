@@ -53,6 +53,7 @@ class SystemLinkTests(unittest.TestCase):
         return message_id
 
     def test_system_link_queues_and_sends_accepted_alarm(self) -> None:
+        self.storage.set_setting("system_link_started_at", "2000-01-01T00:00:00Z")
         message_id = self._accepted_message()
         self.storage.set_setting("system_link_enabled", "1")
         self.storage.set_setting("system_link_endpoint", "https://example.invalid/gateway")
@@ -69,6 +70,7 @@ class SystemLinkTests(unittest.TestCase):
         self.assertEqual(payload["message"]["id"], message_id)
         self.assertEqual(payload["message"]["body"], "Alarm (S) · Bygningsbrand · Testvej 1, 4200 Slagelse")
         self.assertEqual(payload["event"]["station"], "S")
+        self.assertEqual(payload["deliveryId"], f"message:{message_id}")
 
         with self.storage.connection() as db:
             row = db.execute(
@@ -78,6 +80,19 @@ class SystemLinkTests(unittest.TestCase):
         self.assertEqual(row["status"], "sent")
         self.assertEqual(int(row["attempts"]), 1)
         self.assertTrue(row["delivered_at"])
+
+    def test_system_link_does_not_replay_messages_before_activation(self) -> None:
+        message_id = self._accepted_message("old-before-link")
+        self.storage.set_setting("system_link_started_at", "2099-01-01T00:00:00Z")
+        engine = self.system_link.SystemLinkEngine()
+        engine._queue_accepted_messages()
+
+        with self.storage.connection() as db:
+            row = db.execute(
+                "SELECT id FROM system_link_deliveries WHERE inbound_id=?",
+                (message_id,),
+            ).fetchone()
+        self.assertIsNone(row)
 
     def test_sms_forward_delay_keeps_message_pending(self) -> None:
         from delivery import WhatsAppDeliveryEngine
