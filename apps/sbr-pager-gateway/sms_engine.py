@@ -48,6 +48,14 @@ class SmsModemEngine:
         if self.on_status:
             self.on_status(state, detail)
 
+    def _current_poll_seconds(self) -> float:
+        raw = get_setting("modem_poll_seconds", str(self.poll_seconds))
+        try:
+            value = float(raw or self.poll_seconds)
+        except (TypeError, ValueError):
+            value = self.poll_seconds
+        return max(1.0, min(30.0, value))
+
     def run(self) -> None:
         retry_seconds = 2
         while not self._stop.is_set():
@@ -74,7 +82,7 @@ class SmsModemEngine:
 
                     while not self._stop.is_set():
                         self._poll_once(port)
-                        self._stop.wait(self.poll_seconds)
+                        self._stop.wait(self._current_poll_seconds())
 
             except (serial.SerialException, OSError, TimeoutError, RuntimeError, ValueError) as exc:
                 detail = str(exc) or exc.__class__.__name__
