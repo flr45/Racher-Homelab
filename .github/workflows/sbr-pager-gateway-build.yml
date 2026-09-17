@@ -72,19 +72,18 @@ jobs:
             Write-Warning "System Link bootstrap mangler: $($missing -join ', '). CI-testbuilden fortsætter uden auto-provisionering."
           }
 
-          function Escape-Python([string]$value) {
-            if ($null -eq $value) { return '' }
-            return $value.Replace('\', '\\').Replace('"', '\"')
-          }
+          $version = ConvertTo-Json -Compress ([string]$env:SBR_APP_VERSION)
+          $provisionUrl = ConvertTo-Json -Compress ([string]$env:SYSTEM_LINK_PROVISION_URL)
+          $messageEndpoint = ConvertTo-Json -Compress ([string]$env:SYSTEM_LINK_MESSAGE_ENDPOINT)
+          $provisionToken = ConvertTo-Json -Compress ([string]$env:SYSTEM_LINK_PROVISION_TOKEN)
+          @(
+            "APP_VERSION = $version",
+            "SYSTEM_LINK_PROVISION_URL = $provisionUrl",
+            "SYSTEM_LINK_MESSAGE_ENDPOINT = $messageEndpoint",
+            "SYSTEM_LINK_PROVISION_TOKEN = $provisionToken"
+          ) | Set-Content -Encoding UTF8 build_config.py
 
-          $config = @(
-            "APP_VERSION = $([char]34)$(Escape-Python $env:SBR_APP_VERSION)$([char]34)",
-            "SYSTEM_LINK_PROVISION_URL = $([char]34)$(Escape-Python $env:SYSTEM_LINK_PROVISION_URL)$([char]34)",
-            "SYSTEM_LINK_MESSAGE_ENDPOINT = $([char]34)$(Escape-Python $env:SYSTEM_LINK_MESSAGE_ENDPOINT)$([char]34)",
-            "SYSTEM_LINK_PROVISION_TOKEN = $([char]34)$(Escape-Python $env:SYSTEM_LINK_PROVISION_TOKEN)$([char]34)"
-          )
-          $config | Set-Content -Encoding UTF8 build_config.py
-
+          python -m py_compile build_config.py
           if ($missing.Count -eq 0) {
             Write-Host 'System Link one-time bootstrap embedded in application.'
           }
