@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 import station_events
 from admin_ui import AdvancedSettingsDialog
 from management import RecipientsDialog, SendersDialog
-from modem import ModemInfo, discover_modems
+from modem import ModemInfo, available_serial_ports, discover_modems
 from sms_engine import SmsModemEngine
 from storage import get_setting, init_database, recent_messages
 from whatsapp_engine import WhatsAppBridgeManager
@@ -116,14 +116,16 @@ class GatewayWorker(QThread):
     state_changed = Signal(str, str)
     message_received = Signal(dict)
 
-    def __init__(self, port_name: str, parent=None) -> None:
+    def __init__(self, port_name: str, baudrate: int, parent=None) -> None:
         super().__init__(parent)
         self.port_name = port_name
+        self.baudrate = baudrate
         self.engine: SmsModemEngine | None = None
 
     def run(self) -> None:
         self.engine = SmsModemEngine(
             self.port_name,
+            baudrate=self.baudrate,
             on_status=lambda state, detail: self.state_changed.emit(state, detail),
             on_message=lambda message: self.message_received.emit(message),
         )
@@ -351,13 +353,17 @@ class MainWindow(QMainWindow):
 
         if not modems:
             self.selected_modem = None
-            self.modem_card.set_status(
-                "Ikke fundet",
-                "Ingen AT-kompatible modemmer fundet",
-                "bad",
-            )
-            self.signal_card.set_status("—", "Kontrollér dongle og Windows-driver", "bad")
-            self.modem_detail.setText("Modem: ikke fundet")
+            ports = available_serial_ports()
+            if ports:
+                port_text = ", ".join(f"{name} ({description})" for name, description in ports)
+                detail = f"COM-porte fundet, men ingen svarede på AT: {port_text}"
+                signal_detail = "Donglen ses af Windows; vi kunne ikke finde dens AT/SMS-port"
+            else:
+                detail = "Windows viser ingen COM-porte til modemmet"
+                signal_detail = "Kontrollér USB-dongle og Windows-driver i Enhedshåndtering"
+            self.modem_card.set_status("Ikke fundet", detail, "bad")
+            self.signal_card.set_status("—", signal_detail, "bad")
+            self.modem_detail.setText(detail)
             self.start_button.setEnabled(False)
             return
 
@@ -371,7 +377,7 @@ class MainWindow(QMainWindow):
 
         self.modem_card.set_status(
             display_name,
-            f"{modem.port} · SIM: {modem.sim_status}",
+            f"{modem.port} · {modem.baudrate} baud · SIM: {modem.sim_status}",
             "ok",
         )
         if modem.signal_percent is None:
@@ -383,7 +389,9 @@ class MainWindow(QMainWindow):
                 "ok",
             )
 
-        self.modem_detail.setText(f"Modem: {display_name} på {modem.port}")
+        self.modem_detail.setText(
+            f"Modem: {display_name} på {modem.port} · {modem.baudrate} baud"
+        )
         self.start_button.setEnabled(True)
 
     def start_gateway(self) -> None:
@@ -392,7 +400,11 @@ class MainWindow(QMainWindow):
         if self.gateway_worker and self.gateway_worker.isRunning():
             return
 
-        self.gateway_worker = GatewayWorker(self.selected_modem.port, self)
+        self.gateway_worker = GatewayWorker(
+            self.selected_modem.port,
+            self.selected_modem.baudrate,
+            self,
+        )
         self.gateway_worker.state_changed.connect(self.on_gateway_state)
         self.gateway_worker.message_received.connect(self.on_message_received)
         self.gateway_worker.finished.connect(self.on_gateway_finished)

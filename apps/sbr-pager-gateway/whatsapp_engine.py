@@ -102,10 +102,10 @@ class WhatsAppBridgeManager:
         bridge = self.bridge_path
         if not bridge.exists():
             return False, "WhatsApp bridge.js mangler"
-        package = bridge.parent / "node_modules" / "@open-wa" / "wa-automate"
+        package = bridge.parent / "node_modules" / "@whiskeysockets" / "baileys"
         if not package.exists():
-            return False, "OpenWA-runtime mangler (npm install i whatsapp-mappen i udviklingsmiljø)"
-        return True, f"Runtime klar · {node.name}"
+            return False, "Baileys-runtime mangler (npm install i whatsapp-mappen i udviklingsmiljø)"
+        return True, f"Baileys-runtime klar · {node.name}"
 
     def start(self) -> None:
         if self.process and self.process.poll() is None:
@@ -125,9 +125,7 @@ class WhatsAppBridgeManager:
                 "NO_UPDATE_NOTIFIER": "1",
             }
         )
-        browser_cache = self.browser_cache_dir
-        if browser_cache is not None:
-            env["PUPPETEER_CACHE_DIR"] = str(browser_cache)
+        env["NODE_NO_WARNINGS"] = "1"
 
         log_path = self.whatsapp_data_dir / "bridge.log"
         self._log_handle = log_path.open("a", encoding="utf-8")
@@ -164,9 +162,21 @@ class WhatsAppBridgeManager:
 
     def status(self, timeout: float = 0.8) -> dict:
         if self.process and self.process.poll() is not None:
+            detail = f"WhatsApp-motor stoppede med kode {self.process.returncode}"
+            log_path = self.whatsapp_data_dir / "bridge.log"
+            try:
+                lines = [
+                    line.strip()
+                    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                    if line.strip()
+                ]
+                if lines:
+                    detail += f" · {lines[-1][-350:]}"
+            except OSError:
+                pass
             return {
                 "state": "error",
-                "detail": f"WhatsApp-motor stoppede med kode {self.process.returncode}",
+                "detail": detail,
                 "qrAvailable": False,
             }
 

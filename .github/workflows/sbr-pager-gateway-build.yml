@@ -6,6 +6,7 @@ on:
     branches:
       - feature/sbr-pager-gateway-windows
       - feature/sbr-pager-gateway-admin-pin
+      - feature/sbr-pager-gateway-modem-baileys-fix
     paths:
       - 'apps/sbr-pager-gateway/**'
       - '.github/workflows/sbr-pager-gateway-build.yml'
@@ -26,7 +27,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.21.1'
 
       - name: Install Python build dependencies
         run: |
@@ -36,12 +37,8 @@ jobs:
       - name: Install pinned WhatsApp runtime
         shell: pwsh
         run: |
-          $cache = Join-Path $PWD 'runtime\puppeteer-cache'
-          New-Item -ItemType Directory -Force $cache | Out-Null
-          $env:PUPPETEER_CACHE_DIR = $cache
           Push-Location whatsapp
           npm install --no-audit --no-fund
-          npx puppeteer browsers install chrome
           Pop-Location
 
       - name: Bundle Node runtime
@@ -109,7 +106,7 @@ jobs:
             "$app\SBR Pager Gateway.exe",
             "$app\runtime\node\node.exe",
             "$app\whatsapp\bridge.js",
-            "$app\whatsapp\node_modules\@open-wa\wa-automate\package.json"
+            "$app\whatsapp\node_modules\@whiskeysockets\baileys\package.json"
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Missing packaged file: $path" }
