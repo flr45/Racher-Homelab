@@ -1,0 +1,47 @@
+name: SBR Pager Gateway Windows
+
+on:
+  push:
+    branches:
+      - feature/sbr-pager-gateway-windows
+    paths:
+      - 'apps/sbr-pager-gateway/**'
+      - '.github/workflows/sbr-pager-gateway-windows.yml'
+  pull_request:
+    paths:
+      - 'apps/sbr-pager-gateway/**'
+      - '.github/workflows/sbr-pager-gateway-windows.yml'
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/sbr-pager-gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile Python sources
+        run: python -m py_compile main.py modem.py storage.py sms_engine.py sms_pdu.py gsm0338.py policy.py management.py whatsapp_engine.py delivery.py whatsapp_ui.py
+
+      - name: Import application modules
+        run: python -c "import main, modem, storage, sms_engine, sms_pdu, gsm0338, policy, management, whatsapp_engine, delivery, whatsapp_ui; print('SBR Pager Gateway imports OK')"
+
+      - name: Validate WhatsApp bridge JavaScript
+        working-directory: apps/sbr-pager-gateway/whatsapp
+        run: node --check bridge.js
+
+      - name: Resolve pinned OpenWA dependency
+        working-directory: apps/sbr-pager-gateway/whatsapp
+        run: npm install --ignore-scripts --no-audit --no-fund

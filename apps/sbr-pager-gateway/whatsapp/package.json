@@ -1,0 +1,14 @@
+{
+  "name": "sbr-pager-gateway-whatsapp-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local WhatsApp bridge for SBR Pager Gateway",
+  "main": "bridge.js",
+  "scripts": {
+    "start": "node bridge.js",
+    "check": "node --check bridge.js"
+  },
+  "dependencies": {
+    "@open-wa/wa-automate": "4.76.0"
+  }
+}
