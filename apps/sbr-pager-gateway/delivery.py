@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from datetime import datetime, timezone
 
 from station_events import (
     active_recipients_for_station,
@@ -9,10 +10,26 @@ from station_events import (
     record_alarm_message,
     station_for_inbound,
 )
-from storage import add_event, connection, list_recipients, set_message_status, utcnow_iso
+from storage import add_event, connection, get_setting, list_recipients, set_message_status, utcnow_iso
 from whatsapp_engine import WhatsAppBridgeManager
 
 UpdateCallback = Callable[[int, str], None]
+
+
+def _setting_float(key: str, default: float, minimum: float, maximum: float) -> float:
+    raw = get_setting(key, str(default))
+    try:
+        value = float(raw or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _parse_iso(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class WhatsAppDeliveryEngine:
@@ -33,6 +50,12 @@ class WhatsAppDeliveryEngine:
     def stop(self) -> None:
         self._stop.set()
 
+    def _current_poll_seconds(self) -> float:
+        return _setting_float("whatsapp_poll_seconds", self.poll_seconds, 1.0, 30.0)
+
+    def _current_forward_delay(self) -> float:
+        return _setting_float("sms_forward_delay_seconds", 0.0, 0.0, 300.0)
+
     def run(self) -> None:
         while not self._stop.is_set():
             try:
@@ -41,13 +64,13 @@ class WhatsAppDeliveryEngine:
                     self._process_batch()
             except Exception as exc:  # noqa: BLE001
                 add_event("error", "whatsapp_delivery_worker", str(exc)[:1000])
-            self._stop.wait(self.poll_seconds)
+            self._stop.wait(self._current_poll_seconds())
 
     def _process_batch(self) -> None:
         with connection() as db:
             rows = db.execute(
                 """
-                SELECT id, sender, body, received_at, processing_status
+                SELECT id, sender, body, received_at, created_at, processing_status
                 FROM inbound_messages
                 WHERE accepted=1
                   AND processing_status IN (
@@ -62,9 +85,17 @@ class WhatsAppDeliveryEngine:
             ).fetchall()
             messages = [dict(row) for row in rows]
 
+        delay = self._current_forward_delay()
+        now = datetime.now(timezone.utc)
         for message in messages:
             if self._stop.is_set():
                 return
+            try:
+                age = (now - _parse_iso(str(message["created_at"]))).total_seconds()
+            except (TypeError, ValueError):
+                age = delay
+            if age < delay:
+                continue
             self._deliver_message(
                 int(message["id"]),
                 str(message["sender"]),
