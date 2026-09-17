@@ -4,6 +4,7 @@ from datetime import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFrame,
     QGridLayout,
@@ -12,10 +13,13 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
+    QWidget,
 )
 
-from station_events import alarm_event_timeline, recent_alarm_events, stats_snapshot
+from alarm_stats import statistics_snapshot
+from station_events import alarm_event_timeline, recent_alarm_events
 
 
 def _format_time(value: str | None, with_seconds: bool = False) -> str:
@@ -23,9 +27,20 @@ def _format_time(value: str | None, with_seconds: bool = False) -> str:
         return "—"
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        return parsed.astimezone().strftime("%d-%m-%Y %H:%M:%S" if with_seconds else "%d-%m-%Y %H:%M")
+        return parsed.astimezone().strftime(
+            "%d-%m-%Y %H:%M:%S" if with_seconds else "%d-%m-%Y %H:%M"
+        )
     except ValueError:
         return str(value)
+
+
+def _duration_summary(values: dict) -> str:
+    if values.get("avg") is None:
+        return "Ingen data endnu"
+    return (
+        f"Gns. {values['avg']} sek. · "
+        f"hurtigste {values['min']} sek. · langsomste {values['max']} sek."
+    )
 
 
 class _StatCard(QFrame):
@@ -38,8 +53,12 @@ class _StatCard(QFrame):
         heading.setObjectName("cardTitle")
         self.value = QLabel("—")
         self.value.setObjectName("metric")
+        self.detail = QLabel("")
+        self.detail.setObjectName("muted")
+        self.detail.setWordWrap(True)
         layout.addWidget(heading)
         layout.addWidget(self.value)
+        layout.addWidget(self.detail)
 
 
 class EventDetailDialog(QDialog):
@@ -65,7 +84,9 @@ class EventDetailDialog(QDialog):
         description = QLabel(
             f"Alarmtype: {event.get('alarm_type') or '—'}\n"
             f"Adresse: {event.get('address') or '—'}\n"
-            f"Sending 2/opfølgninger: {event.get('followup_count') or 0}"
+            f"Sending 2/opfølgninger: {event.get('followup_count') or 0}\n"
+            f"Første WhatsApp: {_format_time(event.get('first_delivered_at'), True)} · "
+            f"Komplet: {_format_time(event.get('completed_at'), True)}"
         )
         description.setWordWrap(True)
         root.addWidget(description)
@@ -116,91 +137,127 @@ class AlarmEventsDialog(QDialog):
         super().__init__(parent)
         self.events: list[dict] = []
         self.setWindowTitle("Alarmhændelser og statistik · SBR Pager Gateway")
-        self.resize(1120, 720)
+        self.resize(1180, 760)
         root = QVBoxLayout(self)
 
         header = QHBoxLayout()
         title_box = QVBoxLayout()
         title = QLabel("Alarmhændelser og statistik")
         title.setStyleSheet("font-size: 22px; font-weight: 650;")
-        subtitle = QLabel("Første varsling, komplet melding og Sending 2 samlet som én hændelse.")
+        subtitle = QLabel(
+            "Første varsling, komplet melding og Sending 2 samlet som én hændelse."
+        )
         subtitle.setObjectName("muted")
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
         header.addLayout(title_box)
         header.addStretch()
+
+        period_label = QLabel("Periode")
+        header.addWidget(period_label)
+        self.period = QComboBox()
+        self.period.addItem("30 dage", 30)
+        self.period.addItem("90 dage", 90)
+        self.period.addItem("365 dage", 365)
+        self.period.currentIndexChanged.connect(self.refresh_statistics)
+        header.addWidget(self.period)
+
         refresh = QPushButton("Opdater")
         refresh.clicked.connect(self.refresh)
         header.addWidget(refresh)
         root.addLayout(header)
 
-        cards = QGridLayout()
-        self.today = _StatCard("ALARMer I DAG")
-        self.days7 = _StatCard("SENESTE 7 DAGE")
-        self.days30 = _StatCard("SENESTE 30 DAGE")
-        self.waiting = _StatCard("AFVENTER")
-        self.first = _StatCard("FØRSTE WHATSAPP")
-        self.complete = _StatCard("KOMPLET MELDING")
-        for index, card in enumerate(
-            [self.today, self.days7, self.days30, self.waiting, self.first, self.complete]
-        ):
-            cards.addWidget(card, index // 3, index % 3)
-        root.addLayout(cards)
+        self.tabs = QTabWidget()
+        root.addWidget(self.tabs, 1)
 
-        self.summary = QLabel("")
-        self.summary.setWordWrap(True)
-        self.summary.setObjectName("muted")
-        root.addWidget(self.summary)
-
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(
+        self.events_page = QWidget()
+        events_layout = QVBoxLayout(self.events_page)
+        self.events_table = QTableWidget(0, 7)
+        self.events_table.setHorizontalHeaderLabels(
             ["Tid", "Station", "Alarmtype", "Adresse", "Status", "Sending 2", "Afsender"]
         )
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setColumnWidth(0, 145)
-        self.table.setColumnWidth(1, 120)
-        self.table.setColumnWidth(2, 190)
-        self.table.setColumnWidth(3, 300)
-        self.table.setColumnWidth(4, 100)
-        self.table.setColumnWidth(5, 90)
-        self.table.doubleClicked.connect(self.open_selected)
-        root.addWidget(self.table, 1)
-
-        actions = QHBoxLayout()
+        self.events_table.verticalHeader().setVisible(False)
+        self.events_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.events_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.events_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.events_table.setColumnWidth(0, 145)
+        self.events_table.setColumnWidth(1, 120)
+        self.events_table.setColumnWidth(2, 190)
+        self.events_table.setColumnWidth(3, 300)
+        self.events_table.setColumnWidth(4, 100)
+        self.events_table.setColumnWidth(5, 90)
+        self.events_table.doubleClicked.connect(self.open_selected)
+        events_layout.addWidget(self.events_table, 1)
+        event_actions = QHBoxLayout()
         open_button = QPushButton("Vis valgt hændelse")
         open_button.clicked.connect(self.open_selected)
-        actions.addWidget(open_button)
-        actions.addStretch()
+        event_actions.addWidget(open_button)
+        event_actions.addStretch()
+        events_layout.addLayout(event_actions)
+        self.tabs.addTab(self.events_page, "Hændelser")
+
+        self.stats_page = QWidget()
+        stats_layout = QVBoxLayout(self.stats_page)
+        cards = QGridLayout()
+        self.total = _StatCard("ALARMER")
+        self.complete_pct = _StatCard("KOMPLETTE")
+        self.followups = _StatCard("MED SENDING 2")
+        self.peak = _StatCard("TRAVLESTE TIDSPUNKT")
+        self.first = _StatCard("FØRSTE WHATSAPP")
+        self.complete_time = _StatCard("KOMPLET MELDING")
+        for index, card in enumerate(
+            [
+                self.total,
+                self.complete_pct,
+                self.followups,
+                self.peak,
+                self.first,
+                self.complete_time,
+            ]
+        ):
+            cards.addWidget(card, index // 3, index % 3)
+        stats_layout.addLayout(cards)
+
+        self.daily_label = QLabel("")
+        self.daily_label.setWordWrap(True)
+        self.daily_label.setObjectName("muted")
+        stats_layout.addWidget(self.daily_label)
+
+        self.distributions = QTableWidget(0, 8)
+        self.distributions.setHorizontalHeaderLabels(
+            [
+                "Ugedag",
+                "Antal",
+                "Klokkeslæt",
+                "Antal",
+                "Alarmtype",
+                "Antal",
+                "Station",
+                "Antal",
+            ]
+        )
+        self.distributions.verticalHeader().setVisible(False)
+        self.distributions.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.distributions.setSelectionMode(QTableWidget.NoSelection)
+        self.distributions.horizontalHeader().setStretchLastSection(True)
+        stats_layout.addWidget(self.distributions, 1)
+        self.tabs.addTab(self.stats_page, "Statistik")
+
+        close_row = QHBoxLayout()
+        close_row.addStretch()
         close = QPushButton("Luk")
         close.clicked.connect(self.accept)
-        actions.addWidget(close)
-        root.addLayout(actions)
+        close_row.addWidget(close)
+        root.addLayout(close_row)
         self.refresh()
 
     def refresh(self) -> None:
-        stats = stats_snapshot()
-        self.today.value.setText(str(stats["today"]))
-        self.days7.value.setText(str(stats["days7"]))
-        self.days30.value.setText(str(stats["days30"]))
-        self.waiting.value.setText(str(stats["waiting"]))
-        self.first.value.setText(
-            f"{stats['avg_first']} sek." if stats["avg_first"] is not None else "—"
-        )
-        self.complete.value.setText(
-            f"{stats['avg_complete']} sek." if stats["avg_complete"] is not None else "—"
-        )
+        self.refresh_events()
+        self.refresh_statistics()
 
-        top_types = ", ".join(f"{name} ({count})" for name, count in stats["top_types"])
-        self.summary.setText(
-            f"Sending 2/opfølgninger de seneste 30 dage: {stats['followups']}"
-            + (f" · Hyppigste alarmtyper: {top_types}" if top_types else "")
-        )
-
-        self.events = recent_alarm_events(250)
-        self.table.setRowCount(len(self.events))
+    def refresh_events(self) -> None:
+        self.events = recent_alarm_events(500)
+        self.events_table.setRowCount(len(self.events))
         for index, event in enumerate(self.events):
             values = [
                 _format_time(str(event["started_at"])),
@@ -215,11 +272,75 @@ class AlarmEventsDialog(QDialog):
                 item = QTableWidgetItem(value)
                 if column == 0:
                     item.setData(Qt.UserRole, int(event["id"]))
-                self.table.setItem(index, column, item)
-        self.table.resizeRowsToContents()
+                self.events_table.setItem(index, column, item)
+        self.events_table.resizeRowsToContents()
+
+    def refresh_statistics(self, *_args) -> None:
+        days = int(self.period.currentData() or 30)
+        stats = statistics_snapshot(days)
+
+        self.total.value.setText(str(stats["total"]))
+        self.total.detail.setText(f"Seneste {days} dage")
+        self.complete_pct.value.setText(f"{stats['complete_pct']}%")
+        self.complete_pct.detail.setText(f"{stats['complete']} af {stats['total']} hændelser")
+        self.followups.value.setText(f"{stats['followup_pct']}%")
+        self.followups.detail.setText(
+            f"{stats['followup_events']} hændelser · {stats['followup_total']} opfølgninger"
+        )
+        peak_hour = stats["peak_hour"]["name"] if stats["peak_hour"] else "—"
+        peak_day = stats["peak_weekday"]["name"] if stats["peak_weekday"] else "Ikke nok data"
+        self.peak.value.setText(peak_hour)
+        self.peak.detail.setText(peak_day)
+        self.first.value.setText(
+            f"{stats['first']['avg']} sek." if stats["first"]["avg"] is not None else "—"
+        )
+        self.first.detail.setText(_duration_summary(stats["first"]))
+        self.complete_time.value.setText(
+            f"{stats['complete_time']['avg']} sek."
+            if stats["complete_time"]["avg"] is not None
+            else "—"
+        )
+        self.complete_time.detail.setText(_duration_summary(stats["complete_time"]))
+
+        daily_nonzero = [row for row in stats["daily"] if row["count"]]
+        self.daily_label.setText(
+            "Alarmer pr. dag · seneste 30 dage: "
+            + (
+                " · ".join(f"{row['date']}: {row['count']}" for row in daily_nonzero)
+                if daily_nonzero
+                else "ingen registrerede alarmer"
+            )
+        )
+
+        weekdays = stats["weekdays"]
+        hours = stats["hours"]
+        types = stats["types"]
+        stations = stats["stations"]
+        row_count = max(len(weekdays), len(hours), len(types), len(stations), 1)
+        self.distributions.setRowCount(row_count)
+        for row_index in range(row_count):
+            values: list[str] = []
+            if row_index < len(weekdays):
+                values.extend([weekdays[row_index]["name"], str(weekdays[row_index]["count"])])
+            else:
+                values.extend(["", ""])
+            if row_index < len(hours):
+                values.extend([hours[row_index]["name"], str(hours[row_index]["count"])])
+            else:
+                values.extend(["", ""])
+            if row_index < len(types):
+                values.extend([str(types[row_index][0]), str(types[row_index][1])])
+            else:
+                values.extend(["", ""])
+            if row_index < len(stations):
+                values.extend([str(stations[row_index][0]), str(stations[row_index][1])])
+            else:
+                values.extend(["", ""])
+            for column, value in enumerate(values):
+                self.distributions.setItem(row_index, column, QTableWidgetItem(value))
 
     def open_selected(self, *_args) -> None:
-        row = self.table.currentRow()
+        row = self.events_table.currentRow()
         if row < 0 or row >= len(self.events):
             return
         EventDetailDialog(self.events[row], self).exec()
