@@ -20,10 +20,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import station_events
+from admin_ui import AdvancedSettingsDialog
 from management import RecipientsDialog, SendersDialog
 from modem import ModemInfo, discover_modems
 from sms_engine import SmsModemEngine
-from storage import data_dir, init_database, recent_messages
+from storage import get_setting, init_database, recent_messages
 from whatsapp_engine import WhatsAppBridgeManager
 from whatsapp_ui import (
     DeliveryWorker,
@@ -165,6 +167,13 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         init_database()
+        try:
+            station_events.EVENT_LINK_MINUTES = max(
+                15,
+                min(720, int(float(get_setting("sending2_link_minutes", "120") or 120))),
+            )
+        except (TypeError, ValueError):
+            station_events.EVENT_LINK_MINUTES = 120
 
         self.setWindowTitle("SBR Pager Gateway")
         self.resize(1240, 790)
@@ -291,7 +300,9 @@ class MainWindow(QMainWindow):
         self.recipients_button.clicked.connect(self.open_recipients)
         bottom.addWidget(self.recipients_button)
 
-        self.settings_button = QPushButton("Indstillinger")
+        self.settings_button = QPushButton("Avanceret")
+        self.settings_button.setToolTip("Avancerede drifts- og integrationsindstillinger")
+        self.settings_button.setShortcut("Ctrl+Shift+F12")
         self.settings_button.clicked.connect(self.show_settings)
         bottom.addWidget(self.settings_button)
         main.addLayout(bottom)
@@ -554,17 +565,7 @@ class MainWindow(QMainWindow):
         self.refresh_history()
 
     def show_settings(self) -> None:
-        node = self.whatsapp.node_executable
-        ready, runtime_detail = self.whatsapp.runtime_status()
-        QMessageBox.information(
-            self,
-            "Indstillinger / systeminfo",
-            "SBR Pager Gateway kører lokalt på denne Windows-pc.\n\n"
-            f"Data: {data_dir()}\n"
-            f"WhatsApp-runtime: {'Klar' if ready else 'Ikke klar'}\n"
-            f"Detalje: {runtime_detail}\n"
-            f"Node: {node if node else 'ikke fundet'}",
-        )
+        AdvancedSettingsDialog(self).exec()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.gateway_worker and self.gateway_worker.isRunning():
