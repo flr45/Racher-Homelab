@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
-from storage import add_event, connection, get_setting, utcnow_iso
+from storage import add_event, connection, get_setting, set_setting, utcnow_iso
 
 
 def _as_bool(value: str | None, default: bool = False) -> bool:
@@ -205,14 +205,21 @@ class SystemLinkEngine:
             self._stop.wait(1.0)
 
     def _queue_accepted_messages(self) -> None:
+        started_at = get_setting("system_link_started_at", None)
+        if not started_at:
+            # Defensive bootstrap for manually edited/migrated installations:
+            # establish the boundary now rather than replaying old alarms.
+            set_setting("system_link_started_at", utcnow_iso())
+            return
         with connection() as db:
             db.execute(
                 """
                 INSERT OR IGNORE INTO system_link_deliveries(inbound_id, status, attempts)
                 SELECT id, 'pending', 0
                 FROM inbound_messages
-                WHERE accepted=1
-                """
+                WHERE accepted=1 AND created_at>=?
+                """,
+                (started_at,),
             )
 
     def _process_one(self) -> None:
