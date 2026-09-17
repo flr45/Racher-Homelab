@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 import station_events
+from admin_access_ui import request_admin_access
 from storage import data_dir, get_setting, set_setting, utcnow_iso
 from system_link import system_link_status, test_system_link
 
@@ -51,33 +51,30 @@ class SystemLinkTestWorker(QThread):
     completed = Signal()
     failed = Signal(str)
 
-    def __init__(self, endpoint: str, token: str, timeout: float, parent=None) -> None:
+    def __init__(self, timeout: float, parent=None) -> None:
         super().__init__(parent)
-        self.endpoint = endpoint
-        self.token = token
         self.timeout = timeout
 
     def run(self) -> None:
         try:
-            test_system_link(self.endpoint, self.token, self.timeout)
+            test_system_link(self.timeout)
             self.completed.emit()
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
 
 
 class AdvancedSettingsDialog(QDialog):
-    """Administrator-only operational settings.
+    """PIN-protected operational settings.
 
-    The normal local Windows UI intentionally has no login. This dialog keeps
-    transport mirroring and low-level timing knobs away from everyday user,
-    station and recipient administration.
+    Everyday sender, recipient, station and alarm-filter administration remains
+    login-free. Only transport mirroring and low-level timing live here.
     """
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.test_worker: SystemLinkTestWorker | None = None
         self.setWindowTitle("Avancerede indstillinger · SBR Pager Gateway")
-        self.resize(680, 690)
+        self.resize(680, 660)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 22, 24, 22)
@@ -98,18 +95,29 @@ class AdvancedSettingsDialog(QDialog):
         link_group = QGroupBox("System Link")
         link_form = QFormLayout(link_group)
 
+        status = system_link_status()
         self.link_enabled = QCheckBox("Aktivér System Link")
-        self.link_enabled.setChecked((get_setting("system_link_enabled", "0") or "0") == "1")
+        self.link_enabled.setChecked(bool(status["enabled"]))
         link_form.addRow("Status", self.link_enabled)
 
-        self.endpoint = QLineEdit(get_setting("system_link_endpoint", "") or "")
-        self.endpoint.setPlaceholderText("https://server.example/api/gateway")
-        link_form.addRow("Endpoint", self.endpoint)
+        if status["provisioned"]:
+            registration_text = "Registreret automatisk"
+        elif status["bootstrap_configured"]:
+            registration_text = "Afventer automatisk registrering"
+        else:
+            registration_text = "Installer mangler provisioneringsdata"
+        registration = QLabel(registration_text)
+        registration.setObjectName("ok" if status["provisioned"] else "warn")
+        link_form.addRow("Registrering", registration)
 
-        self.token = QLineEdit(get_setting("system_link_token", "") or "")
-        self.token.setEchoMode(QLineEdit.Password)
-        self.token.setPlaceholderText("Delt nøgle / token")
-        link_form.addRow("Nøgle", self.token)
+        client_id = QLabel(status["client_id"] or "—")
+        client_id.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        link_form.addRow("Klient-ID", client_id)
+
+        endpoint = QLabel(status["endpoint"] or "—")
+        endpoint.setWordWrap(True)
+        endpoint.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        link_form.addRow("Endpoint", endpoint)
 
         self.link_timeout = QDoubleSpinBox()
         self.link_timeout.setRange(1.0, 30.0)
@@ -124,7 +132,6 @@ class AdvancedSettingsDialog(QDialog):
         self.link_retry.setValue(_setting_int("system_link_retry_seconds", 30))
         link_form.addRow("Retry efter fejl", self.link_retry)
 
-        status = system_link_status()
         self.link_status = QLabel(
             f"Kø: {status['pending']} · Fejl: {status['failed']} · "
             f"Leveret: {status['sent']} · Sidste succes: {_format_time(status['last_success'])}"
@@ -202,27 +209,19 @@ class AdvancedSettingsDialog(QDialog):
         buttons.addWidget(save)
         root.addLayout(buttons)
 
+    def exec(self) -> int:  # noqa: A003
+        if not request_admin_access(self.parent()):
+            return QDialog.Rejected
+        return super().exec()
+
     def save(self) -> None:
-        endpoint = self.endpoint.text().strip()
         enabling_link = self.link_enabled.isChecked()
         was_enabled = (get_setting("system_link_enabled", "0") or "0") == "1"
-        if enabling_link and not endpoint.lower().startswith(("http://", "https://")):
-            QMessageBox.warning(
-                self,
-                "System Link",
-                "Når System Link er aktiv, skal endpoint starte med http:// eller https://.",
-            )
-            return
-
         if enabling_link and not was_enabled:
-            # Establish the boundary before enabling, so the background worker
-            # can never observe enabled=1 without a replay boundary.
             set_setting("system_link_started_at", utcnow_iso())
 
         values = {
             "system_link_enabled": "1" if enabling_link else "0",
-            "system_link_endpoint": endpoint,
-            "system_link_token": self.token.text(),
             "system_link_timeout_seconds": str(self.link_timeout.value()),
             "system_link_retry_seconds": str(self.link_retry.value()),
             "sms_forward_delay_seconds": str(self.sms_delay.value()),
@@ -233,26 +232,15 @@ class AdvancedSettingsDialog(QDialog):
         for key, value in values.items():
             set_setting(key, value)
 
-        # station_events reads this module constant while grouping follow-up
-        # messages. Updating it here makes the setting effective immediately.
         station_events.EVENT_LINK_MINUTES = int(self.sending2_window.value())
         self.accept()
 
     def test_link(self) -> None:
         if self.test_worker and self.test_worker.isRunning():
             return
-        endpoint = self.endpoint.text().strip()
-        if not endpoint:
-            QMessageBox.information(self, "System Link", "Skriv først et endpoint.")
-            return
         self.test_button.setEnabled(False)
         self.test_button.setText("Tester…")
-        self.test_worker = SystemLinkTestWorker(
-            endpoint,
-            self.token.text(),
-            self.link_timeout.value(),
-            self,
-        )
+        self.test_worker = SystemLinkTestWorker(self.link_timeout.value(), self)
         self.test_worker.completed.connect(self.on_test_ok)
         self.test_worker.failed.connect(self.on_test_failed)
         self.test_worker.finished.connect(self.on_test_finished)

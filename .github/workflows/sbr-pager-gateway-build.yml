@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/sbr-pager-gateway-windows
+      - feature/sbr-pager-gateway-admin-pin
     paths:
       - 'apps/sbr-pager-gateway/**'
       - '.github/workflows/sbr-pager-gateway-build.yml'
@@ -50,6 +51,42 @@ jobs:
           $node = (Get-Command node).Source
           Copy-Item $node 'runtime\node\node.exe' -Force
           Write-Host "Bundled Node from $node"
+
+      - name: Embed System Link bootstrap
+        shell: pwsh
+        env:
+          SYSTEM_LINK_PROVISION_URL: ${{ secrets.SBR_SYSTEM_LINK_PROVISION_URL }}
+          SYSTEM_LINK_MESSAGE_ENDPOINT: ${{ secrets.SBR_SYSTEM_LINK_MESSAGE_ENDPOINT }}
+          SYSTEM_LINK_PROVISION_TOKEN: ${{ secrets.SBR_SYSTEM_LINK_PROVISION_TOKEN }}
+          SBR_APP_VERSION: 0.1.${{ github.run_number }}
+        run: |
+          $missing = @()
+          if ([string]::IsNullOrWhiteSpace($env:SYSTEM_LINK_PROVISION_URL)) { $missing += 'SBR_SYSTEM_LINK_PROVISION_URL' }
+          if ([string]::IsNullOrWhiteSpace($env:SYSTEM_LINK_MESSAGE_ENDPOINT)) { $missing += 'SBR_SYSTEM_LINK_MESSAGE_ENDPOINT' }
+          if ([string]::IsNullOrWhiteSpace($env:SYSTEM_LINK_PROVISION_TOKEN)) { $missing += 'SBR_SYSTEM_LINK_PROVISION_TOKEN' }
+
+          if ($missing.Count -gt 0) {
+            if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+              throw "Production/manual installer build mangler GitHub Actions secrets: $($missing -join ', ')"
+            }
+            Write-Warning "System Link bootstrap mangler: $($missing -join ', '). CI-testbuilden fortsætter uden auto-provisionering."
+          }
+
+          $version = ConvertTo-Json -Compress ([string]$env:SBR_APP_VERSION)
+          $provisionUrl = ConvertTo-Json -Compress ([string]$env:SYSTEM_LINK_PROVISION_URL)
+          $messageEndpoint = ConvertTo-Json -Compress ([string]$env:SYSTEM_LINK_MESSAGE_ENDPOINT)
+          $provisionToken = ConvertTo-Json -Compress ([string]$env:SYSTEM_LINK_PROVISION_TOKEN)
+          @(
+            "APP_VERSION = $version",
+            "SYSTEM_LINK_PROVISION_URL = $provisionUrl",
+            "SYSTEM_LINK_MESSAGE_ENDPOINT = $messageEndpoint",
+            "SYSTEM_LINK_PROVISION_TOKEN = $provisionToken"
+          ) | Set-Content -Encoding UTF8 build_config.py
+
+          python -m py_compile build_config.py
+          if ($missing.Count -eq 0) {
+            Write-Host 'System Link one-time bootstrap embedded in application.'
+          }
 
       - name: Build Windows application
         run: pyinstaller --noconfirm --clean --windowed --name "SBR Pager Gateway" main.py
@@ -98,12 +135,18 @@ jobs:
         run: |
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' 'installer.iss'
 
-      - name: Upload Windows builds
+      - name: Upload Setup EXE
         uses: actions/upload-artifact@v4
         with:
-          name: SBR-Pager-Gateway-Windows
-          path: |
-            apps/sbr-pager-gateway/installer-output/SBR-Pager-Gateway-Setup.exe
-            apps/sbr-pager-gateway/installer-output/SBR-Pager-Gateway-Portable.zip
+          name: SBR-Pager-Gateway-Setup
+          path: apps/sbr-pager-gateway/installer-output/SBR-Pager-Gateway-Setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: SBR-Pager-Gateway-Portable
+          path: apps/sbr-pager-gateway/installer-output/SBR-Pager-Gateway-Portable.zip
           if-no-files-found: error
           retention-days: 14
