@@ -123,13 +123,32 @@ async function connectWhatsApp() {
   setState('starting', 'Forbinder til WhatsApp');
   console.log('[whatsapp] starting Baileys connection');
 
-  const baileys = await import('@whiskeysockets/baileys');
-  const {
-    default: makeWASocket,
-    useMultiFileAuthState,
-    DisconnectReason,
-    Browsers,
-  } = baileys;
+  const imported = await import('@whiskeysockets/baileys');
+  const common = imported && imported.default && typeof imported.default === 'object'
+    ? imported.default
+    : {};
+
+  const makeWASocket =
+    (typeof imported.default === 'function' && imported.default) ||
+    imported.makeWASocket ||
+    common.makeWASocket ||
+    common.default;
+  const useMultiFileAuthState =
+    imported.useMultiFileAuthState || common.useMultiFileAuthState;
+  const DisconnectReason =
+    imported.DisconnectReason || common.DisconnectReason;
+  const Browsers =
+    imported.Browsers || common.Browsers;
+
+  if (typeof makeWASocket !== 'function') {
+    throw new Error('Baileys runtime: makeWASocket mangler');
+  }
+  if (typeof useMultiFileAuthState !== 'function') {
+    throw new Error('Baileys runtime: useMultiFileAuthState mangler');
+  }
+  if (!Browsers || typeof Browsers.windows !== 'function') {
+    throw new Error('Baileys runtime: Browsers.windows mangler');
+  }
 
   const { state: authState, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
 
