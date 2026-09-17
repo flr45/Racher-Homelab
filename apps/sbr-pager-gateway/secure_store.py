@@ -24,12 +24,41 @@ def _make_blob(data: bytes) -> tuple[DATA_BLOB, ctypes.Array]:
     return blob, buffer
 
 
+def _apis():
+    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    blob_ptr = ctypes.POINTER(DATA_BLOB)
+
+    crypt32.CryptProtectData.argtypes = [
+        blob_ptr,
+        wintypes.LPCWSTR,
+        blob_ptr,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        blob_ptr,
+    ]
+    crypt32.CryptProtectData.restype = wintypes.BOOL
+    crypt32.CryptUnprotectData.argtypes = [
+        blob_ptr,
+        ctypes.c_void_p,
+        blob_ptr,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        blob_ptr,
+    ]
+    crypt32.CryptUnprotectData.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
+    return crypt32, kernel32
+
+
 def protect_bytes(data: bytes) -> bytes:
     _require_windows()
     in_blob, in_buffer = _make_blob(data)
     out_blob = DATA_BLOB()
-    crypt32 = ctypes.windll.crypt32
-    kernel32 = ctypes.windll.kernel32
+    crypt32, kernel32 = _apis()
     ok = crypt32.CryptProtectData(
         ctypes.byref(in_blob),
         "SBR Pager Gateway",
@@ -41,19 +70,18 @@ def protect_bytes(data: bytes) -> bytes:
     )
     _ = in_buffer
     if not ok:
-        raise ctypes.WinError()
+        raise ctypes.WinError(ctypes.get_last_error())
     try:
         return ctypes.string_at(out_blob.pbData, out_blob.cbData)
     finally:
-        kernel32.LocalFree(out_blob.pbData)
+        kernel32.LocalFree(ctypes.cast(out_blob.pbData, ctypes.c_void_p))
 
 
 def unprotect_bytes(data: bytes) -> bytes:
     _require_windows()
     in_blob, in_buffer = _make_blob(data)
     out_blob = DATA_BLOB()
-    crypt32 = ctypes.windll.crypt32
-    kernel32 = ctypes.windll.kernel32
+    crypt32, kernel32 = _apis()
     ok = crypt32.CryptUnprotectData(
         ctypes.byref(in_blob),
         None,
@@ -65,11 +93,11 @@ def unprotect_bytes(data: bytes) -> bytes:
     )
     _ = in_buffer
     if not ok:
-        raise ctypes.WinError()
+        raise ctypes.WinError(ctypes.get_last_error())
     try:
         return ctypes.string_at(out_blob.pbData, out_blob.cbData)
     finally:
-        kernel32.LocalFree(out_blob.pbData)
+        kernel32.LocalFree(ctypes.cast(out_blob.pbData, ctypes.c_void_p))
 
 
 def credential_path(name: str) -> Path:
