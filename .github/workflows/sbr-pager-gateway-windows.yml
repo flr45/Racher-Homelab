@@ -34,10 +34,10 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Compile Python sources
-        run: python -m py_compile main.py modem.py storage.py sms_engine.py sms_pdu.py gsm0338.py policy.py management.py whatsapp_engine.py delivery.py whatsapp_ui.py station_events.py stations_ui.py events_ui.py alarm_stats.py tests/test_station_events.py
+        run: python -m py_compile main.py modem.py storage.py sms_engine.py sms_pdu.py gsm0338.py policy.py management.py whatsapp_engine.py delivery.py whatsapp_ui.py station_events.py station_defaults.py stations_ui.py events_ui.py alarm_stats.py tests/test_station_events.py
 
       - name: Import application modules
-        run: python -c "import main, modem, storage, sms_engine, sms_pdu, gsm0338, policy, management, whatsapp_engine, delivery, whatsapp_ui, station_events, stations_ui, events_ui, alarm_stats; print('SBR Pager Gateway imports OK')"
+        run: python -c "import main, modem, storage, sms_engine, sms_pdu, gsm0338, policy, management, whatsapp_engine, delivery, whatsapp_ui, station_events, station_defaults, stations_ui, events_ui, alarm_stats; print('SBR Pager Gateway imports OK')"
 
       - name: Run local gateway tests
         run: python -m unittest discover -s tests -v
