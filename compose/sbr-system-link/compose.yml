@@ -1,0 +1,32 @@
+name: sbr-system-link
+
+services:
+  sbr-system-link:
+    build:
+      context: ../../services/sbr-system-link
+      dockerfile: Dockerfile
+    container_name: sbr-system-link
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Copenhagen}
+      SYSTEM_LINK_SECRET: ${SBR_SYSTEM_LINK_SECRET:?SBR_SYSTEM_LINK_SECRET must be set}
+      SYSTEM_LINK_DB: /data/system-link.db
+    ports:
+      - "127.0.0.1:${SBR_SYSTEM_LINK_PORT:-8098}:8098"
+    volumes:
+      - sbr_system_link_data:/data
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8098/health', timeout=5).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  sbr_system_link_data:
+
+networks:
+  proxy:
+    external: true
