@@ -7,8 +7,16 @@ from collections.abc import Callable
 
 import serial
 
+from policy import normalize_phone, should_ignore_message
 from sms_pdu import parse_cmgl_response
-from storage import add_event, get_setting, set_setting, store_inbound_message
+from storage import (
+    add_event,
+    get_setting,
+    is_sender_allowed,
+    set_message_status,
+    set_setting,
+    store_inbound_message,
+)
 
 StatusCallback = Callable[[str, str], None]
 MessageCallback = Callable[[dict], None]
@@ -85,11 +93,7 @@ class SmsModemEngine:
                 raise RuntimeError(f"Modemmet afviste {value}: {response.strip()}")
 
     def _bootstrap_existing_sms(self, port: serial.Serial) -> None:
-        """Archive and clear pre-existing unread SMS without forwarding them.
-
-        This protects a fresh installation from forwarding messages that were
-        already stored on the SIM before SBR Pager Gateway was installed.
-        """
+        """Archive and clear pre-existing unread SMS without forwarding them."""
         key = f"modem_bootstrap_complete:{self.port_name}"
         if get_setting(key, "0") == "1":
             return
@@ -99,7 +103,7 @@ class SmsModemEngine:
         skipped = 0
         for message in messages:
             source_id = self._source_id(message)
-            _, _ = store_inbound_message(
+            store_inbound_message(
                 source_id=source_id,
                 sender=message["sender"],
                 body=message["body"],
@@ -136,22 +140,41 @@ class SmsModemEngine:
                 processing_status="received",
             )
 
-            # The database write is the durability boundary. Only after it has
-            # succeeded is the message removed from the SIM.
+            # SQLite is the durability boundary. The SMS is only removed from
+            # the SIM after the local copy is known to exist.
             self._delete_message(port, message)
 
             if inserted:
+                final_status, accepted = self._classify_message(message)
+                set_message_status(message_id, final_status, accepted=accepted)
                 add_event(
                     "info",
                     "sms_received",
-                    f"SMS {message_id} modtaget fra {message['sender']}",
+                    f"SMS {message_id} fra {message['sender']} → {final_status}",
                 )
                 if self.on_message:
                     event = dict(message)
                     event["database_id"] = message_id
+                    event["processing_status"] = final_status
+                    event["accepted"] = accepted
                     self.on_message(event)
 
         self._status("online", f"SMS-modem online på {self.port_name}")
+
+    @staticmethod
+    def _classify_message(message: dict) -> tuple[str, bool]:
+        body = str(message.get("body") or "")
+        if should_ignore_message(body):
+            return "ignored_command", False
+
+        try:
+            sender = normalize_phone(str(message.get("sender") or ""))
+        except ValueError:
+            return "rejected_sender", False
+
+        if is_sender_allowed(sender):
+            return "accepted_pending_whatsapp", True
+        return "rejected_sender", False
 
     def _delete_message(self, port: serial.Serial, message: dict) -> None:
         for index in message["indices"]:
