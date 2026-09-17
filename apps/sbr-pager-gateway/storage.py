@@ -209,3 +209,75 @@ def message_count() -> int:
     with connection() as db:
         row = db.execute("SELECT COUNT(*) AS count FROM inbound_messages").fetchone()
         return int(row["count"])
+
+
+def list_allowed_senders() -> list[dict]:
+    with connection() as db:
+        rows = db.execute(
+            "SELECT id, name, phone, active, created_at FROM allowed_senders ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def save_allowed_sender(name: str, phone: str) -> int:
+    with connection() as db:
+        cursor = db.execute(
+            "INSERT INTO allowed_senders(name, phone, active, created_at) VALUES(?,?,1,?)",
+            (name.strip(), phone, utcnow_iso()),
+        )
+        return int(cursor.lastrowid)
+
+
+def set_allowed_sender_active(sender_id: int, active: bool) -> None:
+    with connection() as db:
+        db.execute(
+            "UPDATE allowed_senders SET active=? WHERE id=?",
+            (1 if active else 0, sender_id),
+        )
+
+
+def delete_allowed_sender(sender_id: int) -> None:
+    with connection() as db:
+        db.execute("DELETE FROM allowed_senders WHERE id=?", (sender_id,))
+
+
+def is_sender_allowed(phone: str) -> bool:
+    with connection() as db:
+        row = db.execute(
+            "SELECT 1 FROM allowed_senders WHERE phone=? AND active=1 LIMIT 1",
+            (phone,),
+        ).fetchone()
+        return row is not None
+
+
+def list_recipients(active_only: bool = False) -> list[dict]:
+    with connection() as db:
+        sql = "SELECT id, name, phone, active, created_at FROM recipients"
+        params: tuple = ()
+        if active_only:
+            sql += " WHERE active=1"
+        sql += " ORDER BY name COLLATE NOCASE"
+        rows = db.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+
+def save_recipient(name: str, phone: str) -> int:
+    with connection() as db:
+        cursor = db.execute(
+            "INSERT INTO recipients(name, phone, active, created_at) VALUES(?,?,1,?)",
+            (name.strip(), phone, utcnow_iso()),
+        )
+        return int(cursor.lastrowid)
+
+
+def set_recipient_active(recipient_id: int, active: bool) -> None:
+    with connection() as db:
+        db.execute(
+            "UPDATE recipients SET active=? WHERE id=?",
+            (1 if active else 0, recipient_id),
+        )
+
+
+def delete_recipient(recipient_id: int) -> None:
+    with connection() as db:
+        db.execute("DELETE FROM recipients WHERE id=?", (recipient_id,))
