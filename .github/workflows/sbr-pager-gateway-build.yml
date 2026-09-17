@@ -98,12 +98,18 @@ jobs:
         run: |
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' 'installer.iss'
 
-      - name: Upload Windows builds
+      - name: Upload Setup EXE
         uses: actions/upload-artifact@v4
         with:
-          name: SBR-Pager-Gateway-Windows
-          path: |
-            apps/sbr-pager-gateway/installer-output/SBR-Pager-Gateway-Setup.exe
-            apps/sbr-pager-gateway/installer-output/SBR-Pager-Gateway-Portable.zip
+          name: SBR-Pager-Gateway-Setup
+          path: apps/sbr-pager-gateway/installer-output/SBR-Pager-Gateway-Setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: SBR-Pager-Gateway-Portable
+          path: apps/sbr-pager-gateway/installer-output/SBR-Pager-Gateway-Portable.zip
           if-no-files-found: error
           retention-days: 14
