@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/sbr-pager-gateway-windows
+      - feature/sbr-pager-gateway-events-stations
     paths:
       - 'apps/sbr-pager-gateway/**'
       - '.github/workflows/sbr-pager-gateway-windows.yml'
@@ -33,10 +34,10 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Compile Python sources
-        run: python -m py_compile main.py modem.py storage.py sms_engine.py sms_pdu.py gsm0338.py policy.py management.py whatsapp_engine.py delivery.py whatsapp_ui.py
+        run: python -m py_compile main.py modem.py storage.py sms_engine.py sms_pdu.py gsm0338.py policy.py management.py whatsapp_engine.py delivery.py whatsapp_ui.py station_events.py stations_ui.py events_ui.py
 
       - name: Import application modules
-        run: python -c "import main, modem, storage, sms_engine, sms_pdu, gsm0338, policy, management, whatsapp_engine, delivery, whatsapp_ui; print('SBR Pager Gateway imports OK')"
+        run: python -c "import main, modem, storage, sms_engine, sms_pdu, gsm0338, policy, management, whatsapp_engine, delivery, whatsapp_ui, station_events, stations_ui, events_ui; print('SBR Pager Gateway imports OK')"
 
       - name: Validate WhatsApp bridge JavaScript
         working-directory: apps/sbr-pager-gateway/whatsapp
