@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,6 +59,38 @@ class SystemLinkReceiverTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["status"], "ok")
         self.assertTrue(payload["provisioning"])
+
+    def test_existing_database_is_migrated_before_client_index(self) -> None:
+        legacy_path = Path(self.temp.name) / "legacy.db"
+        os.environ["SYSTEM_LINK_DB"] = str(legacy_path)
+        db = sqlite3.connect(legacy_path)
+        try:
+            db.executescript(
+                """
+                CREATE TABLE deliveries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    delivery_id TEXT NOT NULL UNIQUE,
+                    receiver_received_at TEXT NOT NULL,
+                    station TEXT
+                );
+                """
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        receiver.init_database()
+        with receiver.connection() as migrated:
+            columns = {
+                str(row[1])
+                for row in migrated.execute("PRAGMA table_info(deliveries)").fetchall()
+            }
+            indexes = {
+                str(row[1])
+                for row in migrated.execute("PRAGMA index_list(deliveries)").fetchall()
+            }
+        self.assertIn("client_id", columns)
+        self.assertIn("idx_deliveries_client", indexes)
 
     def test_provisioning_token_is_one_time(self) -> None:
         first = self._provision()
