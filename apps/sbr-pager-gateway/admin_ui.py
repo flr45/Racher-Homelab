@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 import station_events
-from storage import data_dir, get_setting, set_setting
+from storage import data_dir, get_setting, set_setting, utcnow_iso
 from system_link import system_link_status, test_system_link
 
 
@@ -204,7 +204,9 @@ class AdvancedSettingsDialog(QDialog):
 
     def save(self) -> None:
         endpoint = self.endpoint.text().strip()
-        if self.link_enabled.isChecked() and not endpoint.lower().startswith(("http://", "https://")):
+        enabling_link = self.link_enabled.isChecked()
+        was_enabled = (get_setting("system_link_enabled", "0") or "0") == "1"
+        if enabling_link and not endpoint.lower().startswith(("http://", "https://")):
             QMessageBox.warning(
                 self,
                 "System Link",
@@ -213,7 +215,7 @@ class AdvancedSettingsDialog(QDialog):
             return
 
         values = {
-            "system_link_enabled": "1" if self.link_enabled.isChecked() else "0",
+            "system_link_enabled": "1" if enabling_link else "0",
             "system_link_endpoint": endpoint,
             "system_link_token": self.token.text(),
             "system_link_timeout_seconds": str(self.link_timeout.value()),
@@ -225,6 +227,11 @@ class AdvancedSettingsDialog(QDialog):
         }
         for key, value in values.items():
             set_setting(key, value)
+
+        if enabling_link and not was_enabled:
+            # Enabling/re-enabling starts a new mirror window. Historical SMS
+            # are deliberately not replayed to the external endpoint.
+            set_setting("system_link_started_at", utcnow_iso())
 
         # station_events reads this module constant while grouping follow-up
         # messages. Updating it here makes the setting effective immediately.
