@@ -2,16 +2,26 @@ name: minutregnskab
 
 services:
   minutregnskab:
-    image: ${MINUTREGNSKAB_IMAGE:-ghcr.io/flr45/minutregnskab:latest}
+    image: ${MINUTREGNSKAB_IMAGE:?MINUTREGNSKAB_IMAGE must be pinned to an immutable sha tag}
     container_name: minutregnskab
     restart: unless-stopped
     labels:
-      com.centurylinklabs.watchtower.enable: "true"
+      com.centurylinklabs.watchtower.enable: "false"
     environment:
       TZ: ${TZ:-Europe/Copenhagen}
       DATABASE_PATH: /app/data/minutregnskab.db
       SECRET_KEY: ${MINUTREGNSKAB_SECRET_KEY:?MINUTREGNSKAB_SECRET_KEY must be set}
       SESSION_COOKIE_SECURE: ${MINUTREGNSKAB_SESSION_COOKIE_SECURE:-true}
+      SESSION_LIFETIME_HOURS: ${MINUTREGNSKAB_SESSION_LIFETIME_HOURS:-12}
+      PUBLIC_BASE_URL: ${MINUTREGNSKAB_PUBLIC_BASE_URL:-https://minutregnskab.racher.dk}
+      PASSWORD_RESET_MINUTES: ${MINUTREGNSKAB_PASSWORD_RESET_MINUTES:-60}
+      SMTP_HOST: ${MINUTREGNSKAB_SMTP_HOST:-}
+      SMTP_PORT: ${MINUTREGNSKAB_SMTP_PORT:-587}
+      SMTP_STARTTLS: ${MINUTREGNSKAB_SMTP_STARTTLS:-true}
+      SMTP_SSL: ${MINUTREGNSKAB_SMTP_SSL:-false}
+      SMTP_USERNAME: ${MINUTREGNSKAB_SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${MINUTREGNSKAB_SMTP_PASSWORD:-}
+      SMTP_FROM: ${MINUTREGNSKAB_SMTP_FROM:-}
     volumes:
       - minutregnskab_data:/app/data
     expose:
@@ -19,7 +29,7 @@ services:
     networks:
       - proxy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5)\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)\""]
       interval: 30s
       timeout: 10s
       retries: 3

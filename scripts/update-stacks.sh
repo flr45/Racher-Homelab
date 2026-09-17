@@ -18,7 +18,9 @@ done
 
 git pull --ff-only
 
-for stack in compose/core compose/data compose/minutregnskab compose/indsatsbrief compose/control-center compose/vagtbytte; do
+echo "Minutregnskab springes over her og opdateres kun via scripts/update-minutregnskab.sh"
+
+for stack in compose/core compose/data compose/indsatsbrief compose/control-center compose/vagtbytte; do
   compose_file="$stack/compose.yml"
   if [[ ! -f "$compose_file" ]]; then
     echo "Springer over $stack: $compose_file findes ikke"
