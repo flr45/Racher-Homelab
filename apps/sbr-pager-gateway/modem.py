@@ -112,6 +112,9 @@ def probe_port(device: str, description: str = "") -> ModemInfo | None:
 
         try:
             at_command(port, "ATE0", timeout=1.2)
+            sms_mode = at_command(port, "AT+CMGF=0", timeout=2.0)
+            if "OK" not in sms_mode:
+                continue
             manufacturer = _clean_single_value(
                 at_command(port, "AT+CGMI", timeout=2.0), "AT+CGMI"
             )
