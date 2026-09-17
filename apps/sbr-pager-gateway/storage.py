@@ -105,6 +105,17 @@ def init_database() -> None:
             """
         )
 
+    # Extended modules are imported lazily so the core database module remains
+    # usable on its own. On the full Windows application this also creates the
+    # station/event tables and seeds A/S/L/K/R/B exactly as the current web
+    # gateway does.
+    try:
+        from station_defaults import ensure_default_station_rules
+
+        ensure_default_station_rules()
+    except ImportError:
+        pass
+
 
 def get_setting(key: str, default: str | None = None) -> str | None:
     with connection() as db:
