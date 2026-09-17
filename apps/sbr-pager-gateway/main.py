@@ -23,7 +23,14 @@ from PySide6.QtWidgets import (
 from management import RecipientsDialog, SendersDialog
 from modem import ModemInfo, discover_modems
 from sms_engine import SmsModemEngine
-from storage import init_database, recent_messages
+from storage import data_dir, init_database, recent_messages
+from whatsapp_engine import WhatsAppBridgeManager
+from whatsapp_ui import (
+    DeliveryWorker,
+    TestMessageWorker,
+    WhatsAppLoginDialog,
+    WhatsAppStatusWorker,
+)
 
 
 APP_STYLE = """
@@ -160,10 +167,17 @@ class MainWindow(QMainWindow):
         init_database()
 
         self.setWindowTitle("SBR Pager Gateway")
-        self.resize(1180, 760)
+        self.resize(1240, 790)
+
         self.scan_worker: ModemScanWorker | None = None
         self.gateway_worker: GatewayWorker | None = None
         self.selected_modem: ModemInfo | None = None
+
+        self.whatsapp = WhatsAppBridgeManager()
+        self.whatsapp_status_worker: WhatsAppStatusWorker | None = None
+        self.delivery_worker: DeliveryWorker | None = None
+        self.test_worker: TestMessageWorker | None = None
+        self.last_whatsapp_state = "starting"
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -181,6 +195,14 @@ class MainWindow(QMainWindow):
         brand.addWidget(subtitle)
         header.addLayout(brand)
         header.addStretch()
+
+        self.whatsapp_button = QPushButton("WhatsApp-login")
+        self.whatsapp_button.clicked.connect(self.open_whatsapp_login)
+        header.addWidget(self.whatsapp_button)
+
+        self.test_button = QPushButton("Send test")
+        self.test_button.clicked.connect(self.send_test_message)
+        header.addWidget(self.test_button)
 
         self.scan_button = QPushButton("Søg efter SMS-modem")
         self.scan_button.clicked.connect(self.scan_modem)
@@ -203,10 +225,25 @@ class MainWindow(QMainWindow):
         card_grid.setHorizontalSpacing(14)
         card_grid.setVerticalSpacing(14)
 
-        self.modem_card = MetricCard("SMS MODEM", "Ikke fundet", "Tilslut et USB GSM/SMS-modem", "warn")
+        self.modem_card = MetricCard(
+            "SMS MODEM",
+            "Ikke fundet",
+            "Tilslut et USB GSM/SMS-modem",
+            "warn",
+        )
         self.signal_card = MetricCard("SIGNAL", "—", "Afventer modem", "warn")
-        self.whatsapp_card = MetricCard("WHATSAPP", "Ikke konfigureret", "WhatsApp-motoren kommer som næste hoveddel", "warn")
-        self.gateway_card = MetricCard("GATEWAY", "Stoppet", "Ingen nye SMS læses endnu", "warn")
+        self.whatsapp_card = MetricCard(
+            "WHATSAPP",
+            "Starter…",
+            "Initialiserer lokal WhatsApp-session",
+            "warn",
+        )
+        self.gateway_card = MetricCard(
+            "GATEWAY",
+            "Stoppet",
+            "Ingen nye SMS læses endnu",
+            "warn",
+        )
 
         card_grid.addWidget(self.modem_card, 0, 0)
         card_grid.addWidget(self.signal_card, 0, 1)
@@ -232,8 +269,8 @@ class MainWindow(QMainWindow):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setColumnWidth(0, 145)
         self.table.setColumnWidth(1, 150)
-        self.table.setColumnWidth(2, 490)
-        self.table.setColumnWidth(3, 185)
+        self.table.setColumnWidth(2, 520)
+        self.table.setColumnWidth(3, 190)
         main.addWidget(self.table, 1)
 
         bottom = QHBoxLayout()
@@ -255,16 +292,35 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self.recipients_button)
 
         self.settings_button = QPushButton("Indstillinger")
-        self.settings_button.clicked.connect(self.show_settings_placeholder)
+        self.settings_button.clicked.connect(self.show_settings)
         bottom.addWidget(self.settings_button)
         main.addLayout(bottom)
 
         self.refresh_history()
+        self.start_whatsapp_components()
         self.scan_modem()
+
+    def start_whatsapp_components(self) -> None:
+        try:
+            self.whatsapp.start()
+        except RuntimeError as exc:
+            self.whatsapp_card.set_status("Ikke klar", str(exc), "bad")
+
+        self.whatsapp_status_worker = WhatsAppStatusWorker(self.whatsapp, self)
+        self.whatsapp_status_worker.status_changed.connect(self.on_whatsapp_status)
+        self.whatsapp_status_worker.start()
+
+        self.delivery_worker = DeliveryWorker(self.whatsapp, self)
+        self.delivery_worker.message_updated.connect(self.on_delivery_updated)
+        self.delivery_worker.start()
 
     def scan_modem(self) -> None:
         if self.gateway_worker and self.gateway_worker.isRunning():
-            QMessageBox.information(self, "SBR Pager Gateway", "Stop gatewayen før der søges efter modem igen.")
+            QMessageBox.information(
+                self,
+                "SBR Pager Gateway",
+                "Stop gatewayen før der søges efter modem igen.",
+            )
             return
         if self.scan_worker and self.scan_worker.isRunning():
             return
@@ -284,7 +340,11 @@ class MainWindow(QMainWindow):
 
         if not modems:
             self.selected_modem = None
-            self.modem_card.set_status("Ikke fundet", "Ingen AT-kompatible modemmer fundet", "bad")
+            self.modem_card.set_status(
+                "Ikke fundet",
+                "Ingen AT-kompatible modemmer fundet",
+                "bad",
+            )
             self.signal_card.set_status("—", "Kontrollér dongle og Windows-driver", "bad")
             self.modem_detail.setText("Modem: ikke fundet")
             self.start_button.setEnabled(False)
@@ -293,15 +353,24 @@ class MainWindow(QMainWindow):
         modem = modems[0]
         self.selected_modem = modem
         display_name = " ".join(
-            part for part in (modem.manufacturer, modem.model)
+            part
+            for part in (modem.manufacturer, modem.model)
             if part and part != "Ukendt"
         ).strip() or "GSM modem"
 
-        self.modem_card.set_status(display_name, f"{modem.port} · SIM: {modem.sim_status}", "ok")
+        self.modem_card.set_status(
+            display_name,
+            f"{modem.port} · SIM: {modem.sim_status}",
+            "ok",
+        )
         if modem.signal_percent is None:
             self.signal_card.set_status("Ukendt", modem.network_status, "warn")
         else:
-            self.signal_card.set_status(f"{modem.signal_percent}%", modem.network_status, "ok")
+            self.signal_card.set_status(
+                f"{modem.signal_percent}%",
+                modem.network_status,
+                "ok",
+            )
 
         self.modem_detail.setText(f"Modem: {display_name} på {modem.port}")
         self.start_button.setEnabled(True)
@@ -321,12 +390,20 @@ class MainWindow(QMainWindow):
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.scan_button.setEnabled(False)
-        self.gateway_card.set_status("Starter…", f"Åbner {self.selected_modem.port}", "warn")
+        self.gateway_card.set_status(
+            "Starter…",
+            f"Åbner {self.selected_modem.port}",
+            "warn",
+        )
 
     def stop_gateway(self) -> None:
         if self.gateway_worker and self.gateway_worker.isRunning():
             self.stop_button.setEnabled(False)
-            self.gateway_card.set_status("Stopper…", "Lukker modemforbindelsen sikkert", "warn")
+            self.gateway_card.set_status(
+                "Stopper…",
+                "Lukker modemforbindelsen sikkert",
+                "warn",
+            )
             self.gateway_worker.stop()
 
     def on_gateway_state(self, state: str, detail: str) -> None:
@@ -345,7 +422,67 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(False)
         self.scan_button.setEnabled(True)
 
+    def on_whatsapp_status(self, status: dict) -> None:
+        state = str(status.get("state") or "unknown")
+        detail = str(status.get("detail") or "")
+        self.last_whatsapp_state = state
+
+        if state == "online":
+            self.whatsapp_card.set_status("Online", detail or "WhatsApp er forbundet", "ok")
+            self.whatsapp_button.setText("WhatsApp")
+        elif state == "qr":
+            self.whatsapp_card.set_status("QR-login", detail or "Scan QR-koden", "warn")
+            self.whatsapp_button.setText("Scan WhatsApp QR")
+        elif state == "starting":
+            self.whatsapp_card.set_status("Starter…", detail, "warn")
+        elif state == "runtime_missing":
+            self.whatsapp_card.set_status("Runtime mangler", detail, "bad")
+        elif state == "offline":
+            self.whatsapp_card.set_status("Offline", detail, "warn")
+        else:
+            self.whatsapp_card.set_status("Fejl", detail or state, "bad")
+
+    def open_whatsapp_login(self) -> None:
+        WhatsAppLoginDialog(self.whatsapp, self).exec()
+
+    def send_test_message(self) -> None:
+        if self.last_whatsapp_state != "online":
+            QMessageBox.information(
+                self,
+                "WhatsApp",
+                "WhatsApp skal være online, før der kan sendes en testbesked.",
+            )
+            return
+        if self.test_worker and self.test_worker.isRunning():
+            return
+
+        self.test_button.setEnabled(False)
+        self.test_button.setText("Sender…")
+        self.test_worker = TestMessageWorker(self.whatsapp, self)
+        self.test_worker.completed.connect(self.on_test_completed)
+        self.test_worker.failed.connect(self.on_test_failed)
+        self.test_worker.finished.connect(self.on_test_finished)
+        self.test_worker.start()
+
+    def on_test_completed(self, sent: int, failed: int) -> None:
+        QMessageBox.information(
+            self,
+            "Testbesked",
+            f"Testbesked færdig.\n\nSendt: {sent}\nFejl: {failed}",
+        )
+        self.refresh_history()
+
+    def on_test_failed(self, message: str) -> None:
+        QMessageBox.warning(self, "Testbesked", message)
+
+    def on_test_finished(self) -> None:
+        self.test_button.setEnabled(True)
+        self.test_button.setText("Send test")
+
     def on_message_received(self, _message: dict) -> None:
+        self.refresh_history()
+
+    def on_delivery_updated(self, _message_id: int, _status: str) -> None:
         self.refresh_history()
 
     def refresh_history(self) -> None:
@@ -356,11 +493,18 @@ class MainWindow(QMainWindow):
             status = self._friendly_status(str(row["processing_status"]))
             sent_count = int(row.get("sent_count") or 0)
             failed_count = int(row.get("failed_count") or 0)
-            if sent_count:
+
+            if sent_count and failed_count:
+                whatsapp = f"{sent_count} sendt · {failed_count} fejl"
+            elif sent_count:
                 whatsapp = f"Sendt til {sent_count}"
             elif failed_count:
                 whatsapp = f"Fejl ({failed_count})"
-            elif row["processing_status"] == "accepted_pending_whatsapp":
+            elif row["processing_status"] in {
+                "accepted_pending_whatsapp",
+                "whatsapp_sending",
+                "awaiting_recipients",
+            }:
                 whatsapp = "Afventer WhatsApp"
             else:
                 whatsapp = "—"
@@ -390,11 +534,14 @@ class MainWindow(QMainWindow):
         labels = {
             "received": "Modtaget",
             "bootstrap_skipped": "Gammel SMS · ikke sendt",
-            "accepted_pending_whatsapp": "Godkendt",
+            "accepted_pending_whatsapp": "Godkendt · afventer",
+            "awaiting_recipients": "Afventer modtagere",
+            "whatsapp_sending": "Sender til WhatsApp",
             "rejected_sender": "Afvist afsender",
             "ignored_command": "Ignoreret kommando",
             "forwarded": "Videresendt",
-            "failed": "Fejl",
+            "forwarded_partial": "Delvist videresendt",
+            "whatsapp_failed": "WhatsApp-fejl",
         }
         return labels.get(value, value)
 
@@ -404,18 +551,35 @@ class MainWindow(QMainWindow):
 
     def open_recipients(self) -> None:
         RecipientsDialog(self).exec()
+        self.refresh_history()
 
-    def show_settings_placeholder(self) -> None:
+    def show_settings(self) -> None:
+        node = self.whatsapp.node_executable
+        ready, runtime_detail = self.whatsapp.runtime_status()
         QMessageBox.information(
             self,
-            "Indstillinger",
-            "Indstillinger til autostart, WhatsApp og modem bliver næste del.",
+            "Indstillinger / systeminfo",
+            "SBR Pager Gateway kører lokalt på denne Windows-pc.\n\n"
+            f"Data: {data_dir()}\n"
+            f"WhatsApp-runtime: {'Klar' if ready else 'Ikke klar'}\n"
+            f"Detalje: {runtime_detail}\n"
+            f"Node: {node if node else 'ikke fundet'}",
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.gateway_worker and self.gateway_worker.isRunning():
             self.gateway_worker.stop()
             self.gateway_worker.wait(3500)
+
+        if self.delivery_worker and self.delivery_worker.isRunning():
+            self.delivery_worker.stop()
+            self.delivery_worker.wait(3500)
+
+        if self.whatsapp_status_worker and self.whatsapp_status_worker.isRunning():
+            self.whatsapp_status_worker.requestInterruption()
+            self.whatsapp_status_worker.wait(2500)
+
+        self.whatsapp.stop()
         event.accept()
 
 
