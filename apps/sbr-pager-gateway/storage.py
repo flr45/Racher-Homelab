@@ -141,6 +141,7 @@ def store_inbound_message(
     body: str,
     received_at: str,
     modem_port: str,
+    processing_status: str = "received",
 ) -> tuple[int, bool]:
     with connection() as db:
         existing = db.execute(
@@ -155,11 +156,33 @@ def store_inbound_message(
             INSERT INTO inbound_messages(
                 source_id, sender, body, received_at, modem_port,
                 accepted, processing_status, created_at
-            ) VALUES(?,?,?,?,?,0,'received',?)
+            ) VALUES(?,?,?,?,?,0,?,?)
             """,
-            (source_id, sender, body, received_at, modem_port, utcnow_iso()),
+            (
+                source_id,
+                sender,
+                body,
+                received_at,
+                modem_port,
+                processing_status,
+                utcnow_iso(),
+            ),
         )
         return int(cursor.lastrowid), True
+
+
+def set_message_status(message_id: int, status: str, accepted: bool | None = None) -> None:
+    with connection() as db:
+        if accepted is None:
+            db.execute(
+                "UPDATE inbound_messages SET processing_status=? WHERE id=?",
+                (status, message_id),
+            )
+        else:
+            db.execute(
+                "UPDATE inbound_messages SET processing_status=?, accepted=? WHERE id=?",
+                (status, 1 if accepted else 0, message_id),
+            )
 
 
 def recent_messages(limit: int = 100) -> list[dict]:
