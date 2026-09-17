@@ -3,7 +3,8 @@
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
-const wa = require('@open-wa/wa-automate');
+const QRCode = require('qrcode');
+const pino = require('pino');
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.SBR_WA_PORT || '8765');
@@ -16,8 +17,13 @@ const QR_PATH = path.join(DATA_DIR, 'qr.png');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(SESSION_DIR, { recursive: true });
 
+const logger = pino({ level: process.env.SBR_WA_DEBUG === '1' ? 'debug' : 'silent' });
+
 let client = null;
 let stopping = false;
+let manualLogout = false;
+let reconnectTimer = null;
+let connectGeneration = 0;
 let state = {
   state: 'starting',
   detail: 'Starter WhatsApp-motor',
@@ -42,6 +48,13 @@ function removeQrFile() {
   } catch (_) {
     // A stale QR file is not fatal.
   }
+}
+
+function resetSessionFiles() {
+  try {
+    fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+  } catch (_) {}
+  fs.mkdirSync(SESSION_DIR, { recursive: true });
 }
 
 function unauthorized(req) {
@@ -89,67 +102,121 @@ function readJson(req) {
 function toChatId(phone) {
   const digits = String(phone || '').replace(/\D/g, '');
   if (!digits) throw new Error('Ugyldigt WhatsApp-nummer');
-  return `${digits}@c.us`;
+  return `${digits}@s.whatsapp.net`;
 }
 
-wa.ev.on('qr.**', async (qrcode, sessionId) => {
-  if (sessionId && sessionId !== SESSION_ID) return;
-  try {
-    const imageBuffer = Buffer.from(
-      String(qrcode).replace('data:image/png;base64,', ''),
-      'base64',
-    );
-    fs.writeFileSync(QR_PATH, imageBuffer);
-    setState('qr', 'Scan QR-koden i WhatsApp → Forbundne enheder', {
-      qrAvailable: true,
+function scheduleReconnect(delayMs = 1500) {
+  if (stopping || manualLogout) return;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectWhatsApp().catch(error => {
+      console.error('[whatsapp] reconnect failed:', error);
+      setState('error', error && error.message ? error.message : String(error));
+      scheduleReconnect(4000);
     });
-  } catch (error) {
-    setState('error', `Kunne ikke gemme QR-kode: ${error.message}`);
-  }
-});
+  }, delayMs);
+}
 
-async function startWhatsApp() {
-  try {
-    setState('starting', 'Starter WhatsApp Web-session');
-    client = await wa.create({
-      sessionId: SESSION_ID,
-      multiDevice: true,
-      headless: true,
-      qrTimeout: 0,
-      authTimeout: 0,
-      qrLogSkip: true,
-      disableSpins: true,
-      logConsole: false,
-      sessionDataPath: SESSION_DIR,
-      deleteSessionDataOnLogout: true,
-      killClientOnLogout: false,
-    });
+async function connectWhatsApp() {
+  const generation = ++connectGeneration;
+  setState('starting', 'Forbinder til WhatsApp');
+  console.log('[whatsapp] starting Baileys connection');
 
-    removeQrFile();
-    setState('online', 'WhatsApp er forbundet', { qrAvailable: false });
+  const baileys = await import('@whiskeysockets/baileys');
+  const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    Browsers,
+  } = baileys;
 
-    if (client.onStateChanged) {
-      await client.onStateChanged(async newState => {
-        const value = String(newState || '').toUpperCase();
-        if (value === 'CONNECTED') {
-          removeQrFile();
-          setState('online', 'WhatsApp er forbundet', { qrAvailable: false });
-        } else if (['UNPAIRED', 'UNPAIRED_IDLE', 'CONFLICT', 'TIMEOUT', 'UNLAUNCHED'].includes(value)) {
-          setState('offline', `WhatsApp-status: ${value}`);
-        }
-      });
+  const { state: authState, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
+
+  const socket = makeWASocket({
+    auth: authState,
+    logger,
+    printQRInTerminal: false,
+    browser: Browsers.windows('SBR Pager Gateway'),
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: false,
+    connectTimeoutMs: 30_000,
+    defaultQueryTimeoutMs: 30_000,
+    keepAliveIntervalMs: 20_000,
+  });
+
+  client = socket;
+
+  socket.ev.on('creds.update', saveCreds);
+
+  socket.ev.on('connection.update', async update => {
+    if (generation !== connectGeneration || stopping) return;
+
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      try {
+        await QRCode.toFile(QR_PATH, qr, {
+          type: 'png',
+          width: 420,
+          margin: 2,
+          errorCorrectionLevel: 'M',
+        });
+        setState('qr', 'Scan QR-koden i WhatsApp → Forbundne enheder', {
+          qrAvailable: true,
+        });
+        console.log('[whatsapp] QR code ready');
+      } catch (error) {
+        console.error('[whatsapp] QR write failed:', error);
+        setState('error', `Kunne ikke gemme QR-kode: ${error.message || error}`);
+      }
     }
 
-    if (client.onLogout) {
-      await client.onLogout(() => {
-        client = null;
-        setState('offline', 'WhatsApp er logget ud', { qrAvailable: false });
-      });
+    if (connection === 'open') {
+      removeQrFile();
+      manualLogout = false;
+      setState('online', 'WhatsApp er forbundet', { qrAvailable: false });
+      console.log('[whatsapp] connected');
+      return;
     }
-  } catch (error) {
-    client = null;
-    setState('error', error && error.message ? error.message : String(error));
+
+    if (connection !== 'close') return;
+
+    if (client === socket) client = null;
+
+    const error = lastDisconnect && lastDisconnect.error;
+    const statusCode =
+      (error && error.output && error.output.statusCode) ||
+      (error && error.data && error.data.statusCode) ||
+      (error && error.statusCode) ||
+      null;
+
+    console.error('[whatsapp] connection closed', statusCode || '', error || '');
+
+    if (manualLogout || statusCode === DisconnectReason.loggedOut) {
+      removeQrFile();
+      setState('offline', 'WhatsApp er logget ud', { qrAvailable: false });
+      return;
+    }
+
+    setState('starting', 'WhatsApp-forbindelsen blev afbrudt · prøver igen', {
+      qrAvailable: false,
+    });
+    scheduleReconnect();
+  });
+}
+
+async function sendText(phone, text) {
+  if (!client || state.state !== 'online') {
+    throw new Error('WhatsApp er ikke online');
   }
+  const message = String(text || '').trim();
+  if (!message) throw new Error('Beskeden er tom');
+  const result = await client.sendMessage(toChatId(phone), {
+    text: message.slice(0, 4096),
+  });
+  return result && result.key && result.key.id ? String(result.key.id) : null;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -182,16 +249,9 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/send') {
     try {
-      if (!client || state.state !== 'online') {
-        jsonResponse(res, 503, { ok: false, error: 'WhatsApp er ikke online' });
-        return;
-      }
       const payload = await readJson(req);
-      const text = String(payload.text || '').trim();
-      if (!text) throw new Error('Beskeden er tom');
-      const chatId = toChatId(payload.to);
-      const messageId = await client.sendText(chatId, text.slice(0, 4096));
-      jsonResponse(res, 200, { ok: true, messageId: messageId || null });
+      const messageId = await sendText(payload.to, payload.text);
+      jsonResponse(res, 200, { ok: true, messageId });
     } catch (error) {
       jsonResponse(res, 400, { ok: false, error: error.message || String(error) });
     }
@@ -200,15 +260,33 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/logout') {
     try {
-      if (client) {
-        await client.logout();
-        try { await client.kill(); } catch (_) {}
+      manualLogout = true;
+      connectGeneration += 1;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
       }
+      const oldClient = client;
       client = null;
+      if (oldClient) {
+        try { await oldClient.logout(); } catch (_) {}
+        try { oldClient.ws && oldClient.ws.close(); } catch (_) {}
+      }
       removeQrFile();
-      setState('offline', 'WhatsApp er logget ud', { qrAvailable: false });
+      resetSessionFiles();
+      setState('starting', 'WhatsApp er logget ud · opretter ny QR-kode', {
+        qrAvailable: false,
+      });
       jsonResponse(res, 200, { ok: true });
+      setTimeout(() => {
+        manualLogout = false;
+        connectWhatsApp().catch(error => {
+          console.error('[whatsapp] restart after logout failed:', error);
+          setState('error', error && error.message ? error.message : String(error));
+        });
+      }, 800);
     } catch (error) {
+      manualLogout = false;
       jsonResponse(res, 500, { ok: false, error: error.message || String(error) });
     }
     return;
@@ -220,9 +298,13 @@ const server = http.createServer(async (req, res) => {
 async function shutdown() {
   if (stopping) return;
   stopping = true;
+  connectGeneration += 1;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
   setState('stopping', 'Stopper WhatsApp-motor');
+  const oldClient = client;
+  client = null;
   try {
-    if (client) await client.kill();
+    if (oldClient && oldClient.ws) oldClient.ws.close();
   } catch (_) {}
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref();
@@ -231,13 +313,20 @@ async function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 process.on('uncaughtException', error => {
+  console.error('[whatsapp] uncaught exception:', error);
   setState('error', error && error.message ? error.message : String(error));
 });
 process.on('unhandledRejection', error => {
+  console.error('[whatsapp] unhandled rejection:', error);
   setState('error', error && error.message ? error.message : String(error));
 });
 
 server.listen(PORT, HOST, () => {
   setState('starting', `Lokal WhatsApp bridge lytter på ${HOST}:${PORT}`);
-  startWhatsApp();
+  console.log(`[whatsapp] bridge listening on ${HOST}:${PORT}`);
+  connectWhatsApp().catch(error => {
+    console.error('[whatsapp] initial connection failed:', error);
+    setState('error', error && error.message ? error.message : String(error));
+    scheduleReconnect(4000);
+  });
 });
