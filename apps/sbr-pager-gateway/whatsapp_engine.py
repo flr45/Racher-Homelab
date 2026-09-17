@@ -83,6 +83,18 @@ class WhatsAppBridgeManager:
         system_node = shutil.which("node")
         return Path(system_node) if system_node else None
 
+    @property
+    def browser_cache_dir(self) -> Path | None:
+        candidates = [
+            _install_root() / "runtime" / "puppeteer-cache",
+            _resource_root() / "runtime" / "puppeteer-cache",
+            Path(__file__).resolve().parent / "runtime" / "puppeteer-cache",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
     def runtime_status(self) -> tuple[bool, str]:
         node = self.node_executable
         if node is None:
@@ -113,6 +125,9 @@ class WhatsAppBridgeManager:
                 "NO_UPDATE_NOTIFIER": "1",
             }
         )
+        browser_cache = self.browser_cache_dir
+        if browser_cache is not None:
+            env["PUPPETEER_CACHE_DIR"] = str(browser_cache)
 
         log_path = self.whatsapp_data_dir / "bridge.log"
         self._log_handle = log_path.open("a", encoding="utf-8")
@@ -165,6 +180,8 @@ class WhatsAppBridgeManager:
         ready, detail = self.runtime_status()
         if not ready:
             return {"state": "runtime_missing", "detail": detail, "qrAvailable": False}
+        if self.process is None:
+            return {"state": "stopped", "detail": "WhatsApp-motor er stoppet", "qrAvailable": False}
         return {"state": "starting", "detail": "Starter WhatsApp-motor", "qrAvailable": False}
 
     def send_text(self, phone: str, text: str, timeout: float = 20) -> str | None:
@@ -212,8 +229,8 @@ class WhatsAppBridgeManager:
         except urllib.error.HTTPError as exc:
             details = exc.read().decode("utf-8", errors="replace")
             try:
-                payload = json.loads(details)
-                reason = payload.get("error") or details
+                response_payload = json.loads(details)
+                reason = response_payload.get("error") or details
             except json.JSONDecodeError:
                 reason = details
             raise RuntimeError(f"WhatsApp bridge HTTP {exc.code}: {reason}") from exc
