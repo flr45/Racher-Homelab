@@ -214,6 +214,11 @@ class AdvancedSettingsDialog(QDialog):
             )
             return
 
+        if enabling_link and not was_enabled:
+            # Establish the boundary before enabling, so the background worker
+            # can never observe enabled=1 without a replay boundary.
+            set_setting("system_link_started_at", utcnow_iso())
+
         values = {
             "system_link_enabled": "1" if enabling_link else "0",
             "system_link_endpoint": endpoint,
@@ -227,11 +232,6 @@ class AdvancedSettingsDialog(QDialog):
         }
         for key, value in values.items():
             set_setting(key, value)
-
-        if enabling_link and not was_enabled:
-            # Enabling/re-enabling starts a new mirror window. Historical SMS
-            # are deliberately not replayed to the external endpoint.
-            set_setting("system_link_started_at", utcnow_iso())
 
         # station_events reads this module constant while grouping follow-up
         # messages. Updating it here makes the setting effective immediately.
