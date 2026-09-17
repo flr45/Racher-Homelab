@@ -16,7 +16,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from events_ui import AlarmEventsDialog
 from policy import normalize_phone
+from stations_ui import StationsDialog
 from storage import (
     delete_allowed_sender,
     delete_recipient,
@@ -33,17 +35,17 @@ class _DirectoryDialog(QDialog):
     def __init__(self, title: str, description: str, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(650, 500)
+        self.resize(700, 540)
 
-        root = QVBoxLayout(self)
+        self.root = QVBoxLayout(self)
         heading = QLabel(title)
         heading.setStyleSheet("font-size: 22px; font-weight: 650;")
-        root.addWidget(heading)
+        self.root.addWidget(heading)
 
         info = QLabel(description)
         info.setWordWrap(True)
         info.setStyleSheet("color: #666;")
-        root.addWidget(info)
+        self.root.addWidget(info)
 
         form = QFormLayout()
         self.name_input = QLineEdit()
@@ -52,7 +54,7 @@ class _DirectoryDialog(QDialog):
         self.phone_input.setPlaceholderText("fx +4512345678")
         form.addRow("Navn", self.name_input)
         form.addRow("Telefon", self.phone_input)
-        root.addLayout(form)
+        self.root.addLayout(form)
 
         add_row = QHBoxLayout()
         add_row.addStretch()
@@ -60,7 +62,7 @@ class _DirectoryDialog(QDialog):
         self.add_button.setObjectName("primary")
         self.add_button.clicked.connect(self.add_entry)
         add_row.addWidget(self.add_button)
-        root.addLayout(add_row)
+        self.root.addLayout(add_row)
 
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Navn", "Telefon", "Status"])
@@ -69,22 +71,22 @@ class _DirectoryDialog(QDialog):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        root.addWidget(self.table, 1)
+        self.root.addWidget(self.table, 1)
 
-        actions = QHBoxLayout()
+        self.actions = QHBoxLayout()
         self.toggle_button = QPushButton("Aktiver / pause")
         self.toggle_button.clicked.connect(self.toggle_selected)
-        actions.addWidget(self.toggle_button)
+        self.actions.addWidget(self.toggle_button)
 
         self.delete_button = QPushButton("Slet")
         self.delete_button.clicked.connect(self.delete_selected)
-        actions.addWidget(self.delete_button)
-        actions.addStretch()
+        self.actions.addWidget(self.delete_button)
+        self.actions.addStretch()
 
         close_button = QPushButton("Luk")
         close_button.clicked.connect(self.accept)
-        actions.addWidget(close_button)
-        root.addLayout(actions)
+        self.actions.addWidget(close_button)
+        self.root.addLayout(self.actions)
 
     def selected_id_and_active(self) -> tuple[int, bool] | None:
         row = self.table.currentRow()
@@ -172,9 +174,20 @@ class RecipientsDialog(_DirectoryDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(
             "WhatsApp-modtagere",
-            "Aktive modtagere får de SMS-beskeder, som godkendes af gatewayen.",
+            "Aktive modtagere får de SMS-beskeder, som godkendes af gatewayen. "
+            "Alarmfiltre kan begrænse modtagelse til bestemte stationer.",
             parent,
         )
+
+        extras = QHBoxLayout()
+        station_button = QPushButton("Stationer og alarmfiltre")
+        station_button.clicked.connect(self.open_stations)
+        extras.addWidget(station_button)
+        events_button = QPushButton("Hændelser og statistik")
+        events_button.clicked.connect(self.open_events)
+        extras.addWidget(events_button)
+        extras.addStretch()
+        self.root.insertLayout(self.root.count() - 1, extras)
         self.refresh()
 
     def refresh(self) -> None:
@@ -223,3 +236,10 @@ class RecipientsDialog(_DirectoryDialog):
         if QMessageBox.question(self, self.windowTitle(), "Slet den valgte modtager?") == QMessageBox.Yes:
             delete_recipient(entry_id)
             self.refresh()
+
+    def open_stations(self) -> None:
+        StationsDialog(self).exec()
+        self.refresh()
+
+    def open_events(self) -> None:
+        AlarmEventsDialog(self).exec()

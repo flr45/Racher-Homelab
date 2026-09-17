@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from PySide6.QtCore import QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
@@ -12,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from delivery import WhatsAppDeliveryEngine, send_test_to_active_recipients
+from system_link import SystemLinkEngine
 from whatsapp_engine import WhatsAppBridgeManager
 
 
@@ -35,15 +38,32 @@ class DeliveryWorker(QThread):
         super().__init__(parent)
         self.bridge = bridge
         self.engine: WhatsAppDeliveryEngine | None = None
+        self.system_link = SystemLinkEngine()
+        self.system_link_thread: threading.Thread | None = None
 
     def run(self) -> None:
+        # System Link deliberately runs in its own background thread. A slow or
+        # unavailable endpoint can therefore never hold up WhatsApp delivery.
+        self.system_link_thread = threading.Thread(
+            target=self.system_link.run,
+            name="sbr-system-link",
+            daemon=True,
+        )
+        self.system_link_thread.start()
+
         self.engine = WhatsAppDeliveryEngine(
             self.bridge,
             on_update=lambda message_id, status: self.message_updated.emit(message_id, status),
         )
-        self.engine.run()
+        try:
+            self.engine.run()
+        finally:
+            self.system_link.stop()
+            if self.system_link_thread:
+                self.system_link_thread.join(timeout=2.0)
 
     def stop(self) -> None:
+        self.system_link.stop()
         if self.engine:
             self.engine.stop()
 

@@ -2,11 +2,34 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from datetime import datetime, timezone
 
-from storage import add_event, connection, list_recipients, set_message_status, utcnow_iso
+from station_events import (
+    active_recipients_for_station,
+    mark_first_delivery,
+    record_alarm_message,
+    station_for_inbound,
+)
+from storage import add_event, connection, get_setting, list_recipients, set_message_status, utcnow_iso
 from whatsapp_engine import WhatsAppBridgeManager
 
 UpdateCallback = Callable[[int, str], None]
+
+
+def _setting_float(key: str, default: float, minimum: float, maximum: float) -> float:
+    raw = get_setting(key, str(default))
+    try:
+        value = float(raw or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _parse_iso(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class WhatsAppDeliveryEngine:
@@ -27,6 +50,12 @@ class WhatsAppDeliveryEngine:
     def stop(self) -> None:
         self._stop.set()
 
+    def _current_poll_seconds(self) -> float:
+        return _setting_float("whatsapp_poll_seconds", self.poll_seconds, 1.0, 30.0)
+
+    def _current_forward_delay(self) -> float:
+        return _setting_float("sms_forward_delay_seconds", 0.0, 0.0, 300.0)
+
     def run(self) -> None:
         while not self._stop.is_set():
             try:
@@ -35,19 +64,20 @@ class WhatsAppDeliveryEngine:
                     self._process_batch()
             except Exception as exc:  # noqa: BLE001
                 add_event("error", "whatsapp_delivery_worker", str(exc)[:1000])
-            self._stop.wait(self.poll_seconds)
+            self._stop.wait(self._current_poll_seconds())
 
     def _process_batch(self) -> None:
         with connection() as db:
             rows = db.execute(
                 """
-                SELECT id, body, processing_status
+                SELECT id, sender, body, received_at, created_at, processing_status
                 FROM inbound_messages
                 WHERE accepted=1
                   AND processing_status IN (
                     'accepted_pending_whatsapp',
                     'awaiting_recipients',
-                    'whatsapp_sending'
+                    'whatsapp_sending',
+                    'no_matching_recipients'
                   )
                 ORDER BY id ASC
                 LIMIT 20
@@ -55,19 +85,66 @@ class WhatsAppDeliveryEngine:
             ).fetchall()
             messages = [dict(row) for row in rows]
 
+        delay = self._current_forward_delay()
+        now = datetime.now(timezone.utc)
         for message in messages:
             if self._stop.is_set():
                 return
-            self._deliver_message(int(message["id"]), str(message["body"]))
+            try:
+                age = (now - _parse_iso(str(message["created_at"]))).total_seconds()
+            except (TypeError, ValueError):
+                age = delay
+            if age < delay:
+                continue
+            self._deliver_message(
+                int(message["id"]),
+                str(message["sender"]),
+                str(message["body"]),
+                str(message["received_at"]),
+            )
 
-    def _deliver_message(self, message_id: int, body: str) -> None:
-        recipients = list_recipients(active_only=True)
+    def _deliver_message(
+        self,
+        message_id: int,
+        sender: str,
+        body: str,
+        received_at: str,
+    ) -> None:
+        try:
+            record_alarm_message(
+                message_id,
+                sender=sender,
+                body=body,
+                received_at=received_at,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Event/statistics enrichment must never block an alarm delivery.
+            add_event(
+                "error",
+                "alarm_event_recording",
+                f"SMS {message_id}: {str(exc)[:500]}",
+            )
+
+        station = station_for_inbound(message_id)
+        recipients = active_recipients_for_station(station)
         if not recipients:
-            set_message_status(message_id, "awaiting_recipients")
-            self._notify(message_id, "awaiting_recipients")
+            active_total = len(list_recipients(active_only=True))
+            if active_total:
+                status = "no_matching_recipients"
+                detail = station or "ukendt station"
+                add_event(
+                    "info",
+                    "station_filter_no_match",
+                    f"SMS {message_id}: ingen aktive modtagere matcher {detail}",
+                )
+            else:
+                status = "awaiting_recipients"
+            set_message_status(message_id, status)
+            self._notify(message_id, status)
             return
 
         set_message_status(message_id, "whatsapp_sending")
+        first_success = False
         for recipient in recipients:
             if self._stop.is_set():
                 return
@@ -76,6 +153,8 @@ class WhatsAppDeliveryEngine:
             recipient_name = str(recipient["name"])
             delivery = self._existing_delivery(message_id, recipient_phone)
             if delivery and str(delivery["status"]) in {"sent", "failed"}:
+                if str(delivery["status"]) == "sent":
+                    first_success = True
                 continue
 
             delivery_id = int(delivery["id"]) if delivery else self._create_delivery(
@@ -86,16 +165,22 @@ class WhatsAppDeliveryEngine:
 
             try:
                 whatsapp_message_id = self.bridge.send_text(recipient_phone, body)
+                delivered_at = utcnow_iso()
                 self._finish_delivery(
                     delivery_id,
                     "sent",
                     message_id=whatsapp_message_id,
                     error=None,
+                    attempted_at=delivered_at,
                 )
+                if not first_success:
+                    mark_first_delivery(message_id, delivered_at)
+                    first_success = True
                 add_event(
                     "info",
                     "whatsapp_sent",
-                    f"SMS {message_id} sendt til {recipient_name}",
+                    f"SMS {message_id} sendt til {recipient_name}"
+                    + (f" · station {station}" if station else ""),
                 )
             except Exception as exc:  # noqa: BLE001
                 self._finish_delivery(
@@ -103,6 +188,7 @@ class WhatsAppDeliveryEngine:
                     "failed",
                     message_id=None,
                     error=str(exc)[:1000],
+                    attempted_at=utcnow_iso(),
                 )
                 add_event(
                     "error",
@@ -161,6 +247,7 @@ class WhatsAppDeliveryEngine:
         *,
         message_id: str | None,
         error: str | None,
+        attempted_at: str,
     ) -> None:
         with connection() as db:
             db.execute(
@@ -169,7 +256,7 @@ class WhatsAppDeliveryEngine:
                 SET status=?, message_id=?, error=?, attempted_at=?
                 WHERE id=?
                 """,
-                (status, message_id, error, utcnow_iso(), delivery_id),
+                (status, message_id, error, attempted_at, delivery_id),
             )
 
     @staticmethod
@@ -198,6 +285,8 @@ class WhatsAppDeliveryEngine:
 
 
 def send_test_to_active_recipients(bridge: WhatsAppBridgeManager) -> tuple[int, int]:
+    # A manual test deliberately goes to every active recipient regardless of
+    # station filter so the administrator can verify the whole WhatsApp path.
     recipients = list_recipients(active_only=True)
     if not recipients:
         raise RuntimeError("Der er ingen aktive WhatsApp-modtagere")

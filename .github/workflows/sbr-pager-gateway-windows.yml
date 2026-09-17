@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/sbr-pager-gateway-windows
+      - feature/sbr-pager-gateway-events-stations
+      - feature/sbr-pager-gateway-admin-system-link
+      - feature/sbr-pager-gateway-admin-pin
     paths:
       - 'apps/sbr-pager-gateway/**'
       - '.github/workflows/sbr-pager-gateway-windows.yml'
@@ -33,10 +36,13 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Compile Python sources
-        run: python -m py_compile main.py modem.py storage.py sms_engine.py sms_pdu.py gsm0338.py policy.py management.py whatsapp_engine.py delivery.py whatsapp_ui.py
+        run: python -m py_compile main.py modem.py storage.py sms_engine.py sms_pdu.py gsm0338.py policy.py management.py whatsapp_engine.py delivery.py whatsapp_ui.py station_events.py station_defaults.py stations_ui.py events_ui.py alarm_stats.py system_link.py admin_ui.py admin_auth.py admin_access_ui.py secure_store.py build_config.py tests/test_station_events.py tests/test_system_link.py tests/test_admin_auth.py
 
       - name: Import application modules
-        run: python -c "import main, modem, storage, sms_engine, sms_pdu, gsm0338, policy, management, whatsapp_engine, delivery, whatsapp_ui; print('SBR Pager Gateway imports OK')"
+        run: python -c "import main, modem, storage, sms_engine, sms_pdu, gsm0338, policy, management, whatsapp_engine, delivery, whatsapp_ui, station_events, station_defaults, stations_ui, events_ui, alarm_stats, system_link, admin_ui, admin_auth, admin_access_ui, secure_store, build_config; print('SBR Pager Gateway imports OK')"
+
+      - name: Run local gateway tests
+        run: python -m unittest discover -s tests -v
 
       - name: Validate WhatsApp bridge JavaScript
         working-directory: apps/sbr-pager-gateway/whatsapp
