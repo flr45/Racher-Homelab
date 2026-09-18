@@ -8,6 +8,7 @@ on:
       - feature/sbr-pager-gateway-admin-system-link
       - feature/sbr-pager-gateway-admin-pin
       - feature/sbr-pager-gateway-modem-baileys-fix
+      - feature/sbr-pager-gateway-baileys-loader-hotfix
     paths:
       - 'apps/sbr-pager-gateway/**'
       - '.github/workflows/sbr-pager-gateway-windows.yml'
@@ -49,8 +50,20 @@ jobs:
         working-directory: apps/sbr-pager-gateway/whatsapp
         run: node --check bridge.js
 
-      - name: Resolve pinned Baileys dependency
+      - name: Resolve and validate pinned Baileys runtime
         working-directory: apps/sbr-pager-gateway/whatsapp
+        shell: pwsh
         run: |
           npm install --ignore-scripts --no-audit --no-fund
-          node -e "import('@whiskeysockets/baileys').then(() => console.log('Baileys import OK'))"
+          @'
+          const imported = await import('@whiskeysockets/baileys');
+          const common = imported?.default && typeof imported.default === 'object' ? imported.default : {};
+          const makeWASocket = (typeof imported.default === 'function' && imported.default) || imported.makeWASocket || common.makeWASocket || common.default;
+          const useMultiFileAuthState = imported.useMultiFileAuthState || common.useMultiFileAuthState;
+          const Browsers = imported.Browsers || common.Browsers;
+          if (typeof makeWASocket !== 'function') throw new Error('makeWASocket export missing');
+          if (typeof useMultiFileAuthState !== 'function') throw new Error('useMultiFileAuthState export missing');
+          if (!Browsers || typeof Browsers.windows !== 'function') throw new Error('Browsers.windows export missing');
+          console.log('Baileys runtime exports OK');
+          '@ | Set-Content -Encoding UTF8 validate-baileys.mjs
+          node validate-baileys.mjs

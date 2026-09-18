@@ -7,6 +7,7 @@ on:
       - feature/sbr-pager-gateway-windows
       - feature/sbr-pager-gateway-admin-pin
       - feature/sbr-pager-gateway-modem-baileys-fix
+      - feature/sbr-pager-gateway-baileys-loader-hotfix
     paths:
       - 'apps/sbr-pager-gateway/**'
       - '.github/workflows/sbr-pager-gateway-build.yml'
@@ -20,11 +21,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22.21.1'
@@ -41,13 +40,16 @@ jobs:
           npm install --no-audit --no-fund
           Pop-Location
 
+      - name: Validate Baileys runtime exports
+        working-directory: apps/sbr-pager-gateway/whatsapp
+        run: node validate-runtime.mjs
+
       - name: Bundle Node runtime
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force 'runtime\node' | Out-Null
           $node = (Get-Command node).Source
           Copy-Item $node 'runtime\node\node.exe' -Force
-          Write-Host "Bundled Node from $node"
 
       - name: Embed System Link bootstrap
         shell: pwsh
@@ -61,14 +63,10 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:SYSTEM_LINK_PROVISION_URL)) { $missing += 'SBR_SYSTEM_LINK_PROVISION_URL' }
           if ([string]::IsNullOrWhiteSpace($env:SYSTEM_LINK_MESSAGE_ENDPOINT)) { $missing += 'SBR_SYSTEM_LINK_MESSAGE_ENDPOINT' }
           if ([string]::IsNullOrWhiteSpace($env:SYSTEM_LINK_PROVISION_TOKEN)) { $missing += 'SBR_SYSTEM_LINK_PROVISION_TOKEN' }
-
           if ($missing.Count -gt 0) {
-            if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
-              throw "Production/manual installer build mangler GitHub Actions secrets: $($missing -join ', ')"
-            }
+            if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { throw "Production/manual installer build mangler GitHub Actions secrets: $($missing -join ', ')" }
             Write-Warning "System Link bootstrap mangler: $($missing -join ', '). CI-testbuilden fortsætter uden auto-provisionering."
           }
-
           $version = ConvertTo-Json -Compress ([string]$env:SBR_APP_VERSION)
           $provisionUrl = ConvertTo-Json -Compress ([string]$env:SYSTEM_LINK_PROVISION_URL)
           $messageEndpoint = ConvertTo-Json -Compress ([string]$env:SYSTEM_LINK_MESSAGE_ENDPOINT)
@@ -79,16 +77,12 @@ jobs:
             "SYSTEM_LINK_MESSAGE_ENDPOINT = $messageEndpoint",
             "SYSTEM_LINK_PROVISION_TOKEN = $provisionToken"
           ) | Set-Content -Encoding UTF8 build_config.py
-
           python -m py_compile build_config.py
-          if ($missing.Count -eq 0) {
-            Write-Host 'System Link one-time bootstrap embedded in application.'
-          }
 
       - name: Build Windows application
         run: pyinstaller --noconfirm --clean --windowed --name "SBR Pager Gateway" main.py
 
-      - name: Add WhatsApp and browser runtimes to application
+      - name: Add WhatsApp runtime to application
         shell: pwsh
         run: |
           $app = 'dist\SBR Pager Gateway'
@@ -108,9 +102,7 @@ jobs:
             "$app\whatsapp\bridge.js",
             "$app\whatsapp\node_modules\@whiskeysockets\baileys\package.json"
           )
-          foreach ($path in $required) {
-            if (-not (Test-Path $path)) { throw "Missing packaged file: $path" }
-          }
+          foreach ($path in $required) { if (-not (Test-Path $path)) { throw "Missing packaged file: $path" } }
           & "$app\runtime\node\node.exe" --check "$app\whatsapp\bridge.js"
 
       - name: Create portable ZIP
@@ -123,9 +115,7 @@ jobs:
         shell: pwsh
         run: |
           $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path $iscc)) {
-            choco install innosetup --yes --no-progress
-          }
+          if (-not (Test-Path $iscc)) { choco install innosetup --yes --no-progress }
 
       - name: Build Setup EXE
         shell: pwsh
