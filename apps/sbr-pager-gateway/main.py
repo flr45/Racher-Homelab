@@ -196,7 +196,8 @@ class MainWindow(QMainWindow):
         main.setContentsMargins(28, 24, 28, 28)
         main.setSpacing(18)
 
-        header = QVBoxLayout()\n        header_top = QHBoxLayout()
+        header = QVBoxLayout()
+        header_top = QHBoxLayout()
         brand = QVBoxLayout()
         title = QLabel("SBR Pager Gateway")
         title.setObjectName("appTitle")
@@ -230,7 +231,9 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_gateway)
         actions.addWidget(self.stop_button)
-        actions.addStretch()\n        header.addLayout(actions)\n        main.addLayout(header)
+        actions.addStretch()
+        header.addLayout(actions)
+        main.addLayout(header)
 
         card_grid = QGridLayout()
         card_grid.setHorizontalSpacing(14)
@@ -492,7 +495,10 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Testbesked",
-            f"Testbesked færdig.\n\nSendt: {sent}\nFejl: {failed}",
+            f"Testbesked færdig.
+
+Sendt: {sent}
+Fejl: {failed}",
         )
         self.refresh_history()
 
