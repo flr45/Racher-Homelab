@@ -282,6 +282,10 @@ def forward_to_vagtbytte(
     source_message_id: str | None,
     station_code: str | None,
 ):
+    enabled = os.getenv("VAGTBYTTE_FORWARD_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return {"created": False, "disabled": True}
+
     url = os.getenv(
         "VAGTBYTTE_ALARM_FEED_URL",
         "http://vagtbytte-web:3000/api/alarm-feed/ingest",
