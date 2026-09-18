@@ -22,7 +22,7 @@ services:
         aliases:
           - openwa
     pids_limit: 1024
-    mem_limit: ${SMS_WHATSAPP_OPENWA_MEM_LIMIT:-768m}
+    mem_limit: ${SMS_WHATSAPP_OPENWA_MEM_LIMIT:-1200m}
     security_opt:
       - no-new-privileges:true
     logging:
