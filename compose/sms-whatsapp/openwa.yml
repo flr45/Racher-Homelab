@@ -9,6 +9,7 @@ services:
       PORT: 2785
       LOG_LEVEL: ${SMS_WHATSAPP_OPENWA_LOG_LEVEL:-info}
       CSP_UPGRADE_INSECURE_REQUESTS: "false"
+      AUTO_START_SESSIONS: ${SMS_WHATSAPP_OPENWA_AUTO_START_SESSIONS:-true}
     volumes:
       - sms_whatsapp_openwa_data:/app/data
     tmpfs:
