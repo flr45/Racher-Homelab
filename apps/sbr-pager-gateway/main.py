@@ -196,7 +196,7 @@ class MainWindow(QMainWindow):
         main.setContentsMargins(28, 24, 28, 28)
         main.setSpacing(18)
 
-        header = QHBoxLayout()
+        header = QVBoxLayout()\n        header_top = QHBoxLayout()
         brand = QVBoxLayout()
         title = QLabel("SBR Pager Gateway")
         title.setObjectName("appTitle")
@@ -209,28 +209,28 @@ class MainWindow(QMainWindow):
 
         self.whatsapp_button = QPushButton("WhatsApp-login")
         self.whatsapp_button.clicked.connect(self.open_whatsapp_login)
-        header.addWidget(self.whatsapp_button)
+        actions.addWidget(self.whatsapp_button)
 
         self.test_button = QPushButton("Send test")
         self.test_button.clicked.connect(self.send_test_message)
-        header.addWidget(self.test_button)
+        actions.addWidget(self.test_button)
 
         self.scan_button = QPushButton("Søg efter SMS-modem")
         self.scan_button.clicked.connect(self.scan_modem)
-        header.addWidget(self.scan_button)
+        actions.addWidget(self.scan_button)
 
         self.start_button = QPushButton("Start gateway")
         self.start_button.setObjectName("primary")
         self.start_button.setEnabled(False)
         self.start_button.clicked.connect(self.start_gateway)
-        header.addWidget(self.start_button)
+        actions.addWidget(self.start_button)
 
         self.stop_button = QPushButton("Stop")
         self.stop_button.setObjectName("danger")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_gateway)
-        header.addWidget(self.stop_button)
-        main.addLayout(header)
+        actions.addWidget(self.stop_button)
+        actions.addStretch()\n        header.addLayout(actions)\n        main.addLayout(header)
 
         card_grid = QGridLayout()
         card_grid.setHorizontalSpacing(14)
@@ -342,6 +342,7 @@ class MainWindow(QMainWindow):
         self.scan_button.setText("Søger…")
         self.start_button.setEnabled(False)
         self.modem_card.set_status("Søger…", "Scanner Windows COM-porte", "warn")
+        self.refresh_port_choices()
 
         self.scan_worker = ModemScanWorker(self)
         self.scan_worker.finished_scan.connect(self.on_modems_found)
