@@ -53,7 +53,7 @@ services:
     volumes:
       - sms_whatsapp_data:/data
     ports:
-      - "127.0.0.1:${SMS_WHATSAPP_PORT:-8091}:8080"
+      - "${SMS_WHATSAPP_BIND_IP:-127.0.0.1}:${SMS_WHATSAPP_PORT:-8091}:8080"
     networks:
       - backend
       - proxy
