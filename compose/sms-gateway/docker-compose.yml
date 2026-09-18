@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: sqlite:////data/sms-gateway.db
-      MODEM_DEVICE: ${SMS_MODEM_DEVICE:-/dev/ttyUSB1}
+      MODEM_DEVICE: /dev/sbr-sms-modem
       MODEM_BAUDRATE: ${SMS_MODEM_BAUDRATE:-115200}
       MODEM_POLL_SECONDS: ${SMS_MODEM_POLL_SECONDS:-0.5}
       MODEM_STATUS_FILE: /data/modem-status.json
@@ -14,6 +14,7 @@ services:
       DELETE_SMS_AFTER_IMPORT: ${SMS_DELETE_AFTER_IMPORT:-true}
       ALARM_SOURCE_WINDOW_MINUTES: ${SMS_ALARM_SOURCE_WINDOW_MINUTES:-10}
       SMS_DRY_RUN: ${SMS_DRY_RUN:-true}
+      VAGTBYTTE_FORWARD_ENABLED: ${VAGTBYTTE_FORWARD_ENABLED:-false}
       VAGTBYTTE_ALARM_FEED_URL: ${VAGTBYTTE_ALARM_FEED_URL:-http://vagtbytte-web:3000/api/alarm-feed/ingest}
       VAGTBYTTE_ALARM_FEED_TOKEN: ${VAGTBYTTE_ALARM_FEED_INGEST_TOKEN}
       SBR_PAGER_INGEST_URL: ${SBR_PAGER_INGEST_URL:-http://sms-whatsapp:8080/api/incoming}
@@ -23,7 +24,7 @@ services:
       SMS_COMMAND_ALLOWED_NUMBERS: ${SMS_COMMAND_ALLOWED_NUMBERS:-}
       SMS_GATEWAY_API_TOKEN: ${SMS_GATEWAY_API_TOKEN:?SMS_GATEWAY_API_TOKEN must be set}
     devices:
-      - ${SMS_MODEM_DEVICE:-/dev/ttyUSB1}:${SMS_MODEM_DEVICE:-/dev/ttyUSB1}
+      - ${SMS_MODEM_HOST_DEVICE:-/dev/serial/by-id/usb-HUAWEI_Technology_HUAWEI_Mobile-if00-port0}:/dev/sbr-sms-modem
     group_add:
       - "${DIALOUT_GID:-20}"
     volumes:
