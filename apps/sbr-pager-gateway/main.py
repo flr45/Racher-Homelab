@@ -495,10 +495,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Testbesked",
-            f"Testbesked færdig.
-
-Sendt: {sent}
-Fejl: {failed}",
+            f"Testbesked færdig.\\n\\nSendt: {sent}\\nFejl: {failed}",
         )
         self.refresh_history()
 
