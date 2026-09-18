@@ -40,7 +40,7 @@ class WhatsAppBridgeManager:
         self.port = _free_local_port()
         self.token = secrets.token_urlsafe(32)
         self.process: subprocess.Popen | None = None
-        self._log_handle = None
+        self._log_handle = None\n        self._last_start_error = None
 
     @property
     def whatsapp_data_dir(self) -> Path:
@@ -105,6 +105,25 @@ class WhatsAppBridgeManager:
         package = bridge.parent / "node_modules" / "@whiskeysockets" / "baileys"
         if not package.exists():
             return False, "Baileys-runtime mangler (npm install i whatsapp-mappen i udviklingsmiljø)"
+        # Validate that the packaged Node process can actually resolve Baileys
+        # from the exact directory used at runtime; file-existence alone gave
+        # false positives in installed builds.
+        try:
+            check = subprocess.run(
+                [str(node), "-e", "import('@whiskeysockets/baileys').then(m=>{if(!(m.default||m.makeWASocket))process.exit(2)}).catch(e=>{console.error(e.message);process.exit(3)})"],
+                cwd=str(bridge.parent),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=12,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+            )
+            if check.returncode != 0:
+                message=(check.stdout or "").strip().splitlines()
+                tail=message[-1] if message else f"exit {check.returncode}"
+                return False, f"Baileys kan ikke indlæses: {tail[:180]}"
+        except (OSError, subprocess.SubprocessError) as exc:
+            return False, f"WhatsApp runtime-test fejlede: {exc}"
         return True, f"Baileys-runtime klar · {node.name}"
 
     def start(self) -> None:
@@ -133,7 +152,7 @@ class WhatsAppBridgeManager:
         if os.name == "nt":
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-        self.process = subprocess.Popen(
+        self._last_start_error = None\n        self.process = subprocess.Popen(
             [str(self.node_executable), str(self.bridge_path)],
             cwd=str(self.bridge_path.parent),
             env=env,
@@ -142,7 +161,23 @@ class WhatsAppBridgeManager:
             stdin=subprocess.DEVNULL,
             creationflags=creationflags,
         )
-        add_event("info", "whatsapp_start", "Lokal WhatsApp-motor startet")
+        # Do not report success merely because CreateProcess succeeded.
+        # Wait briefly for the localhost bridge or an early process failure.
+        import time
+        deadline=time.monotonic()+8.0
+        while time.monotonic() < deadline:
+            if self.process.poll() is not None:
+                status=self.status()
+                self._last_start_error=str(status.get("detail") or "WhatsApp-motor stoppede")
+                raise RuntimeError(self._last_start_error)
+            try:
+                result=self._request("/status", timeout=.35)
+                if isinstance(result, dict):
+                    add_event("info", "whatsapp_start", "Lokal WhatsApp-motor startet")
+                    return
+            except Exception:
+                time.sleep(.15)
+        raise RuntimeError("WhatsApp bridge startede ikke localhost API inden for 8 sekunder")
 
     def stop(self) -> None:
         process = self.process
