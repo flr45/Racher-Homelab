@@ -332,7 +332,7 @@ DASHBOARD_STATS_FRAGMENT = r"""
 
 
 RECENT_EVENTS_FRAGMENT = r"""
-<section class="card span12"><div class="top" style="margin-bottom:12px"><div><h2 style="margin:0">Seneste alarmhændelser</h2><p class="muted" style="margin:5px 0 0">Første alarm og efterfølgende opfølgninger samlet som én hændelse.</p></div><a class="btn" href="{{ url_for('alarm_statistics') }}">Alarmstatistik</a></div>
+<section class="card span12"><div class="top" style="margin-bottom:12px"><div><h2 style="margin:0">Seneste alarmhændelser</h2><p class="muted" style="margin:5px 0 0">Første alarm og efterfølgende Sending 2 samlet som én hændelse.</p></div><a class="btn" href="{{ url_for('alarm_statistics') }}">Alarmstatistik</a></div>
 <div class="tablewrap"><table><thead><tr><th>Tid</th><th>Station</th><th>Alarmtype</th><th>Adresse</th><th>Status</th><th>Sendinger</th><th></th></tr></thead><tbody>
 {% for event in events %}<tr><td>{{ dk_time(event.started_at) }}</td><td>{{ event.station or '—' }}</td><td>{{ event.alarm_type or '—' }}</td><td class="bodycell">{{ event.address or '—' }}</td><td><span class="tag">{{ 'Komplet' if event.status == 'complete' else 'Afventer' }}</span></td><td>{{ event.followup_count or 0 }}</td><td><a class="btn small" href="{{ url_for('alarm_event_detail', event_id=event.id) }}">Vis</a></td></tr>
 {% else %}<tr><td colspan="7" class="empty">Ingen hændelser registreret endnu.</td></tr>{% endfor %}
@@ -349,12 +349,12 @@ STATISTICS_HTML = base.BASE_HTML.replace(
 <div class="grid">
 <section class="card span3"><h2>I dag</h2><div class="metric">{{ stats.today }}</div><p class="muted">Alarmhændelser</p></section>
 <section class="card span3"><h2>7 dage</h2><div class="metric">{{ stats.days7 }}</div><p class="muted">Alarmhændelser</p></section>
-<section class="card span3"><h2>30 dage</h2><div class="metric">{{ stats.days30 }}</div><p class="muted">{{ stats.followups }} opfølgninger</p></section>
+<section class="card span3"><h2>30 dage</h2><div class="metric">{{ stats.days30 }}</div><p class="muted">{{ stats.followups }} Sending 2</p></section>
 <section class="card span3"><h2>Afventer</h2><div class="metric">{{ stats.waiting }}</div><p class="muted">Multipart-meldinger uden sidste del</p></section>
 <section class="card span6"><h2>Leveringstid · seneste 30 dage</h2><table><tbody><tr><td>Første WhatsApp-varsling</td><td><strong>{{ (stats.avg_first|string + ' sek.') if stats.avg_first is not none else '—' }}</strong></td></tr><tr><td>Komplet alarmmelding</td><td><strong>{{ (stats.avg_complete|string + ' sek.') if stats.avg_complete is not none else '—' }}</strong></td></tr></tbody></table></section>
 <section class="card span6"><h2>Mest almindelige alarmtyper · 30 dage</h2><table><tbody>{% for name,count in stats.top_types %}<tr><td>{{ name }}</td><td>{{ count }}</td></tr>{% else %}<tr><td class="empty">Ikke nok data endnu.</td></tr>{% endfor %}</tbody></table></section>
 <section class="card span12"><h2>Tidspunkt på døgnet · 30 dage</h2>{% set maxhour = (stats.hours | map(attribute=1) | max) if stats.hours else 1 %}{% for hour,count in stats.hours %}<div class="bar"><div class="barlabel">{{ '%02d'|format(hour) }}–{{ '%02d'|format((hour+1)%24) }}</div><div class="bartrack"><div class="barfill" style="width:{{ (count / maxhour * 100)|round }}%"></div></div><div class="barvalue">{{ count }}</div></div>{% else %}<div class="empty">Ikke nok data endnu.</div>{% endfor %}</section>
-<section class="card span12"><h2>Seneste hændelser</h2><div class="tablewrap"><table><thead><tr><th>Tid</th><th>Station</th><th>Alarmtype</th><th>Adresse</th><th>Status</th><th>Opfølgninger</th><th></th></tr></thead><tbody>{% for event in events %}<tr><td>{{ dk_time(event.started_at) }}</td><td>{{ event.station or '—' }}</td><td>{{ event.alarm_type or '—' }}</td><td class="bodycell">{{ event.address or '—' }}</td><td><span class="tag">{{ 'Komplet' if event.status == 'complete' else 'Afventer' }}</span></td><td>{{ event.followup_count or 0 }}</td><td><a class="btn small" href="{{ url_for('alarm_event_detail', event_id=event.id) }}">Vis</a></td></tr>{% else %}<tr><td colspan="7" class="empty">Ingen hændelser registreret endnu.</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="card span12"><h2>Seneste hændelser</h2><div class="tablewrap"><table><thead><tr><th>Tid</th><th>Station</th><th>Alarmtype</th><th>Adresse</th><th>Status</th><th>Sending 2</th><th></th></tr></thead><tbody>{% for event in events %}<tr><td>{{ dk_time(event.started_at) }}</td><td>{{ event.station or '—' }}</td><td>{{ event.alarm_type or '—' }}</td><td class="bodycell">{{ event.address or '—' }}</td><td><span class="tag">{{ 'Komplet' if event.status == 'complete' else 'Afventer' }}</span></td><td>{{ event.followup_count or 0 }}</td><td><a class="btn small" href="{{ url_for('alarm_event_detail', event_id=event.id) }}">Vis</a></td></tr>{% else %}<tr><td colspan="7" class="empty">Ingen hændelser registreret endnu.</td></tr>{% endfor %}</tbody></table></div></section>
 </div><div class="footer">Statistikken starter fra aktiveringen af hændelsesmodulet. Tider vises i Europe/Copenhagen.</div>
 </div>
 """,
@@ -369,7 +369,7 @@ EVENT_DETAIL_HTML = base.BASE_HTML.replace(
 <div class="grid">
 <section class="card span4"><h2>Status</h2><div class="metric">{{ 'Komplet' if event.status == 'complete' else 'Afventer' }}</div><p class="muted">Første varsling: {{ dk_time(event.first_alerted_at) }}</p></section>
 <section class="card span4"><h2>Alarm</h2><div class="metric" style="font-size:18px">{{ event.alarm_type or 'Ukendt type' }}</div><p class="muted">Station {{ event.station or '—' }}</p></section>
-<section class="card span4"><h2>Adresse</h2><div style="font-size:17px;font-weight:700">{{ event.address or 'Ikke fundet automatisk' }}</div><p class="muted">Opfølgninger: {{ event.followup_count or 0 }}</p></section>
+<section class="card span4"><h2>Adresse</h2><div style="font-size:17px;font-weight:700">{{ event.address or 'Ikke fundet automatisk' }}</div><p class="muted">Sending 2: {{ event.followup_count or 0 }}</p></section>
 <section class="card span12"><h2>Tidslinje</h2><div class="tablewrap"><table><thead><tr><th>Modtaget</th><th>Type</th><th>Dele</th><th>Original tekst</th><th>WhatsApp</th></tr></thead><tbody>{% for row in timeline %}<tr><td>{{ dk_time(row.message.received_at) }}</td><td><span class="tag">{{ row.label }}</span></td><td>{{ (row.message.part_current|string + '/' + row.message.part_total|string) if row.message.part_total else '1/1' }}</td><td class="bodycell">{{ row.message.raw_body }}</td><td>{% for d in row.deliveries %}<div>{{ d.recipient_name }} · {{ d.status }}</div>{% else %}<span class="muted">Ingen leveringer</span>{% endfor %}</td></tr>{% endfor %}</tbody></table></div></section>
 </div></div>
 """,
@@ -382,8 +382,8 @@ def kind_label(kind: str) -> str:
         "alarm_complete": "Komplet alarm",
         "sending2_prealert": "Sending 2 · varsling",
         "sending2_complete": "Sending 2 · komplet",
-        "followup_prealert": "Opfølgning · varsling",
-        "followup_complete": "Opfølgning · komplet",
+        "followup_prealert": "Sending 2 · varsling",
+        "followup_complete": "Sending 2 · komplet",
     }.get(kind, kind)
 
 
