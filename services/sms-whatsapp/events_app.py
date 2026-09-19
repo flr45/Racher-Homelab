@@ -126,6 +126,33 @@ def extract_event_fields(raw_body: str) -> tuple[str | None, str | None, str | N
     return station, alarm_type, address
 
 
+def first_sent_delivery_at(inbound_id: int) -> datetime | None:
+    delivery = (
+        base.WhatsAppDelivery.query.filter_by(inbound_id=inbound_id, status="sent")
+        .order_by(base.WhatsAppDelivery.attempted_at.asc(), base.WhatsAppDelivery.id.asc())
+        .first()
+    )
+    return delivery.attempted_at if delivery is not None else None
+
+
+def mark_first_delivery(inbound_id: int, delivered_at: datetime | None = None) -> None:
+    """Record the first actual successful WhatsApp delivery for an event."""
+    message = AlarmEventMessage.query.filter_by(inbound_id=inbound_id).first()
+    if message is None:
+        # Immediate delivery happens before the event wrapper records the
+        # AlarmEventMessage. record_alarm_event() picks it up afterwards.
+        return
+    event = db.session.get(AlarmEvent, message.event_id)
+    if event is None:
+        return
+    when = delivered_at or first_sent_delivery_at(inbound_id) or base.utcnow()
+    current = aware(event.first_alerted_at)
+    candidate = aware(when)
+    if candidate is not None and (current is None or candidate < current):
+        event.first_alerted_at = candidate
+        db.session.commit()
+
+
 def create_event(event_key: str, inbound: base.InboundMessage, raw_body: str) -> AlarmEvent:
     station, alarm_type, address = extract_event_fields(raw_body)
     event = AlarmEvent(
@@ -136,7 +163,7 @@ def create_event(event_key: str, inbound: base.InboundMessage, raw_body: str) ->
         address=address,
         status="waiting",
         started_at=inbound.received_at,
-        first_alerted_at=inbound.created_at,
+        first_alerted_at=first_sent_delivery_at(inbound.id),
         last_update_at=inbound.created_at,
         followup_count=0,
     )
@@ -215,8 +242,14 @@ def record_alarm_event(inbound: base.InboundMessage, payload: dict) -> None:
         event.address = address
 
     event.last_update_at = inbound.created_at
-    if event.first_alerted_at is None or (aware(inbound.created_at) or base.utcnow()) < (aware(event.first_alerted_at) or base.utcnow()):
-        event.first_alerted_at = inbound.created_at
+    delivered_at = first_sent_delivery_at(inbound.id)
+    if delivered_at is not None:
+        current_delivery = aware(event.first_alerted_at)
+        candidate_delivery = aware(delivered_at)
+        if candidate_delivery is not None and (
+            current_delivery is None or candidate_delivery < current_delivery
+        ):
+            event.first_alerted_at = candidate_delivery
     if (aware(inbound.received_at) or base.utcnow()) < (aware(event.started_at) or base.utcnow()):
         event.started_at = inbound.received_at
 
