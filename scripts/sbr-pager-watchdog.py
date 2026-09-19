@@ -239,6 +239,54 @@ def collect_checks() -> tuple[dict[str, str | None], dict]:
     return checks, details
 
 
+def openwa_api_request(path: str, method: str = "GET", timeout: int = 75):
+    api_key = os.getenv("SMS_WHATSAPP_OPENWA_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("SMS_WHATSAPP_OPENWA_API_KEY mangler")
+
+    port = int(os.getenv("SMS_WHATSAPP_OPENWA_PORT", "2785"))
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/{path.lstrip('/')}",
+        headers={"X-API-Key": api_key},
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            return json.loads(body) if body else {}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"OpenWA HTTP {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"OpenWA API kan ikke kontaktes: {exc.reason}") from exc
+
+
+def recover_openwa_session() -> str:
+    session_id = os.getenv("SMS_WHATSAPP_OPENWA_SESSION_ID", "").strip()
+    if not session_id:
+        raise RuntimeError("SMS_WHATSAPP_OPENWA_SESSION_ID mangler")
+
+    status, _health = docker_state(CONTAINERS["openwa"])
+    if status != "running":
+        result = run(["docker", "restart", CONTAINERS["openwa"]], timeout=90)
+        if result.returncode != 0:
+            compose_up("openwa")
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            try:
+                openwa_api_request("sessions", timeout=5)
+                break
+            except RuntimeError:
+                time.sleep(2)
+
+    openwa_api_request(
+        f"sessions/{session_id}/start",
+        method="POST",
+        timeout=75,
+    )
+    return f"OpenWA session start {session_id[:8]}…"
+
+
 def compose_up(component: str) -> str:
     if component == "gateway":
         compose_file = "compose/sms-gateway/docker-compose.yml"
@@ -267,6 +315,17 @@ def compose_up(component: str) -> str:
 
 
 def recover_component(component: str) -> str:
+    if component == "openwa":
+        try:
+            return recover_openwa_session()
+        except Exception as exc:  # noqa: BLE001
+            log_detail = str(exc)
+            name = CONTAINERS[component]
+            result = run(["docker", "restart", name], timeout=90)
+            if result.returncode == 0:
+                return f"docker restart {name} (session-start fejlede: {log_detail[:180]})"
+            return compose_up(component)
+
     name = CONTAINERS[component]
     result = run(["docker", "restart", name], timeout=90)
     if result.returncode == 0:
