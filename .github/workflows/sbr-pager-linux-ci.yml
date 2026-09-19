@@ -7,6 +7,8 @@ on:
       - 'services/sms-gateway/**'
       - 'compose/sms-whatsapp/**'
       - 'compose/sms-gateway/**'
+      - 'scripts/sbr-pager-watchdog.py'
+      - 'systemd/sbr-pager-watchdog.*'
       - '.github/workflows/sbr-pager-linux-ci.yml'
   push:
     branches:
@@ -16,6 +18,8 @@ on:
       - 'services/sms-gateway/**'
       - 'compose/sms-whatsapp/**'
       - 'compose/sms-gateway/**'
+      - 'scripts/sbr-pager-watchdog.py'
+      - 'systemd/sbr-pager-watchdog.*'
       - '.github/workflows/sbr-pager-linux-ci.yml'
   workflow_dispatch:
 
@@ -32,6 +36,12 @@ jobs:
       - name: Compile SBR Pager Python
         run: |
           python -m compileall -q services/sms-whatsapp services/sms-gateway
+          python -m py_compile scripts/sbr-pager-watchdog.py
+
+      - name: Validate watchdog systemd units
+        run: |
+          grep -q '/opt/SBR-Pager-Gateway/scripts/sbr-pager-watchdog.py' systemd/sbr-pager-watchdog.service
+          grep -q 'OnUnitActiveSec=1min' systemd/sbr-pager-watchdog.timer
 
       - name: Build SBR Pager image and run embedded tests
         run: |

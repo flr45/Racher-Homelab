@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import signal
 import time
 import urllib.error
@@ -35,6 +36,22 @@ SMS_SEND_TIMEOUT_SECONDS = max(
     25, int(os.getenv("SMS_SEND_TIMEOUT_SECONDS", "60"))
 )
 OUTBOX_BATCH_SIZE = max(1, int(os.getenv("SMS_OUTBOX_BATCH_SIZE", "20")))
+MODEM_NETWORK_CHECK_SECONDS = max(
+    10.0,
+    float(os.getenv("MODEM_NETWORK_CHECK_SECONDS", "30")),
+)
+MODEM_NETWORK_FAILURES_BEFORE_RESET = max(
+    1,
+    int(os.getenv("MODEM_NETWORK_FAILURES_BEFORE_RESET", "4")),
+)
+MODEM_NETWORK_RADIO_RESET_ENABLED = (
+    os.getenv("MODEM_NETWORK_RADIO_RESET_ENABLED", "true").lower() == "true"
+)
+MODEM_NETWORK_RECOVERY_SETTLE_SECONDS = max(
+    2.0,
+    float(os.getenv("MODEM_NETWORK_RECOVERY_SETTLE_SECONDS", "8")),
+)
+_NETWORK_REGISTRATION_RE = re.compile(r"\+CREG:\s*\d+\s*,\s*(\d+)")
 
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("sms-modem-reader")
@@ -75,6 +92,37 @@ def write_status(**values):
 def stop(_signum, _frame):
     global running
     running = False
+
+
+def network_registration_status(response: str) -> int | None:
+    match = _NETWORK_REGISTRATION_RE.search(response or "")
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def network_is_registered(response: str) -> bool:
+    return network_registration_status(response) in {1, 5}
+
+
+def recover_radio(port) -> None:
+    if not MODEM_NETWORK_RADIO_RESET_ENABLED:
+        log.warning("Automatisk radio-reset er deaktiveret")
+        return
+
+    log.warning("Forsøger automatisk SIM800 radio-reset med AT+CFUN")
+    off = command(port, "AT+CFUN=0", timeout=12)
+    if "ERROR" in off:
+        raise RuntimeError(f"Modemmet afviste AT+CFUN=0: {off.strip()}")
+    time.sleep(2)
+
+    on = command(port, "AT+CFUN=1", timeout=20)
+    if "ERROR" in on:
+        raise RuntimeError(f"Modemmet afviste AT+CFUN=1: {on.strip()}")
+    time.sleep(MODEM_NETWORK_RECOVERY_SETTLE_SECONDS)
 
 
 def command(port, value, timeout=8, expected="\r\nOK\r\n"):
@@ -173,11 +221,13 @@ def initialize(port):
             raise RuntimeError(f"Modemmet afviste {value}: {response.strip()}")
     network = command(port, "AT+CREG?")
     signal_quality = command(port, "AT+CSQ")
+    registered = network_is_registered(network)
     write_status(
-        state="online",
+        state="online" if registered else "degraded",
         network=network.strip(),
         signal=signal_quality.strip(),
-        last_error=None,
+        network_failures=0 if registered else 1,
+        last_error=None if registered else "Mobilnet ikke registreret endnu",
     )
 
 
@@ -307,10 +357,64 @@ def run():
                     MODEM_DEVICE,
                 )
 
+                network_failures = 0
+                next_network_check = 0.0
+
                 while running:
+                    now = time.monotonic()
+                    if now >= next_network_check:
+                        network = command(port, "AT+CREG?")
+                        signal_quality = command(port, "AT+CSQ")
+                        if network_is_registered(network):
+                            if network_failures:
+                                log.info(
+                                    "SMS-modem er registreret på mobilnettet igen efter %s fejlede kontroller",
+                                    network_failures,
+                                )
+                            network_failures = 0
+                            write_status(
+                                state="online",
+                                network=network.strip(),
+                                signal=signal_quality.strip(),
+                                network_failures=0,
+                                last_error=None,
+                            )
+                        else:
+                            network_failures += 1
+                            registration = network_registration_status(network)
+                            error = (
+                                "Mobilnet ikke registreret"
+                                if registration is None
+                                else f"Mobilnet ikke registreret (CREG={registration})"
+                            )
+                            write_status(
+                                state="degraded",
+                                network=network.strip(),
+                                signal=signal_quality.strip(),
+                                network_failures=network_failures,
+                                last_error=error,
+                            )
+                            log.warning(
+                                "%s; kontrol %s/%s",
+                                error,
+                                network_failures,
+                                MODEM_NETWORK_FAILURES_BEFORE_RESET,
+                            )
+                            if network_failures >= MODEM_NETWORK_FAILURES_BEFORE_RESET:
+                                write_status(
+                                    state="recovering",
+                                    last_recovery_at=utc_iso(),
+                                    recovery_reason=error,
+                                    last_error=error,
+                                )
+                                recover_radio(port)
+                                raise RuntimeError(
+                                    f"{error}; radio-reset udført og serieport genåbnes"
+                                )
+                        next_network_check = now + MODEM_NETWORK_CHECK_SECONDS
+
                     response = command(port, "AT+CMGL=0", timeout=15)
                     messages = parse_cmgl_response(response)
-                    write_status(state="online", last_error=None)
 
                     for message in messages:
                         message_label = "+".join(
