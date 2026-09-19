@@ -52,9 +52,13 @@ jobs:
           SMS_WHATSAPP_SESSION_SECRET: ci-session-secret
           SMS_WHATSAPP_OPENWA_API_KEY: ci-openwa-key
           SMS_WHATSAPP_OPENWA_SESSION_ID: ci-openwa-session
+          SMS_GATEWAY_API_TOKEN: ci-sms-gateway-token
         run: |
           docker network create backend || true
           docker network create proxy || true
           docker compose \
             -f compose/sms-whatsapp/compose.yml \
+            config --quiet
+          docker compose \
+            -f compose/sms-gateway/docker-compose.yml \
             config --quiet
