@@ -175,6 +175,8 @@ backup_volume racher-homelab-data_redis_data redis
 backup_volume vagtbytte_vagtbytte_backups vagtbytte-backups
 backup_volume vagtbytte_vagtbytte_operativ_portal vagtbytte-operativ-portal
 backup_volume sms-gateway_sms_gateway_data sms-gateway
+backup_volume sms-whatsapp_sms_whatsapp_data sms-whatsapp
+backup_volume sms-whatsapp_sms_whatsapp_openwa_data sms-whatsapp-openwa
 backup_volume minutregnskab_data minutregnskab
 backup_volume ordberedskab_ordberedskab_data ordberedskab
 
