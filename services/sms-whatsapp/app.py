@@ -524,7 +524,7 @@ def incoming():
         return jsonify(id=inbound.id, accepted=False, sent=0, failed=0), 202
 
     sent, failed = deliver_inbound(inbound)
-    return jsonify(id=inbound.id, accepted=True, sent=sent, failed=failed), 201
+    return jsonify(id=inbound.id, accepted=bool(inbound.accepted), sent=sent, failed=failed), 201
 
 
 with app.app_context():
