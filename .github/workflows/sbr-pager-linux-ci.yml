@@ -1,0 +1,50 @@
+name: SBR Pager Linux CI
+
+on:
+  pull_request:
+    paths:
+      - 'services/sms-whatsapp/**'
+      - 'compose/sms-whatsapp/**'
+      - '.github/workflows/sbr-pager-linux-ci.yml'
+  push:
+    branches:
+      - feature/sms-whatsapp-linux-hardening
+    paths:
+      - 'services/sms-whatsapp/**'
+      - 'compose/sms-whatsapp/**'
+      - '.github/workflows/sbr-pager-linux-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Compile SBR Pager Python
+        run: |
+          python -m compileall -q services/sms-whatsapp
+
+      - name: Build SBR Pager image and run embedded tests
+        run: |
+          docker build --pull \
+            -t sbr-pager-linux-ci \
+            services/sms-whatsapp
+
+      - name: Validate Compose
+        env:
+          SMS_WHATSAPP_INGEST_TOKEN: ci-ingest-token
+          SMS_WHATSAPP_ADMIN_PASSWORD: ci-admin-password
+          SMS_WHATSAPP_SESSION_SECRET: ci-session-secret
+          SMS_WHATSAPP_OPENWA_API_KEY: ci-openwa-key
+          SMS_WHATSAPP_OPENWA_SESSION_ID: ci-openwa-session
+        run: |
+          docker network create backend || true
+          docker network create proxy || true
+          docker compose \
+            -f compose/sms-whatsapp/compose.yml \
+            config --quiet
