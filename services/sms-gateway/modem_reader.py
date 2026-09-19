@@ -324,9 +324,13 @@ def run():
                                 message["sender"],
                                 result.get("station"),
                                 result.get("forwarded_immediately_to"),
-                                "oprettet"
-                                if result.get("vagtbytte_created")
-                                else "dublet",
+                                "deaktiveret"
+                                if result.get("vagtbytte_disabled")
+                                else (
+                                    "oprettet"
+                                    if result.get("vagtbytte_created")
+                                    else "dublet"
+                                ),
                             )
                             if DELETE_AFTER_IMPORT:
                                 for index in message["indices"]:
