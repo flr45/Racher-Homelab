@@ -1,0 +1,113 @@
+name: SBR Pager Linux CI
+
+on:
+  pull_request:
+    paths:
+      - 'services/sms-whatsapp/**'
+      - 'services/sms-gateway/**'
+      - 'compose/sms-whatsapp/**'
+      - 'compose/sms-gateway/**'
+      - 'scripts/sbr-pager-watchdog.py'
+      - 'systemd/sbr-pager-watchdog.*'
+      - '.github/workflows/sbr-pager-linux-ci.yml'
+  push:
+    branches:
+      - 'feature/sms-whatsapp-*'
+    paths:
+      - 'services/sms-whatsapp/**'
+      - 'services/sms-gateway/**'
+      - 'compose/sms-whatsapp/**'
+      - 'compose/sms-gateway/**'
+      - 'scripts/sbr-pager-watchdog.py'
+      - 'systemd/sbr-pager-watchdog.*'
+      - '.github/workflows/sbr-pager-linux-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Compile SBR Pager Python
+        run: |
+          python -m compileall -q services/sms-whatsapp services/sms-gateway
+          python -m py_compile scripts/sbr-pager-watchdog.py
+
+      - name: Validate watchdog systemd units
+        run: |
+          grep -q '/opt/SBR-Pager-Gateway/scripts/sbr-pager-watchdog.py' systemd/sbr-pager-watchdog.service
+          grep -q 'OnUnitActiveSec=1min' systemd/sbr-pager-watchdog.timer
+
+      - name: Test OpenWA watchdog startup grace
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import os
+          from pathlib import Path
+
+          path = Path("scripts/sbr-pager-watchdog.py")
+          spec = importlib.util.spec_from_file_location("sbr_pager_watchdog", path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+
+          module.container_issue = lambda component: None
+
+          gateway = {
+              "status": "ok",
+              "gateway": {"database": "online"},
+              "modem": {"state": "online", "network": "+CREG: 0,5\r\n\r\nOK"},
+          }
+          pager = {
+              "status": "ok",
+              "database": "online",
+              "deliveryQueue": {"failed": 0, "oldestMinutes": None},
+              "openwa": {"state": "initializing", "detail": "SBR-PAGER"},
+          }
+
+          module.http_json = lambda url, timeout=8: gateway if ":8090/" in url else pager
+          module.container_age_seconds = lambda name: 30
+          os.environ["SBR_WATCHDOG_OPENWA_STARTUP_GRACE_SECONDS"] = "300"
+
+          checks, details = module.collect_checks()
+          assert checks["openwa"] is None, checks
+          assert details["openwaStartupGrace"]["active"] is True
+
+          module.container_age_seconds = lambda name: 301
+          checks, _ = module.collect_checks()
+          assert checks["openwa"] == "OpenWA session status=initializing", checks
+          PY
+
+      - name: Build SBR Pager image and run embedded tests
+        run: |
+          docker build --pull \
+            -t sbr-pager-linux-ci \
+            services/sms-whatsapp
+
+      - name: Build SMS Gateway image and run modem/PDU tests
+        run: |
+          docker build --pull \
+            -t sbr-sms-gateway-ci \
+            services/sms-gateway
+
+      - name: Validate Compose
+        env:
+          SMS_WHATSAPP_INGEST_TOKEN: ci-ingest-token
+          SMS_WHATSAPP_ADMIN_PASSWORD: ci-admin-password
+          SMS_WHATSAPP_SESSION_SECRET: ci-session-secret
+          SMS_WHATSAPP_OPENWA_API_KEY: ci-openwa-key
+          SMS_WHATSAPP_OPENWA_SESSION_ID: ci-openwa-session
+          SMS_GATEWAY_API_TOKEN: ci-sms-gateway-token
+        run: |
+          docker network create backend || true
+          docker network create proxy || true
+          docker compose \
+            -f compose/sms-whatsapp/compose.yml \
+            config --quiet
+          docker compose \
+            -f compose/sms-gateway/docker-compose.yml \
+            config --quiet

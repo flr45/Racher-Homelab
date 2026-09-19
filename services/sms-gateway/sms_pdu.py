@@ -24,8 +24,8 @@ class DecodedSmsPart:
     concat_part: int | None = None
 
 
-def parse_cmgl_response(response: str) -> list[dict]:
-    """Parse and assemble unread SMS messages from an AT+CMGL PDU response."""
+def parse_cmgl_parts(response: str) -> list[DecodedSmsPart]:
+    """Decode every stored SMS segment from an AT+CMGL response."""
 
     lines = [line.strip() for line in response.replace("\r", "").split("\n")]
     parts: list[DecodedSmsPart] = []
@@ -52,7 +52,13 @@ def parse_cmgl_response(response: str) -> list[dict]:
             parts.append(decode_sms_deliver_pdu(int(match.group("index")), pdu_line))
         index = max(cursor + 1, index + 1)
 
-    return assemble_parts(parts)
+    return parts
+
+
+def parse_cmgl_response(response: str) -> list[dict]:
+    """Parse and assemble complete SMS messages from an AT+CMGL response."""
+
+    return assemble_parts(parse_cmgl_parts(response))
 
 
 def decode_sms_deliver_pdu(index: int, pdu_hex: str) -> DecodedSmsPart:

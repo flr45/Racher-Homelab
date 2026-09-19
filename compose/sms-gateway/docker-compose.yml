@@ -6,27 +6,40 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: sqlite:////data/sms-gateway.db
-      MODEM_DEVICE: ${SMS_MODEM_DEVICE:-/dev/ttyUSB1}
+      MODEM_DEVICE: /dev/sbr-sms-modem
       MODEM_BAUDRATE: ${SMS_MODEM_BAUDRATE:-115200}
-      MODEM_POLL_SECONDS: ${SMS_MODEM_POLL_SECONDS:-2}
+      MODEM_POLL_SECONDS: ${SMS_MODEM_POLL_SECONDS:-0.5}
       MODEM_STATUS_FILE: /data/modem-status.json
       GATEWAY_STATUS_FILE: /data/gateway-status.json
+      MODEM_NETWORK_CHECK_SECONDS: ${SMS_MODEM_NETWORK_CHECK_SECONDS:-30}
+      MODEM_NETWORK_FAILURES_BEFORE_RESET: ${SMS_MODEM_NETWORK_FAILURES_BEFORE_RESET:-4}
+      MODEM_NETWORK_RADIO_RESET_ENABLED: ${SMS_MODEM_NETWORK_RADIO_RESET_ENABLED:-true}
+      MODEM_NETWORK_RECOVERY_SETTLE_SECONDS: ${SMS_MODEM_NETWORK_RECOVERY_SETTLE_SECONDS:-8}
       DELETE_SMS_AFTER_IMPORT: ${SMS_DELETE_AFTER_IMPORT:-true}
       ALARM_SOURCE_WINDOW_MINUTES: ${SMS_ALARM_SOURCE_WINDOW_MINUTES:-10}
       SMS_DRY_RUN: ${SMS_DRY_RUN:-true}
+      VAGTBYTTE_FORWARD_ENABLED: ${VAGTBYTTE_FORWARD_ENABLED:-false}
       VAGTBYTTE_ALARM_FEED_URL: ${VAGTBYTTE_ALARM_FEED_URL:-http://vagtbytte-web:3000/api/alarm-feed/ingest}
       VAGTBYTTE_ALARM_FEED_TOKEN: ${VAGTBYTTE_ALARM_FEED_INGEST_TOKEN}
+      SBR_PAGER_INGEST_URL: ${SBR_PAGER_INGEST_URL:-http://sms-whatsapp:8080/api/incoming}
+      SBR_PAGER_INGEST_TOKEN: ${SMS_WHATSAPP_INGEST_TOKEN:-}
+      SBR_PAGER_PREALERT_DELAY_SECONDS: ${SMS_WHATSAPP_PREALERT_DELAY_SECONDS:-10}
+      SBR_PAGER_PARENT_STATE_FILE: /data/sbr-pager-parent-events.json
+      SBR_PAGER_PARENT_MAX_AGE_SECONDS: ${SMS_WHATSAPP_PARENT_MAX_AGE_SECONDS:-7200}
+      SBR_PAGER_FOLLOWUP_WINDOW_SECONDS: ${SMS_WHATSAPP_FOLLOWUP_WINDOW_SECONDS:-60}
       RACHER_MONITOR_SMS_TO: ${RACHER_MONITOR_SMS_TO:-}
       SMS_COMMAND_ALLOWED_NUMBERS: ${SMS_COMMAND_ALLOWED_NUMBERS:-}
       SMS_GATEWAY_API_TOKEN: ${SMS_GATEWAY_API_TOKEN:?SMS_GATEWAY_API_TOKEN must be set}
     devices:
-      - ${SMS_MODEM_DEVICE:-/dev/ttyUSB1}:${SMS_MODEM_DEVICE:-/dev/ttyUSB1}
+      - ${SMS_MODEM_HOST_DEVICE:-/dev/serial/by-id/usb-HUAWEI_Technology_HUAWEI_Mobile-if00-port0}:/dev/sbr-sms-modem
     group_add:
       - "${DIALOUT_GID:-20}"
     volumes:
       - sms_gateway_data:/data
+    # Default remains localhost-only. Set SMS_GATEWAY_BIND_IP to the host's
+    # Tailscale IP when the dedicated Pager host needs remote status access.
     ports:
-      - "127.0.0.1:${SMS_GATEWAY_PORT:-8090}:8080"
+      - "${SMS_GATEWAY_BIND_IP:-127.0.0.1}:${SMS_GATEWAY_PORT:-8090}:8080"
     networks:
       - backend
     healthcheck:

@@ -282,6 +282,10 @@ def forward_to_vagtbytte(
     source_message_id: str | None,
     station_code: str | None,
 ):
+    enabled = os.getenv("VAGTBYTTE_FORWARD_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return {"created": False, "disabled": True}
+
     url = os.getenv(
         "VAGTBYTTE_ALARM_FEED_URL",
         "http://vagtbytte-web:3000/api/alarm-feed/ingest",
@@ -369,15 +373,19 @@ def process_incoming(
             station_code=station_code,
         )
         db.session.commit()
-        write_gateway_status(
-            state="online",
-            database="online",
-            last_received_sms_at=received_at.isoformat(),
-            last_vagtbytte_success_at=utc_iso(),
-            last_vagtbytte_error=None,
-            last_vagtbytte_error_at=None,
-            last_error=None,
-        )
+        status_values = {
+            "state": "online",
+            "database": "online",
+            "last_received_sms_at": received_at.isoformat(),
+            "last_error": None,
+        }
+        if not vagtbytte_result.get("disabled"):
+            status_values.update(
+                last_vagtbytte_success_at=utc_iso(),
+                last_vagtbytte_error=None,
+                last_vagtbytte_error_at=None,
+            )
+        write_gateway_status(**status_values)
     except Exception as exc:
         db.session.rollback()
         write_gateway_status(
@@ -493,6 +501,7 @@ def incoming():
         station=inbound.station_code,
         forwarded_immediately_to=recipients,
         vagtbytte_created=bool(vagtbytte_result.get("created")),
+        vagtbytte_disabled=bool(vagtbytte_result.get("disabled")),
         vagtbytte_alarm_id=vagtbytte_result.get("alarmId"),
         vagtbytte_sequence=vagtbytte_result.get("sequenceNumber"),
     ), 201

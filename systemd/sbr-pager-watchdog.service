@@ -1,0 +1,20 @@
+[Unit]
+Description=SBR Pager watchdog
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=racher
+Group=racher
+WorkingDirectory=/opt/SBR-Pager-Gateway
+Environment=ENV_FILE=/opt/SBR-Pager-Gateway/.env
+Environment=SBR_PAGER_ROOT=/opt/SBR-Pager-Gateway
+ExecStart=/usr/bin/python3 /opt/SBR-Pager-Gateway/scripts/sbr-pager-watchdog.py
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target
