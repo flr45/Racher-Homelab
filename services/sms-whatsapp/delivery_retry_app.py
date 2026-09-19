@@ -28,6 +28,22 @@ RETRY_MAX_AGE_HOURS = max(1, int(os.getenv("SMS_WHATSAPP_RETRY_MAX_AGE_HOURS", "
 RETRY_POLL_SECONDS = max(2, int(os.getenv("SMS_WHATSAPP_RETRY_POLL_SECONDS", "5")))
 
 
+class InboundDecision(db.Model):
+    __tablename__ = "inbound_decision"
+
+    id = db.Column(db.Integer, primary_key=True)
+    inbound_id = db.Column(
+        db.Integer,
+        db.ForeignKey("inbound_message.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    decision = db.Column(db.String(32), nullable=False, index=True)
+    reason = db.Column(db.String(160))
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=base.utcnow)
+
+
 class WhatsAppRetryState(db.Model):
     __tablename__ = "whatsapp_retry_state"
 
@@ -45,6 +61,61 @@ class WhatsAppRetryState(db.Model):
     last_error = db.Column(db.Text)
     completed_at = db.Column(db.DateTime(timezone=True))
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=base.utcnow)
+
+
+def message_quality(body: str | None) -> tuple[bool, str | None]:
+    """Reject only obvious transport/decoder noise.
+
+    The filter is deliberately conservative: ordinary human text is allowed,
+    even if it does not look like a known alarm format. This protects against
+    modem garbage without silently discarding new/unknown alarm wording.
+    """
+    text = str(body or "")
+    if not text.strip():
+        return False, "tom besked"
+
+    controls = [
+        ch for ch in text
+        if ord(ch) < 32 and ch not in {"\n", "\r", "\t"}
+    ]
+    if controls:
+        return False, "kontroltegn i SMS"
+
+    replacement_count = text.count("\ufffd")
+    if replacement_count >= 2:
+        return False, "tegnkodningsstøj"
+
+    visible = [ch for ch in text if not ch.isspace()]
+    if visible:
+        printable_ratio = sum(ch.isprintable() for ch in visible) / len(visible)
+        if printable_ratio < 0.85:
+            return False, "for mange ikke-printbare tegn"
+
+        alarm_hint = (
+            stations.detect_station(text) is not None
+            or "m+v" in text.casefold()
+            or "sending 2" in text.casefold()
+            or "alarm" in text.casefold()
+        )
+        substantive_ratio = sum(ch.isalnum() for ch in visible) / len(visible)
+        if len(visible) >= 10 and substantive_ratio < 0.18 and not alarm_hint:
+            return False, "sandsynlig modemstøj"
+
+    return True, None
+
+
+def _record_decision(inbound: base.InboundMessage, decision: str, reason: str | None) -> None:
+    row = InboundDecision.query.filter_by(inbound_id=inbound.id).first()
+    if row is None:
+        row = InboundDecision(
+            inbound_id=inbound.id,
+            decision=decision,
+            reason=(reason or "")[:160] or None,
+        )
+        db.session.add(row)
+    else:
+        row.decision = decision
+        row.reason = (reason or "")[:160] or None
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -146,6 +217,22 @@ def deliver_inbound_resilient(inbound: base.InboundMessage) -> tuple[int, int]:
     delivery row is kept and retried in the background instead of the alarm
     being abandoned after one request.
     """
+
+    quality_ok, quality_reason = message_quality(inbound.body)
+    if not quality_ok:
+        inbound.accepted = False
+        _record_decision(inbound, "ignored_noise", quality_reason)
+        db.session.commit()
+        log.warning(
+            "SMS %s fra %s blev stoppet af kvalitetsfilter: %s",
+            inbound.source_id,
+            inbound.sender,
+            quality_reason,
+        )
+        return 0, 0
+
+    _record_decision(inbound, "deliver", None)
+    db.session.commit()
 
     station = stations.station_for_inbound(inbound)
     recipients = base.Recipient.query.filter_by(active=True).order_by(base.Recipient.name).all()
@@ -264,6 +351,29 @@ def retry_due_once(limit: int = 20) -> dict:
     return {"checked": len(rows), "sent": sent, "remaining": remaining}
 
 
+def quality_snapshot() -> dict:
+    ignored = InboundDecision.query.filter_by(decision="ignored_noise").count()
+    recent = (
+        db.session.query(InboundDecision, base.InboundMessage)
+        .join(base.InboundMessage, base.InboundMessage.id == InboundDecision.inbound_id)
+        .filter(InboundDecision.decision == "ignored_noise")
+        .order_by(InboundDecision.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    return {
+        "ignored": ignored,
+        "recent": [
+            {
+                "sender": inbound.sender,
+                "reason": decision.reason,
+                "body": (inbound.body or "")[:120],
+            }
+            for decision, inbound in recent
+        ],
+    }
+
+
 def queue_snapshot() -> dict:
     retrying = base.WhatsAppDelivery.query.filter_by(status="retrying").count()
     pending = base.WhatsAppDelivery.query.filter_by(status="pending").count()
@@ -335,7 +445,7 @@ RETRY_FRAGMENT = r"""
   <div class="top" style="margin-bottom:10px">
     <div>
       <h2 style="margin:0">Leveringssikkerhed</h2>
-      <p class="muted" style="margin:5px 0 0">OpenWA-fejl køes og forsøges automatisk igen – også efter container-genstart.</p>
+      <p class="muted" style="margin:5px 0 0">OpenWA-fejl køes og forsøges automatisk igen – også efter container-genstart. Tydelig modemstøj stoppes før udsendelse.</p>
     </div>
     <form method="post" action="{{ url_for('retry_whatsapp_deliveries_now') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -347,6 +457,12 @@ RETRY_FRAGMENT = r"""
     <div><div class="metric">{{ queue.retrying }}</div><div class="muted">Afventer nyt forsøg</div></div>
     <div><div class="metric">{{ queue.failed }}</div><div class="muted">Permanent fejlet</div></div>
     <div><div class="metric">{{ (queue.oldestMinutes|string + ' min') if queue.oldestMinutes is not none else '—' }}</div><div class="muted">Ældste aktive fejl</div></div>
+  </div>
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+    <strong>Støjfilter</strong> · {{ quality.ignored }} besked(er) stoppet
+    {% for row in quality.recent %}
+      <div class="muted" style="margin-top:5px">{{ row.sender }} · {{ row.reason }} · {{ row.body }}</div>
+    {% endfor %}
   </div>
 </section>
 """
@@ -363,7 +479,11 @@ def dashboard_with_delivery_safety():
 
     html = response.get_data(as_text=True)
     if 'id="delivery-safety"' not in html:
-        fragment = render_template_string(RETRY_FRAGMENT, queue=queue_snapshot())
+        fragment = render_template_string(
+            RETRY_FRAGMENT,
+            queue=queue_snapshot(),
+            quality=quality_snapshot(),
+        )
         markers = [
             '<section class="card span12"><h2>Teknisk WhatsApp-log</h2>',
             '<section class="card span12"><h2>Teknisk SMS-log</h2>',
