@@ -48,6 +48,14 @@ log "Validerer checksums"
 gzip -t "$BACKUP_DIR/npm-database.sql.gz"
 tar -tzf "$BACKUP_DIR/control-center-data.tar.gz" >/dev/null
 
+for archive in sms-gateway.tar.gz sms-whatsapp.tar.gz sms-whatsapp-openwa.tar.gz; do
+  if [[ -f "$BACKUP_DIR/$archive" ]]; then
+    [[ -s "$BACKUP_DIR/$archive" ]] || fail "$archive er tom."
+    tar -tzf "$BACKUP_DIR/$archive" >/dev/null
+    log "Valideret: $archive"
+  fi
+done
+
 if command -v pg_restore >/dev/null 2>&1; then
   pg_restore --list "$BACKUP_DIR/postgres.dump" >/dev/null
 else
