@@ -52,6 +52,7 @@ MODEM_NETWORK_RECOVERY_SETTLE_SECONDS = max(
     float(os.getenv("MODEM_NETWORK_RECOVERY_SETTLE_SECONDS", "8")),
 )
 _NETWORK_REGISTRATION_RE = re.compile(r"\+CREG:\s*\d+\s*,\s*(\d+)")
+_CFUN_RE = re.compile(r"\+CFUN:\s*(\d+)")
 
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("sms-modem-reader")
@@ -108,21 +109,77 @@ def network_is_registered(response: str) -> bool:
     return network_registration_status(response) in {1, 5}
 
 
+def cfun_mode(response: str) -> int | None:
+    match = _CFUN_RE.search(response or "")
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def wait_for_sim_ready(port, timeout: float = 30.0) -> None:
+    deadline = time.monotonic() + max(1.0, timeout)
+    last_response = ""
+    while time.monotonic() < deadline:
+        last_response = command(port, "AT+CPIN?", timeout=8)
+        if "+CPIN: READY" in last_response:
+            return
+        time.sleep(2)
+    raise RuntimeError(
+        "SIM blev ikke READY efter radioaktivering: "
+        + (last_response.strip() or "intet svar")
+    )
+
+
+def ensure_radio_enabled(port) -> None:
+    response = command(port, "AT+CFUN?", timeout=8)
+    mode = cfun_mode(response)
+    if mode == 1:
+        return
+
+    log.warning(
+        "SIM800 radio er ikke i fuld funktion (CFUN=%s); aktiverer med AT+CFUN=1",
+        "ukendt" if mode is None else mode,
+    )
+    write_status(
+        state="recovering",
+        recovery_reason=f"CFUN={mode}",
+        last_recovery_at=utc_iso(),
+        last_error="SIM800 radio var deaktiveret",
+    )
+    response = command(port, "AT+CFUN=1", timeout=20)
+    if "ERROR" in response:
+        raise RuntimeError(f"Modemmet afviste AT+CFUN=1: {response.strip()}")
+    wait_for_sim_ready(port)
+    time.sleep(MODEM_NETWORK_RECOVERY_SETTLE_SECONDS)
+
+
 def recover_radio(port) -> None:
     if not MODEM_NETWORK_RADIO_RESET_ENABLED:
         log.warning("Automatisk radio-reset er deaktiveret")
         return
 
     log.warning("Forsøger automatisk SIM800 radio-reset med AT+CFUN")
-    off = command(port, "AT+CFUN=0", timeout=12)
-    if "ERROR" in off:
-        raise RuntimeError(f"Modemmet afviste AT+CFUN=0: {off.strip()}")
-    time.sleep(2)
+    try:
+        current = command(port, "AT+CFUN?", timeout=8)
+    except TimeoutError:
+        current = ""
+    mode = cfun_mode(current)
 
-    on = command(port, "AT+CFUN=1", timeout=20)
-    if "ERROR" in on:
-        raise RuntimeError(f"Modemmet afviste AT+CFUN=1: {on.strip()}")
-    time.sleep(MODEM_NETWORK_RECOVERY_SETTLE_SECONDS)
+    if mode == 1:
+        try:
+            off = command(port, "AT+CFUN=0", timeout=12)
+            if "ERROR" in off and "CFUN state is 0" not in off:
+                raise RuntimeError(f"Modemmet afviste AT+CFUN=0: {off.strip()}")
+        except TimeoutError:
+            # SIM800C kan skifte til CFUN=0 uden at sende et stabilt afsluttende
+            # OK-svar. Fortsæt derfor med at tænde radioen igen.
+            log.warning("AT+CFUN=0 gav timeout; fortsætter med radioaktivering")
+        time.sleep(2)
+
+    ensure_radio_enabled(port)
 
 
 def command(port, value, timeout=8, expected="\r\nOK\r\n"):
@@ -210,9 +267,17 @@ def complete_outgoing(message_id, status, error=None, retry=False):
 
 
 def initialize(port):
+    for value in ("AT", "ATE0"):
+        response = command(port, value)
+        if "ERROR" in response:
+            raise RuntimeError(f"Modemmet afviste {value}: {response.strip()}")
+
+    # SMS-kommandoer som CMGF/CPMS fejler på SIM800C, når radioen står i
+    # CFUN=0. Aktiver derfor radio/SIM først, så en gateway-genstart også kan
+    # selv-heale efter en deaktiveret radio.
+    ensure_radio_enabled(port)
+
     for value in (
-        "AT",
-        "ATE0",
         "AT+CMGF=0",
         'AT+CPMS="SM","SM","SM"',
     ):
