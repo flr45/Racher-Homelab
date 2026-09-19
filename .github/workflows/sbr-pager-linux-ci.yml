@@ -4,14 +4,18 @@ on:
   pull_request:
     paths:
       - 'services/sms-whatsapp/**'
+      - 'services/sms-gateway/**'
       - 'compose/sms-whatsapp/**'
+      - 'compose/sms-gateway/**'
       - '.github/workflows/sbr-pager-linux-ci.yml'
   push:
     branches:
-      - feature/sms-whatsapp-linux-hardening
+      - 'feature/sms-whatsapp-*'
     paths:
       - 'services/sms-whatsapp/**'
+      - 'services/sms-gateway/**'
       - 'compose/sms-whatsapp/**'
+      - 'compose/sms-gateway/**'
       - '.github/workflows/sbr-pager-linux-ci.yml'
   workflow_dispatch:
 
@@ -27,13 +31,19 @@ jobs:
 
       - name: Compile SBR Pager Python
         run: |
-          python -m compileall -q services/sms-whatsapp
+          python -m compileall -q services/sms-whatsapp services/sms-gateway
 
       - name: Build SBR Pager image and run embedded tests
         run: |
           docker build --pull \
             -t sbr-pager-linux-ci \
             services/sms-whatsapp
+
+      - name: Build SMS Gateway image and run modem/PDU tests
+        run: |
+          docker build --pull \
+            -t sbr-sms-gateway-ci \
+            services/sms-gateway
 
       - name: Validate Compose
         env:
