@@ -26,6 +26,9 @@ RETRY_MAX_SECONDS = max(RETRY_BASE_SECONDS, int(os.getenv("SMS_WHATSAPP_RETRY_MA
 RETRY_MAX_ATTEMPTS = max(1, int(os.getenv("SMS_WHATSAPP_RETRY_MAX_ATTEMPTS", "20")))
 RETRY_MAX_AGE_HOURS = max(1, int(os.getenv("SMS_WHATSAPP_RETRY_MAX_AGE_HOURS", "24")))
 RETRY_POLL_SECONDS = max(2, int(os.getenv("SMS_WHATSAPP_RETRY_POLL_SECONDS", "5")))
+QUALITY_FILTER_ENABLED = os.getenv(
+    "SMS_WHATSAPP_QUALITY_FILTER_ENABLED", "true"
+).strip().lower() in {"1", "true", "yes", "on"}
 
 
 class InboundDecision(db.Model):
@@ -219,7 +222,7 @@ def deliver_inbound_resilient(inbound: base.InboundMessage) -> tuple[int, int]:
     """
 
     quality_ok, quality_reason = message_quality(inbound.body)
-    if not quality_ok:
+    if QUALITY_FILTER_ENABLED and not quality_ok:
         inbound.accepted = False
         _record_decision(inbound, "ignored_noise", quality_reason)
         db.session.commit()
@@ -362,6 +365,7 @@ def quality_snapshot() -> dict:
         .all()
     )
     return {
+        "enabled": QUALITY_FILTER_ENABLED,
         "ignored": ignored,
         "recent": [
             {
@@ -459,7 +463,7 @@ RETRY_FRAGMENT = r"""
     <div><div class="metric">{{ (queue.oldestMinutes|string + ' min') if queue.oldestMinutes is not none else '—' }}</div><div class="muted">Ældste aktive fejl</div></div>
   </div>
   <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
-    <strong>Støjfilter</strong> · {{ quality.ignored }} besked(er) stoppet
+    <strong>Støjfilter</strong> · {{ 'aktivt' if quality.enabled else 'deaktiveret' }} · {{ quality.ignored }} besked(er) stoppet
     {% for row in quality.recent %}
       <div class="muted" style="margin-top:5px">{{ row.sender }} · {{ row.reason }} · {{ row.body }}</div>
     {% endfor %}
