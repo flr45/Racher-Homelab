@@ -67,6 +67,19 @@ def station_for_inbound(inbound: base.InboundMessage) -> str | None:
     if station:
         return station
 
+    # The modem gateway supplies the exact parent event key for Sending 2.
+    # Use it before the time-based fallback so recipient routing matches the
+    # original alarm even when several incidents are active close together.
+    try:
+        payload = request.get_json(silent=True) or {}
+    except RuntimeError:
+        payload = {}
+    parent_event_key = str(payload.get("parentEventKey") or "").strip()
+    if parent_event_key:
+        parent = events.AlarmEvent.query.filter_by(event_key=parent_event_key[:128]).first()
+        if parent and parent.station:
+            return parent.station.upper()
+
     # Sending 2 often contains no (S)/(A)/... marker. Reuse the station from the
     # most recent alarm event from the same sender inside the event-link window.
     if not _SENDING_2_RE.search(inbound.body or ""):

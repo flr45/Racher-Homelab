@@ -204,10 +204,17 @@ def record_alarm_event(inbound: base.InboundMessage, payload: dict) -> None:
 
     event_key = str(payload.get("eventKey") or payload.get("groupKey") or inbound.source_id).strip()[:128]
     group_key = str(payload.get("groupKey") or event_key).strip()[:128]
+    parent_event_key = str(payload.get("parentEventKey") or "").strip()[:128]
     is_followup = kind.startswith("sending2")
 
     if is_followup:
-        event = recent_parent_event(inbound)
+        event = (
+            AlarmEvent.query.filter_by(event_key=parent_event_key).first()
+            if parent_event_key
+            else None
+        )
+        if event is None:
+            event = recent_parent_event(inbound)
         if event is None:
             event = create_event(f"orphan:{event_key}"[:128], inbound, raw_body)
     else:

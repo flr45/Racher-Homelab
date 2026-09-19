@@ -55,6 +55,14 @@ SBR_PAGER_PREALERT_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("SBR_PAGER_PREALERT_DELAY_SECONDS", "10")),
 )
+SBR_PAGER_PARENT_STATE_FILE = os.getenv(
+    "SBR_PAGER_PARENT_STATE_FILE",
+    "/data/sbr-pager-parent-events.json",
+).strip()
+SBR_PAGER_PARENT_MAX_AGE_SECONDS = max(
+    300.0,
+    float(os.getenv("SBR_PAGER_PARENT_MAX_AGE_SECONDS", "7200")),
+)
 SBR_PAGER_IGNORE_COMMANDS = {
     " ".join(value.casefold().split())
     for value in os.getenv(
@@ -70,6 +78,61 @@ _PHONE_PATTERN = re.compile(r"^\+[1-9]\d{6,14}$")
 _SENDING_2_PATTERN = re.compile(r"\bsending\s*2\b", re.IGNORECASE)
 _multipart_first_seen: dict[str, float] = {}
 _multipart_prealert_sent: set[str] = set()
+
+
+def _read_parent_state() -> dict:
+    if not SBR_PAGER_PARENT_STATE_FILE:
+        return {}
+    try:
+        with open(SBR_PAGER_PARENT_STATE_FILE, "r", encoding="utf-8") as handle:
+            value = json.load(handle)
+        return value if isinstance(value, dict) else {}
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_parent_state(value: dict) -> None:
+    if not SBR_PAGER_PARENT_STATE_FILE:
+        return
+    directory = os.path.dirname(SBR_PAGER_PARENT_STATE_FILE)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    temp_path = SBR_PAGER_PARENT_STATE_FILE + ".tmp"
+    with open(temp_path, "w", encoding="utf-8") as handle:
+        json.dump(value, handle, ensure_ascii=False, separators=(",", ":"))
+    os.replace(temp_path, SBR_PAGER_PARENT_STATE_FILE)
+
+
+def remember_parent_event(sender: str, event_key: str) -> None:
+    now = time.time()
+    state = _read_parent_state()
+    state = {
+        key: row
+        for key, row in state.items()
+        if isinstance(row, dict)
+        and now - float(row.get("updated_at", 0) or 0) <= SBR_PAGER_PARENT_MAX_AGE_SECONDS
+    }
+    state[sender] = {"event_key": event_key, "updated_at": now}
+    try:
+        _write_parent_state(state)
+    except OSError:
+        log.exception("Kunne ikke gemme SBR Pager parent-event state")
+
+
+def recent_parent_event_key(sender: str) -> str | None:
+    now = time.time()
+    state = _read_parent_state()
+    row = state.get(sender)
+    if not isinstance(row, dict):
+        return None
+    try:
+        age = now - float(row.get("updated_at", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if age < 0 or age > SBR_PAGER_PARENT_MAX_AGE_SECONDS:
+        return None
+    value = str(row.get("event_key") or "").strip()
+    return value[:128] or None
 
 
 def normalized_command(body: str) -> str:
@@ -124,6 +187,7 @@ def post_sbr_payload(
     raw_body: str | None = None,
     part_current: int | None = None,
     part_total: int | None = None,
+    parent_event_key: str | None = None,
 ):
     if not SBR_PAGER_INGEST_URL:
         return None
@@ -146,6 +210,7 @@ def post_sbr_payload(
         "rawBody": safe_raw_body,
         "partCurrent": part_current,
         "partTotal": part_total,
+        "parentEventKey": parent_event_key,
     }
     document.update({key: value for key, value in optional.items() if value is not None})
 
@@ -204,7 +269,9 @@ def post_to_sbr_pager(message: dict):
     formatted_body, raw_body, kind, current, total = complete_message_metadata(message)
     source_id = reader.source_message_id(message)
     group_key = str(message.get("_event_group_key") or source_id)
-    return post_sbr_payload(
+    is_sending_2 = kind.startswith("sending2")
+    parent_event_key = recent_parent_event_key(message["sender"]) if is_sending_2 else None
+    result = post_sbr_payload(
         sender=message["sender"],
         body=formatted_body,
         received_at=message["timestamp"],
@@ -215,7 +282,11 @@ def post_to_sbr_pager(message: dict):
         raw_body=raw_body,
         part_current=current,
         part_total=total,
+        parent_event_key=parent_event_key,
     )
+    if result is not None and result.get("accepted") and not is_sending_2:
+        remember_parent_event(message["sender"], group_key)
+    return result
 
 
 def prealert_source_id(part: sms_pdu.DecodedSmsPart) -> str:
@@ -306,9 +377,12 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
                 raw_body=first_text,
                 part_current=visible_parts,
                 part_total=total,
+                parent_event_key=recent_parent_event_key(sender) if is_sending_2 else None,
             )
             if result is not None:
                 _multipart_prealert_sent.add(state_key)
+                if result.get("accepted") and not is_sending_2:
+                    remember_parent_event(sender, state_key)
             if result is not None and not result.get("duplicate", False):
                 log.info(
                     "PRE-ALARM sendt efter %.1f s ventetid for multipart SMS fra %s, del=%s/%s, accepted=%s, sent=%s, failed=%s",
