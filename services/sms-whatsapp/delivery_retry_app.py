@@ -123,6 +123,8 @@ def attempt_delivery(
         message_id = base.send_whatsapp(delivery.recipient_phone, inbound.body)
         _mark_sent(delivery, message_id, state)
         db.session.commit()
+        if delivery.inbound_id is not None:
+            stations.events.mark_first_delivery(delivery.inbound_id, delivery.attempted_at)
         return True
     except Exception as exc:  # noqa: BLE001
         _queue_failure(delivery, exc)
