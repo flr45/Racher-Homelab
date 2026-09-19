@@ -310,7 +310,7 @@ def complete_message_metadata(
     elif is_auto_followup:
         kind = "followup_complete"
         parent_event_key = auto_parent_event_key
-        heading = "📟 *OPFØLGNING – KOMPLET*" if is_multipart else "📟 *OPFØLGNING*"
+        heading = "📟 *SENDING 2 – KOMPLET*" if is_multipart else "📟 *SENDING 2*"
     else:
         kind = "alarm_complete"
         parent_event_key = None
@@ -429,7 +429,7 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
             message_kind = "sending2_prealert"
             parent_event_key = recent_parent_event_key(sender)
         elif is_auto_followup:
-            heading = "📟 *OPFØLGNING MODTAGET*"
+            heading = "📟 *SENDING 2 MODTAGET*"
             message_kind = "followup_prealert"
             parent_event_key = auto_parent_event_key
         else:
