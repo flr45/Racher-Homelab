@@ -43,6 +43,45 @@ jobs:
           grep -q '/opt/SBR-Pager-Gateway/scripts/sbr-pager-watchdog.py' systemd/sbr-pager-watchdog.service
           grep -q 'OnUnitActiveSec=1min' systemd/sbr-pager-watchdog.timer
 
+      - name: Test OpenWA watchdog startup grace
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import os
+          from pathlib import Path
+
+          path = Path("scripts/sbr-pager-watchdog.py")
+          spec = importlib.util.spec_from_file_location("sbr_pager_watchdog", path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+
+          module.container_issue = lambda component: None
+
+          gateway = {
+              "status": "ok",
+              "gateway": {"database": "online"},
+              "modem": {"state": "online", "network": "+CREG: 0,5\r\n\r\nOK"},
+          }
+          pager = {
+              "status": "ok",
+              "database": "online",
+              "deliveryQueue": {"failed": 0, "oldestMinutes": None},
+              "openwa": {"state": "initializing", "detail": "SBR-PAGER"},
+          }
+
+          module.http_json = lambda url, timeout=8: gateway if ":8090/" in url else pager
+          module.container_age_seconds = lambda name: 30
+          os.environ["SBR_WATCHDOG_OPENWA_STARTUP_GRACE_SECONDS"] = "300"
+
+          checks, details = module.collect_checks()
+          assert checks["openwa"] is None, checks
+          assert details["openwaStartupGrace"]["active"] is True
+
+          module.container_age_seconds = lambda name: 301
+          checks, _ = module.collect_checks()
+          assert checks["openwa"] == "OpenWA session status=initializing", checks
+          PY
+
       - name: Build SBR Pager image and run embedded tests
         run: |
           docker build --pull \
