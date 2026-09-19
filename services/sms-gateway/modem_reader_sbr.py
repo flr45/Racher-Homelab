@@ -284,7 +284,7 @@ def post_to_sbr_pager(message: dict):
         part_total=total,
         parent_event_key=parent_event_key,
     )
-    if result is not None and not is_sending_2:
+    if result is not None and result.get("accepted") and not is_sending_2:
         remember_parent_event(message["sender"], group_key)
     return result
 
@@ -381,7 +381,7 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
             )
             if result is not None:
                 _multipart_prealert_sent.add(state_key)
-                if not is_sending_2:
+                if result.get("accepted") and not is_sending_2:
                     remember_parent_event(sender, state_key)
             if result is not None and not result.get("duplicate", False):
                 log.info(
