@@ -121,6 +121,31 @@ def docker_state(name: str) -> tuple[str, str]:
     return status or "unknown", health or "none"
 
 
+def container_age_seconds(name: str) -> float | None:
+    result = run(
+        [
+            "docker",
+            "inspect",
+            "--format",
+            "{{.State.StartedAt}}",
+            name,
+        ],
+        timeout=15,
+    )
+    if result.returncode != 0:
+        return None
+    raw = result.stdout.strip()
+    if not raw:
+        return None
+    try:
+        started = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - started.astimezone(timezone.utc)).total_seconds())
+
+
 def container_issue(component: str) -> str | None:
     status, health = docker_state(CONTAINERS[component])
     if status != "running":
@@ -195,7 +220,21 @@ def collect_checks() -> tuple[dict[str, str | None], dict]:
         openwa = pager_payload.get("openwa") or {}
         state = str(openwa.get("state", "unknown")).lower()
         if state != "ready":
-            checks["openwa"] = f"OpenWA session status={state}"
+            startup_grace = max(
+                0,
+                int(os.getenv("SBR_WATCHDOG_OPENWA_STARTUP_GRACE_SECONDS", "300")),
+            )
+            age = container_age_seconds(CONTAINERS["openwa"])
+            initializing = state in {"initializing", "starting"}
+            if initializing and age is not None and age < startup_grace:
+                details["openwaStartupGrace"] = {
+                    "active": True,
+                    "state": state,
+                    "containerAgeSeconds": int(age),
+                    "graceSeconds": startup_grace,
+                }
+            else:
+                checks["openwa"] = f"OpenWA session status={state}"
 
     return checks, details
 
