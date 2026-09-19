@@ -303,7 +303,7 @@ def run():
                 initialize(port)
                 retry_seconds = 2
                 log.info(
-                    "Huawei-modem online på %s; én proces ejer serieporten",
+                    "SMS-modem online på %s; én proces ejer serieporten",
                     MODEM_DEVICE,
                 )
 
