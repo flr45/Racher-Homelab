@@ -27,7 +27,7 @@ STATE_FILE = Path(
 COMPONENTS = ("gateway", "pager", "openwa")
 CONTAINERS = {
     "gateway": "racher-sms-gateway",
-    "pager": "racher-sms-whatsapp",
+    "pager": "sbr-sms-whatsapp",
     "openwa": "racher-sms-openwa",
 }
 _CREG_RE = re.compile(r"\+CREG:\s*\d+\s*,\s*(\d+)")
