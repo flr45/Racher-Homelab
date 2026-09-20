@@ -1,0 +1,12 @@
+[Unit]
+Description=Kontrollér SBR Pager modem hvert minut
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+RandomizedDelaySec=5
+Persistent=true
+Unit=sbr-modem-watchdog.service
+
+[Install]
+WantedBy=timers.target
