@@ -51,10 +51,19 @@ SBR_PAGER_INGEST_URL = os.getenv(
     "http://sms-whatsapp:8080/api/incoming",
 ).strip()
 SBR_PAGER_INGEST_TOKEN = os.getenv("SBR_PAGER_INGEST_TOKEN", "").strip()
-SBR_PAGER_PREALERT_DELAY_SECONDS = max(
+SBR_PAGER_PREALERT_DELAY_DEFAULT_SECONDS = max(
     0.0,
-    float(os.getenv("SBR_PAGER_PREALERT_DELAY_SECONDS", "10")),
+    min(120.0, float(os.getenv("SBR_PAGER_PREALERT_DELAY_SECONDS", "10"))),
 )
+SBR_PAGER_PREALERT_DELAY_REFRESH_SECONDS = max(
+    1.0,
+    float(os.getenv("SBR_PAGER_PREALERT_DELAY_REFRESH_SECONDS", "5")),
+)
+SBR_PAGER_PREALERT_DELAY_URL = os.getenv(
+    "SBR_PAGER_PREALERT_DELAY_URL",
+    SBR_PAGER_INGEST_URL.rsplit("/api/incoming", 1)[0]
+    + "/api/settings/prealert-delay",
+).strip()
 SBR_PAGER_PARENT_STATE_FILE = os.getenv(
     "SBR_PAGER_PARENT_STATE_FILE",
     "/data/sbr-pager-parent-events.json",
@@ -83,6 +92,48 @@ _STATION_PATTERN = re.compile(r"\(([ASLKRB])\)", re.IGNORECASE)
 _SENDING_2_PATTERN = re.compile(r"\bsending\s*2\b", re.IGNORECASE)
 _multipart_first_seen: dict[str, float] = {}
 _multipart_prealert_sent: set[str] = set()
+_prealert_delay_cache = SBR_PAGER_PREALERT_DELAY_DEFAULT_SECONDS
+_prealert_delay_checked_at = 0.0
+_prealert_delay_warning_at = 0.0
+
+
+def current_prealert_delay_seconds() -> float:
+    global _prealert_delay_cache, _prealert_delay_checked_at, _prealert_delay_warning_at
+
+    now = time.monotonic()
+    if now - _prealert_delay_checked_at < SBR_PAGER_PREALERT_DELAY_REFRESH_SECONDS:
+        return _prealert_delay_cache
+
+    _prealert_delay_checked_at = now
+    if not SBR_PAGER_PREALERT_DELAY_URL or not SBR_PAGER_INGEST_TOKEN:
+        return _prealert_delay_cache
+
+    request = urllib.request.Request(
+        SBR_PAGER_PREALERT_DELAY_URL,
+        headers={"Authorization": f"Bearer {SBR_PAGER_INGEST_TOKEN}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=1.5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        value = max(0.0, min(120.0, float(payload.get("seconds"))))
+        if value != _prealert_delay_cache:
+            log.info(
+                "SBR Pager pre-alarm delay opdateret dynamisk: %.1f -> %.1f sekunder",
+                _prealert_delay_cache,
+                value,
+            )
+        _prealert_delay_cache = value
+    except Exception as exc:  # noqa: BLE001
+        if now - _prealert_delay_warning_at >= 60:
+            log.warning(
+                "Kunne ikke hente dynamisk pre-alarm delay; bruger %.1f sekunder: %s",
+                _prealert_delay_cache,
+                exc,
+            )
+            _prealert_delay_warning_at = now
+
+    return _prealert_delay_cache
 
 
 def _read_parent_state() -> dict:
@@ -367,6 +418,7 @@ def prealert_source_id(part: sms_pdu.DecodedSmsPart) -> str:
 
 
 def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
+    delay_seconds = current_prealert_delay_seconds()
     groups: dict[tuple[str, int, int], list[sms_pdu.DecodedSmsPart]] = {}
 
     for part in parts:
@@ -404,7 +456,7 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
 
         first_seen = _multipart_first_seen.setdefault(state_key, time.monotonic())
         waited = max(0.0, time.monotonic() - first_seen)
-        if waited < SBR_PAGER_PREALERT_DELAY_SECONDS:
+        if waited < delay_seconds:
             continue
         if state_key in _multipart_prealert_sent:
             continue
@@ -549,8 +601,9 @@ reader.post_message = post_message
 
 if __name__ == "__main__":
     log.info(
-        "SBR Pager multipart pre-alert ventetid: %.1f sekunder; automatisk opfølgningsvindue: %.1f sekunder",
-        SBR_PAGER_PREALERT_DELAY_SECONDS,
+        "SBR Pager multipart pre-alert default: %.1f sekunder; dynamisk refresh: %.1f sekunder; automatisk opfølgningsvindue: %.1f sekunder",
+        SBR_PAGER_PREALERT_DELAY_DEFAULT_SECONDS,
+        SBR_PAGER_PREALERT_DELAY_REFRESH_SECONDS,
         SBR_PAGER_FOLLOWUP_WINDOW_SECONDS,
     )
     signal.signal(signal.SIGTERM, reader.stop)
