@@ -178,20 +178,23 @@ def collect_checks() -> tuple[dict[str, str | None], dict]:
             checks["gateway"] = f"SMS Gateway health svarer ikke: {exc}"
 
     if gateway_payload is not None and checks["gateway"] is None:
-        if gateway_payload.get("status") != "ok":
-            checks["gateway"] = f"SMS Gateway status={gateway_payload.get('status', 'ukendt')}"
-        else:
-            modem = gateway_payload.get("modem") or {}
-            gateway = gateway_payload.get("gateway") or {}
-            modem_state = str(modem.get("state", "unknown")).lower()
-            database_state = str(gateway.get("database", "unknown")).lower()
-            network = str(modem.get("network") or "")
-            if modem_state != "online":
-                checks["gateway"] = f"SMS-modem status={modem_state}"
-            elif network and not registered_network(network):
-                checks["gateway"] = "SMS-modem er ikke registreret på mobilnettet"
-            elif database_state != "online":
-                checks["gateway"] = f"SMS Gateway database={database_state}"
+        modem = gateway_payload.get("modem") or {}
+        gateway = gateway_payload.get("gateway") or {}
+        modem_state = str(modem.get("state", "unknown")).lower()
+        database_state = str(gateway.get("database", "unknown")).lower()
+        network = str(modem.get("network") or "")
+        gateway_status = str(gateway_payload.get("status", "unknown")).lower()
+
+        # Modemfejl markeres særskilt, så den generelle Pager-watchdog ikke
+        # genstarter SMS Gateway oven i den dedikerede modem-watchdog.
+        if modem_state != "online":
+            checks["gateway"] = f"SMS-modem status={modem_state}"
+        elif network and not registered_network(network):
+            checks["gateway"] = "SMS-modem er ikke registreret på mobilnettet"
+        elif database_state != "online":
+            checks["gateway"] = f"SMS Gateway database={database_state}"
+        elif gateway_status != "ok":
+            checks["gateway"] = f"SMS Gateway status={gateway_status}"
 
     pager_payload = None
     if checks["pager"] is None:
@@ -320,7 +323,10 @@ def compose_up(component: str, *, force_recreate: bool = False) -> str:
     return action
 
 
-def recover_component(component: str) -> str:
+def recover_component(component: str, issue: str | None = None) -> str:
+    if component == "gateway" and issue and issue.startswith("SMS-modem"):
+        return "modem-recovery delegeret til sbr-modem-watchdog"
+
     if component == "openwa":
         try:
             return recover_openwa_session()
@@ -514,7 +520,7 @@ def main() -> int:
         action = None
         if failures >= threshold and now - last_recovery >= cooldown:
             try:
-                action = recover_component(component)
+                action = recover_component(component, issue)
                 item["last_recovery_at"] = now
                 item["last_recovery_action"] = action
                 print(f"{component}: automatisk recovery udført: {action}")
