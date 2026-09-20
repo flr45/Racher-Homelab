@@ -309,10 +309,15 @@ class RicSmsRouter:
     def _post_outgoing(self, gateway_url: str, recipient: str, body: str) -> dict[str, Any]:
         endpoint = gateway_url.rstrip("/") + "/api/outgoing"
         payload = json.dumps({"recipient": recipient, "body": body}, ensure_ascii=False).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        token = os.getenv("PAGER_SMS_GATEWAY_TOKEN", "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
         outgoing = urllib.request.Request(
             endpoint,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         try:
