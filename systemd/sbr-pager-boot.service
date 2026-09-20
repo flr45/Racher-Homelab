@@ -1,0 +1,14 @@
+[Unit]
+Description=SBR Pager - start efter Docker og Tailscale
+Requires=docker.service
+After=docker.service tailscaled.service network-online.target
+Wants=tailscaled.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sbr-pager-boot
+RemainAfterExit=yes
+TimeoutStartSec=240
+
+[Install]
+WantedBy=multi-user.target
