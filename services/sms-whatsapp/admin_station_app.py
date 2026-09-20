@@ -139,7 +139,7 @@ ADMIN_USERS_PAGE = base.BASE_HTML.replace(
 
       <section class="editor-box alarm-box">
         <h3>Modtagerstationer</h3>
-        <div class="hint" style="margin:0 0 10px">Vælg hvilke stationers alarmer brugeren skal modtage. Dette påvirker ikke den administrative station ovenfor.</div>
+        <div class="hint" style="margin:0 0 10px">Vælg hvilke stationers alarmer brugeren skal modtage. Test er et særskilt opt-in og er ikke inkluderet i Alle. Dette påvirker ikke den administrative station ovenfor.</div>
         <form class="alarm-filter-form" method="post" action="{{ url_for('update_admin_user_alarm_stations', recipient_id=recipient.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="alarm-grid">
@@ -181,7 +181,7 @@ ADMIN_USERS_PAGE = base.BASE_HTML.replace(
         <div><label>Administrativ station</label><select name="station_id"><option value="">Uden station</option>{% for item in station_groups %}<option value="{{ item.station.id }}">{{ item.station.name }}</option>{% endfor %}</select></div>
         <button class="btn primary" type="submit">+ Tilføj bruger</button>
       </form>
-      <div class="hint">Nye brugere er aktive og modtager alle alarmstationer som udgangspunkt. Det kan ændres på brugerens kort bagefter.</div>
+      <div class="hint">Nye brugere er aktive og modtager alle almindelige alarmstationer som udgangspunkt. Test er ikke valgt automatisk.</div>
     </section>
 
     <section class="card span12">
