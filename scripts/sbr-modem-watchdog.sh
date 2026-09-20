@@ -154,6 +154,6 @@ fi
 
 RESULT="$(check_modem 2>&1 || true)"
 log "⚠️ Modemmet er stadig offline efter Gateway-genstart: $RESULT"
-log "ℹ️ Automatisk USB-reset er deaktiveret. Der foretages ikke hardware-specifik Huawei-recovery."
+log "ℹ️ Automatisk USB-reset er deaktiveret. Der foretages ikke model-specifik hardware-recovery."
 
 exit 0
