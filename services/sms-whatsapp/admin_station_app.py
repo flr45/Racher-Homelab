@@ -94,7 +94,7 @@ ADMIN_USERS_PAGE = base.BASE_HTML.replace(
 .user-card{border-bottom:1px solid #213044}.user-card:last-child{border-bottom:0}.user-card>summary{list-style:none;cursor:pointer;padding:14px 16px}.user-card>summary::-webkit-details-marker{display:none}.user-card[open]>summary{background:#0e1722}
 .user-summary{display:grid;grid-template-columns:minmax(170px,1.4fr) 110px minmax(150px,1fr) 34px;gap:12px;align-items:center}.user-name{font-weight:780}.user-phone{color:var(--muted);font-size:13px}.badge-active{color:#9cf0c4}.badge-inactive{color:#ffb0b0}.user-arrow{font-size:18px;color:var(--muted);transition:transform .18s ease;text-align:right}.user-card[open] .user-arrow{transform:rotate(180deg)}
 .user-editor{padding:0 16px 16px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.editor-box{background:#0d141e;border:1px solid var(--border);border-radius:13px;padding:14px}.editor-box h3{font-size:14px;margin:0 0 10px}.editor-row{display:grid;grid-template-columns:1fr 1fr;gap:9px}.editor-box label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}.editor-box input,.editor-box select,.create-user select{width:100%;background:#09111a;border:1px solid var(--border);color:var(--text);border-radius:10px;padding:9px 10px}.active-choice{display:flex!important;align-items:center;gap:8px;margin:10px 0 0!important;color:var(--text)!important;font-size:13px!important}.active-choice input{width:auto;margin:0}.editor-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:11px;flex-wrap:wrap}
-.alarm-box{grid-column:1/-1}.alarm-grid{display:grid;grid-template-columns:repeat(7,minmax(52px,1fr));gap:7px}.alarm-choice{display:flex!important;align-items:center;justify-content:center;gap:5px;background:#101a27;border:1px solid var(--border);border-radius:9px;padding:8px 5px;color:var(--text)!important;font-size:12px!important;cursor:pointer}.alarm-choice input{width:auto;margin:0}.alarm-summary{color:var(--muted);font-size:12px}.hint{margin-top:8px;color:var(--muted);font-size:13px}.danger-zone{grid-column:1/-1;border-color:#60313a;background:#24151a}.danger-layout{display:flex;justify-content:space-between;align-items:center;gap:15px}.danger-text{color:#ffb0b0;font-size:13px}
+.alarm-box{grid-column:1/-1}.alarm-grid{display:grid;grid-template-columns:repeat(8,minmax(52px,1fr));gap:7px}.alarm-choice{display:flex!important;align-items:center;justify-content:center;gap:5px;background:#101a27;border:1px solid var(--border);border-radius:9px;padding:8px 5px;color:var(--text)!important;font-size:12px!important;cursor:pointer}.alarm-choice input{width:auto;margin:0}.alarm-summary{color:var(--muted);font-size:12px}.hint{margin-top:8px;color:var(--muted);font-size:13px}.danger-zone{grid-column:1/-1;border-color:#60313a;background:#24151a}.danger-layout{display:flex;justify-content:space-between;align-items:center;gap:15px}.danger-text{color:#ffb0b0;font-size:13px}
 @media(max-width:900px){.user-summary{grid-template-columns:1fr auto}.user-summary .alarm-summary{grid-column:1/-1}.user-editor{grid-template-columns:1fr}.editor-row{grid-template-columns:1fr}.create-user,.station-create{grid-template-columns:1fr}.alarm-grid{grid-template-columns:repeat(4,1fr)}.alarm-box,.danger-zone{grid-column:auto}.danger-layout{align-items:flex-start;flex-direction:column}}
 </style>
 
@@ -105,7 +105,7 @@ ADMIN_USERS_PAGE = base.BASE_HTML.replace(
       <div class="user-summary">
         <div><div class="user-name">{{ recipient.name }}</div><div class="user-phone">{{ recipient.phone }}</div></div>
         <div class="{{ 'badge-active' if recipient.active else 'badge-inactive' }}">{{ '● Aktiv' if recipient.active else '● Inaktiv' }}</div>
-        <div class="alarm-summary">Modtager: <strong>{{ 'Alle stationer' if '*' in selected else (selected|sort|join(', ')) }}</strong></div>
+        <div class="alarm-summary">Modtager: <strong>{{ alarm_filter_labels[recipient.id] }}</strong></div>
         <div class="user-arrow">⌄</div>
       </div>
     </summary>
@@ -144,7 +144,7 @@ ADMIN_USERS_PAGE = base.BASE_HTML.replace(
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="alarm-grid">
             <label class="alarm-choice"><input type="checkbox" name="stations" value="*" {{ 'checked' if '*' in selected else '' }}>Alle</label>
-            {% for code in alarm_station_codes %}<label class="alarm-choice"><input type="checkbox" name="stations" value="{{ code }}" {{ 'checked' if code in selected else '' }}>{{ code }}</label>{% endfor %}
+            {% for code in alarm_station_codes %}<label class="alarm-choice"><input type="checkbox" name="stations" value="{{ code }}" {{ 'checked' if code in selected else '' }}>{{ 'Test' if code == 'TEST' else code }}</label>{% endfor %}
           </div>
           <div class="editor-actions"><button class="btn primary small" type="submit">Gem modtagerstationer</button></div>
         </form>
@@ -220,10 +220,20 @@ ADMIN_USERS_PAGE = base.BASE_HTML.replace(
 <script>
 document.querySelectorAll('.alarm-filter-form').forEach(function(form){
   const all = form.querySelector('input[value="*"]');
-  const specific = Array.from(form.querySelectorAll('input[name="stations"]')).filter(function(input){ return input.value !== '*'; });
+  const test = form.querySelector('input[value="TEST"]');
+  const normalSpecific = Array.from(form.querySelectorAll('input[name="stations"]')).filter(function(input){
+    return input.value !== '*' && input.value !== 'TEST';
+  });
   if (!all) return;
-  all.addEventListener('change', function(){ if (all.checked) specific.forEach(function(input){ input.checked = false; }); });
-  specific.forEach(function(input){ input.addEventListener('change', function(){ if (input.checked) all.checked = false; }); });
+  all.addEventListener('change', function(){
+    if (all.checked) normalSpecific.forEach(function(input){ input.checked = false; });
+  });
+  normalSpecific.forEach(function(input){
+    input.addEventListener('change', function(){ if (input.checked) all.checked = false; });
+  });
+  if (test) {
+    test.addEventListener('change', function(){ /* Test er et separat opt-in. */ });
+  }
 });
 </script>
 """,
@@ -269,12 +279,17 @@ app.view_functions["dashboard"] = dashboard_with_admin_user_link
 @base.login_required
 def admin_users_page():
     station_groups, unassigned = station_overview()
+    alarm_filters = alarm_filter_map()
     return render_template_string(
         ADMIN_USERS_PAGE,
         title="Brugere & stationer",
         station_groups=station_groups,
         unassigned=unassigned,
-        alarm_filters=alarm_filter_map(),
+        alarm_filters=alarm_filters,
+        alarm_filter_labels={
+            recipient_id: previous.selection_label(selected)
+            for recipient_id, selected in alarm_filters.items()
+        },
         alarm_station_codes=previous.STATIONS,
     )
 
@@ -419,16 +434,19 @@ def update_admin_user_alarm_stations(recipient_id: int):
     recipient = db.get_or_404(base.Recipient, recipient_id)
     selected = {value.upper() for value in request.form.getlist("stations")}
     selected &= set(previous.STATIONS) | {previous.ALL_STATIONS}
-    if previous.ALL_STATIONS in selected or not selected:
+    if not selected:
         selected = {previous.ALL_STATIONS}
+    elif previous.ALL_STATIONS in selected:
+        selected = {previous.ALL_STATIONS} | (
+            {previous.TEST_STATION} if previous.TEST_STATION in selected else set()
+        )
 
     previous.RecipientStationFilter.query.filter_by(recipient_id=recipient.id).delete()
     for station in sorted(selected):
         db.session.add(previous.RecipientStationFilter(recipient_id=recipient.id, station=station))
     db.session.commit()
 
-    label = "Alle stationer" if previous.ALL_STATIONS in selected else ", ".join(sorted(selected))
-    flash(f"Modtagerstationer for {recipient.name}: {label}.")
+    flash(f"Modtagerstationer for {recipient.name}: {previous.selection_label(selected)}.")
     return redirect(url_for("admin_users_page"))
 
 
