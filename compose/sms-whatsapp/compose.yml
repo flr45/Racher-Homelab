@@ -36,7 +36,9 @@ services:
     build:
       context: ../../services/sms-whatsapp
     container_name: sbr-sms-whatsapp
-    restart: unless-stopped
+    # Must not auto-start before the Tailscale bind IP exists. The dedicated
+    # sbr-pager-boot.service starts/recreates this container after the IP is ready.
+    restart: "no"
     depends_on:
       openwa:
         condition: service_started
