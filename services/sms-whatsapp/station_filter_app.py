@@ -1,7 +1,8 @@
 """Station subscriptions for SBR Pager WhatsApp recipients.
 
-Recipients can subscribe to A/S/L/K/R/B or ALL. Existing recipients default to
-ALL until a filter is explicitly saved. Sending 2 without a station marker is
+Recipients can subscribe to A/S/L/K/R/B, TEST or ALL. TEST is always explicit
+opt-in and is never included by ALL. Existing recipients default to ALL until a
+filter is explicitly saved. Sending 2 without a station marker is
 linked to the most recent alarm event from the same sender so follow-ups keep
 the same station routing.
 """
@@ -208,7 +209,7 @@ STATION_FILTER_FRAGMENT = r"""
 @media(max-width:880px){.station-grid{grid-template-columns:repeat(4,1fr)}.station-grid .btn{grid-column:span 4}}
 </style>
 <section class="card span12" id="stationsfilter">
-  <div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Stationsfilter</h2><p class="muted" style="margin:5px 0 0">Vælg hvilke stationer hver WhatsApp-modtager får. “Alle” sender alt.</p></div><a class="btn small" href="{{ url_for('station_filters_page') }}">Åbn separat</a></div>
+  <div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Stationsfilter</h2><p class="muted" style="margin:5px 0 0">Vælg hvilke stationer hver WhatsApp-modtager får. “Alle” dækker normale alarmer; Test skal vælges aktivt.</p></div><a class="btn small" href="{{ url_for('station_filters_page') }}">Åbn separat</a></div>
   {% for item in station_recipients %}
   <form class="recipient-filter" method="post" action="{{ url_for('update_recipient_stations', recipient_id=item.recipient.id) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -246,7 +247,7 @@ STATION_FILTER_PAGE = base.BASE_HTML.replace(
     "{% block content %}{% endblock %}",
     r"""
 <style>
-.station-grid{display:grid;grid-template-columns:repeat(7,minmax(48px,1fr)) auto;gap:8px;align-items:center}
+.station-grid{display:grid;grid-template-columns:repeat(8,minmax(48px,1fr)) auto;gap:8px;align-items:center}
 .station-choice{display:flex;align-items:center;justify-content:center;gap:5px;background:#0d141e;border:1px solid var(--border);border-radius:10px;padding:10px;cursor:pointer}
 .station-choice input{width:auto;margin:0}.recipient-filter{padding:16px 0;border-bottom:1px solid #213044}.recipient-filter:last-child{border-bottom:0}.recipient-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:10px}
 @media(max-width:880px){.station-grid{grid-template-columns:repeat(4,1fr)}.station-grid .btn{grid-column:span 4}}
@@ -260,7 +261,7 @@ STATION_FILTER_PAGE = base.BASE_HTML.replace(
     <div class="recipient-head"><strong>{{ item.recipient.name }}</strong><span class="muted">{{ item.recipient.phone }}</span></div>
     <div class="station-grid">
       <label class="station-choice"><input type="checkbox" name="stations" value="*" {{ 'checked' if '*' in item.selected else '' }}>Alle</label>
-      {% for code in stations %}<label class="station-choice"><input type="checkbox" name="stations" value="{{ code }}" {{ 'checked' if code in item.selected else '' }}>{{ code }}</label>{% endfor %}
+      {% for code in stations %}<label class="station-choice"><input type="checkbox" name="stations" value="{{ code }}" {{ 'checked' if code in item.selected else '' }}>{{ 'Test' if code == 'TEST' else code }}</label>{% endfor %}
       <button class="btn primary small" type="submit">Gem filter</button>
     </div>
   </form>
