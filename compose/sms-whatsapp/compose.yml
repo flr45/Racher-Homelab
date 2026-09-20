@@ -35,7 +35,7 @@ services:
   sms-whatsapp:
     build:
       context: ../../services/sms-whatsapp
-    container_name: racher-sms-whatsapp
+    container_name: sbr-sms-whatsapp
     restart: unless-stopped
     depends_on:
       openwa:
