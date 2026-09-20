@@ -2,15 +2,22 @@
 .env
 .env.*
 !.env.example
+.cloudflared.env
 *.pem
 *.key
+.openwa-*
+.sms-whatsapp-*
 
 # Backups and runtime data
 backups/*
 !backups/.gitkeep
+manual-backups/
+migration-archive/
 data/
 *.sqlite
 *.sqlite3
+*.bak-*
+*.backup-*
 
 # OS/editor
 .DS_Store

@@ -1,0 +1,15 @@
+[Unit]
+Description=SBR Pager modem watchdog
+Requires=docker.service
+After=docker.service sbr-pager-boot.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sbr-modem-watchdog
+TimeoutStartSec=90
+StateDirectory=sbr-modem-watchdog
+StateDirectoryMode=0755
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
