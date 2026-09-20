@@ -22,7 +22,7 @@ Polleren bruger den eksisterende `GET /api/messages` med `SMS_GATEWAY_API_TOKEN`
 
 ## OpenWA
 
-OpenWA skal være netværksmæssigt tilgængelig fra `racher-sms-whatsapp`. Standard er `http://openwa:2785/api`. API-key sendes i `X-API-Key`, og `SMS_WHATSAPP_OPENWA_SESSION_ID` skal være OpenWA-sessionens id/UUID.
+OpenWA skal være netværksmæssigt tilgængelig fra `sbr-sms-whatsapp`. Standard er `http://openwa:2785/api`. API-key sendes i `X-API-Key`, og `SMS_WHATSAPP_OPENWA_SESSION_ID` skal være OpenWA-sessionens id/UUID.
 
 Hvis din eksisterende OpenWA-container (`racher-pager-openwa`) kører i en anden Compose-stack, kan den uden at eksponere API'et offentligt kobles på det fælles backend-netværk:
 
