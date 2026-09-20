@@ -1,0 +1,22 @@
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: sbr-pager-cloudflared
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - proxy
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  proxy:
+    external: true
+  backend:
+    external: true
