@@ -287,7 +287,7 @@ def recover_openwa_session() -> str:
     return f"OpenWA session start {session_id[:8]}…"
 
 
-def compose_up(component: str) -> str:
+def compose_up(component: str, *, force_recreate: bool = False) -> str:
     if component == "gateway":
         compose_file = "compose/sms-gateway/docker-compose.yml"
         service = "sms-gateway"
@@ -305,13 +305,19 @@ def compose_up(component: str) -> str:
         "up",
         "-d",
         "--no-deps",
-        service,
     ]
+    if force_recreate:
+        command.append("--force-recreate")
+    command.append(service)
+
     result = run(command, timeout=90)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()[-600:]
         raise RuntimeError(detail or f"compose up fejlede for {component}")
-    return f"compose up {service}"
+    action = f"compose up {service}"
+    if force_recreate:
+        action += " --force-recreate"
+    return action
 
 
 def recover_component(component: str) -> str:
@@ -325,6 +331,14 @@ def recover_component(component: str) -> str:
             if result.returncode == 0:
                 return f"docker restart {name} (session-start fejlede: {log_detail[:180]})"
             return compose_up(component)
+
+    # Pagerens host-port kan fejle under boot, hvis Tailscale-IP'en endnu
+    # ikke kan bindes. Et almindeligt docker restart kan efterlade den
+    # eksisterende container uden brugbart Docker-network endpoint.
+    # Recreate derfor pager-containeren, så port-binding og endpoints
+    # etableres på ny.
+    if component == "pager":
+        return compose_up(component, force_recreate=True)
 
     name = CONTAINERS[component]
     result = run(["docker", "restart", name], timeout=90)
