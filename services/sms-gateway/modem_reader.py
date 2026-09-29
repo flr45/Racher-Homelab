@@ -223,12 +223,18 @@ def send_outgoing_sms(port, recipient, body):
                 f"Modemmet afviste SMS-modtageren: {prompt.strip()}"
             )
 
-        port.write(encode_gsm0338(body) + b"\x1a")
-        port.flush()
+        payload = encode_gsm0338(body) + b"\x1a"
         deadline = time.monotonic() + SMS_SEND_TIMEOUT_SECONDS
         response = bytearray()
 
         try:
+            # From the first write onward the outcome is externally ambiguous:
+            # the UART/USB stack can fail after some or all bytes (including
+            # Ctrl-Z) reached the modem. Never classify such a failure as a safe
+            # retry merely because Python did not receive +CMGS/OK.
+            port.write(payload)
+            port.flush()
+
             while time.monotonic() < deadline:
                 chunk = port.read(port.in_waiting or 1)
                 if chunk:
@@ -247,6 +253,8 @@ def send_outgoing_sms(port, recipient, body):
                         # The modem explicitly rejected the submission, so it is
                         # safe for the queue policy to retry within its attempt cap.
                         raise RuntimeError(text.strip())
+        except RuntimeError:
+            raise
         except (serial.SerialException, OSError) as exc:
             raise AmbiguousSmsSendError(
                 f"Serieforbindelsen forsvandt efter SMS-data blev afleveret til modemmet: {exc}"
