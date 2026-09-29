@@ -222,7 +222,7 @@ class PushoverClient:
         if not app_token or not user_key:
             raise ValueError("Pushover app token eller user key mangler")
         requested_title = str(title or "").strip()
-        display_title = "Lind Foto" if requested_title in {"", "Racher Pager Gateway"} else requested_title
+        display_title = requested_title or "Racher Pager Gateway"
         response = requests.post(
             self.endpoint,
             data={"token": app_token, "user": user_key, "title": display_title, "message": public_message(message)},
