@@ -78,6 +78,7 @@ class RicSmsRemoteTests(unittest.TestCase):
         self.assertIs(core.ric_sms_router, router)
         register_routes.assert_called_once_with(core, router, auth_required)
         router.recover_reserved.assert_called_once_with()
+        router.start_status_monitor.assert_called_once_with()
 
     def test_remote_transport_sends_bearer_token(self):
         router = AuthenticatedRicSmsRouter(self.core)
