@@ -392,7 +392,14 @@
   if (window.location.hash === '#politi') {
     setTimeout(() => document.querySelector('[data-tab="politi"]')?.click(), 0);
   }
+  window.addEventListener('pager:refresh-politi', () => {
+    if (!document.hidden && document.querySelector('#politi')?.classList.contains('active')) {
+      refreshPolitiUpdates().catch(console.error);
+    }
+  });
   setInterval(() => {
-    if (document.querySelector('#politi')?.classList.contains('active')) refreshPolitiUpdates().catch(console.error);
+    if (!document.hidden && document.querySelector('#politi')?.classList.contains('active')) {
+      refreshPolitiUpdates().catch(console.error);
+    }
   }, 60000);
 })();

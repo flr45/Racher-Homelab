@@ -207,6 +207,7 @@ async function activateTab(button, {updateHash = true} = {}) {
   button.scrollIntoView({block: 'nearest', inline: 'nearest'});
 
   try {
+    if (name === 'alarms') await refreshAlarms();
     if (name === 'history') await refreshHistory();
     if (name === 'system' && isAdmin) { await refreshAdminStatus(); await refreshAudit(); }
     if (name === 'users' && isAdmin) await refreshUsers();
@@ -407,6 +408,8 @@ async function refreshAudit() {
 async function refreshAdminStatus() {
   if (!isAdmin) return;
   const data = await api('/api/status');
+  window.pagerLastStatus = data;
+  window.dispatchEvent(new CustomEvent('pager:status', {detail: data}));
   $('#message-count').textContent = data.message_count;
   $('#uptime').textContent = formatUptime(data.uptime_seconds);
   $('#hostname').textContent = data.hostname;
@@ -584,12 +587,40 @@ $('#test-pushover')?.addEventListener('click', async () => {
 
 // ---- Startup -------------------------------------------------------------------
 
+function activePanelName() {
+  return document.querySelector('.panel.active')?.id || '';
+}
+
+async function refreshVisiblePanel() {
+  if (document.hidden) return;
+  const active = activePanelName();
+  if (active === 'alarms') await refreshAlarms();
+  if (active === 'system' && isAdmin) await refreshAdminStatus();
+  if (active === 'politi') window.dispatchEvent(new CustomEvent('pager:refresh-politi'));
+}
+
 (async function start() {
   try {
     if (isAdmin) installAlarmFilterUi();
-    await refreshAlarms(); await refreshPushState();
-    if (isAdmin) { await refreshAdminStatus(); await refreshAudit(); }
+    await refreshAlarms();
+    await refreshPushState();
   } catch (error) { console.error(error); }
-  setInterval(() => refreshAlarms().catch(console.error), 3000);
-  if (isAdmin) setInterval(() => refreshAdminStatus().catch(console.error), 10000);
+
+  setInterval(() => {
+    if (!document.hidden && activePanelName() === 'alarms') {
+      refreshAlarms().catch(console.error);
+    }
+  }, 3000);
+
+  if (isAdmin) {
+    setInterval(() => {
+      if (!document.hidden && activePanelName() === 'system') {
+        refreshAdminStatus().catch(console.error);
+      }
+    }, 10000);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshVisiblePanel().catch(console.error);
+  });
 })();
