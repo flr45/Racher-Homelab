@@ -15,6 +15,18 @@ class NotificationWrapperOrderTests(unittest.TestCase):
             "RIC SMS must be installed after operations so Pushover-disabled alarms can still trigger SMS",
         )
 
+    def test_whatsapp_wraps_final_notification_layer(self):
+        source = (Path(__file__).with_name("wsgi.py")).read_text(encoding="utf-8")
+        operations = source.index("operations = install_operations(core)")
+        ric_sms = source.index("ric_sms = install_ric_sms(core, core.auth_required)")
+        whatsapp = source.index("whatsapp = install_whatsapp(core)")
+        self.assertLess(operations, ric_sms)
+        self.assertLess(
+            ric_sms,
+            whatsapp,
+            "WhatsApp must wrap the final notification hook so burst-consensus alarms are delivered",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
