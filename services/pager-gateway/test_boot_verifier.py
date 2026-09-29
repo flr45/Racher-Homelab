@@ -50,13 +50,17 @@ class BootVerifierTests(unittest.TestCase):
             )
 
     def test_end_to_end_boot_check_can_become_ready(self):
-        def fake_http(url, timeout=0):
+        def fake_http(url, timeout=0, headers=None):
             if url.endswith("/healthz"):
                 return {"ok": True}
+            if url.endswith("/api/auth-check"):
+                self.assertEqual(headers, {"Authorization": "Bearer bridge-secret"})
+                return {"ok": True, "auth_configured": True}
             return {"status": "ok", "modem": {"state": "online"}}
 
         with patch.object(boot_verifier, "DB_PATH", self.db), \
              patch.object(boot_verifier, "SMS_GATEWAY_URL", "http://100.111.28.12:8090"), \
+             patch.object(boot_verifier, "SMS_GATEWAY_TOKEN", "bridge-secret"), \
              patch.object(boot_verifier, "service_active", return_value=True), \
              patch.object(boot_verifier, "http_json", side_effect=fake_http), \
              patch.object(boot_verifier, "tailscale_status", return_value={"installed": True, "service": "active", "ip": "100.81.169.71"}):
@@ -67,6 +71,7 @@ class BootVerifierTests(unittest.TestCase):
         self.assertTrue(result["end_to_end_ready"])
         self.assertTrue(result["checks"]["tailscale"])
         self.assertTrue(result["checks"]["gsm_modem"])
+        self.assertTrue(result["checks"]["sms_auth"])
 
     def test_boot_check_uses_sms_gateway_saved_by_admin_ui(self):
         with sqlite3.connect(self.db) as conn:
@@ -79,14 +84,18 @@ class BootVerifierTests(unittest.TestCase):
             )
 
         requested = []
-        def fake_http(url, timeout=0):
+        def fake_http(url, timeout=0, headers=None):
             requested.append(url)
             if url.endswith("/healthz"):
                 return {"ok": True}
+            if url.endswith("/api/auth-check"):
+                self.assertEqual(headers, {"Authorization": "Bearer bridge-secret"})
+                return {"ok": True, "auth_configured": True}
             return {"status": "ok", "modem": {"state": "online"}}
 
         with patch.object(boot_verifier, "DB_PATH", self.db), \
              patch.object(boot_verifier, "SMS_GATEWAY_URL", ""), \
+             patch.object(boot_verifier, "SMS_GATEWAY_TOKEN", "bridge-secret"), \
              patch.object(boot_verifier, "service_active", return_value=True), \
              patch.object(boot_verifier, "http_json", side_effect=fake_http), \
              patch.object(boot_verifier, "tailscale_status", return_value={"installed": True, "service": "active", "ip": "100.81.169.71"}):
@@ -97,14 +106,36 @@ class BootVerifierTests(unittest.TestCase):
         self.assertTrue(result["remote_ready"])
         self.assertTrue(result["end_to_end_ready"])
 
+    def test_rejected_sms_token_keeps_remote_chain_not_ready(self):
+        def fake_http(url, timeout=0, headers=None):
+            if url.endswith("/healthz"):
+                return {"ok": True}
+            if url.endswith("/api/auth-check"):
+                return None
+            return {"status": "ok", "modem": {"state": "online"}}
+
+        with patch.object(boot_verifier, "DB_PATH", self.db), \
+             patch.object(boot_verifier, "SMS_GATEWAY_URL", "http://100.111.28.12:8090"), \
+             patch.object(boot_verifier, "SMS_GATEWAY_TOKEN", "wrong-secret"), \
+             patch.object(boot_verifier, "service_active", return_value=True), \
+             patch.object(boot_verifier, "http_json", side_effect=fake_http), \
+             patch.object(boot_verifier, "tailscale_status", return_value={"installed": True, "service": "active", "ip": "100.81.169.71"}):
+            result = boot_verifier.check_once()
+
+        self.assertTrue(result["local_ready"])
+        self.assertFalse(result["remote_ready"])
+        self.assertFalse(result["checks"]["sms_auth"])
+        self.assertFalse(result["sms_auth_ok"])
+
     def test_transient_sms_timeout_does_not_crash_check(self):
-        def fake_http(url, timeout=0):
+        def fake_http(url, timeout=0, headers=None):
             if url.endswith("/healthz"):
                 return {"ok": True}
             return None
 
         with patch.object(boot_verifier, "DB_PATH", self.db), \
              patch.object(boot_verifier, "SMS_GATEWAY_URL", "http://100.111.28.12:8090"), \
+             patch.object(boot_verifier, "SMS_GATEWAY_TOKEN", "bridge-secret"), \
              patch.object(boot_verifier, "service_active", return_value=True), \
              patch.object(boot_verifier, "http_json", side_effect=fake_http), \
              patch.object(boot_verifier, "tailscale_status", return_value={"installed": True, "service": "active", "ip": "100.81.169.71"}):

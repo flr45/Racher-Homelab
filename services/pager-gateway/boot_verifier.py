@@ -18,6 +18,7 @@ from typing import Any
 DB_PATH = os.getenv("PAGER_DB_PATH", "/var/lib/racher-pager/pager.db")
 GATEWAY_PORT = int(os.getenv("PAGER_GATEWAY_PORT", "8088"))
 SMS_GATEWAY_URL = str(os.getenv("PAGER_SMS_GATEWAY_URL", "") or "").strip().rstrip("/")
+SMS_GATEWAY_TOKEN = str(os.getenv("PAGER_SMS_GATEWAY_TOKEN", "") or "").strip()
 ATTEMPTS = max(1, min(int(os.getenv("PAGER_BOOT_VERIFY_ATTEMPTS", "18")), 60))
 INTERVAL = max(1, min(int(os.getenv("PAGER_BOOT_VERIFY_INTERVAL_SECONDS", "5")), 30))
 
@@ -39,8 +40,12 @@ def service_active(name: str) -> bool:
     return code == 0 and output == "active"
 
 
-def http_json(url: str, timeout: float = 2.5) -> dict[str, Any] | None:
-    request = urllib.request.Request(url, method="GET")
+def http_json(
+    url: str,
+    timeout: float = 2.5,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any] | None:
+    request = urllib.request.Request(url, headers=headers or {}, method="GET")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             if response.status != 200:
@@ -107,6 +112,20 @@ def check_once() -> dict[str, Any]:
     gateway = http_json(f"http://127.0.0.1:{GATEWAY_PORT}/healthz", timeout=2.0)
     sms_gateway_url = configured_sms_gateway_url()
     sms = http_json(sms_gateway_url + "/health", timeout=2.5) if sms_gateway_url else None
+    auth_headers = (
+        {"Authorization": f"Bearer {SMS_GATEWAY_TOKEN}"}
+        if SMS_GATEWAY_TOKEN
+        else {}
+    )
+    sms_auth = (
+        http_json(
+            sms_gateway_url + "/api/auth-check",
+            timeout=2.5,
+            headers=auth_headers,
+        )
+        if sms_gateway_url
+        else None
+    )
     modem = sms.get("modem", {}) if isinstance(sms, dict) else {}
     if not isinstance(modem, dict):
         modem = {}
@@ -118,6 +137,7 @@ def check_once() -> dict[str, Any]:
         "fsk_connected": runtime.get("fsk_usb_connected") == "1",
         "fsk_in_use": runtime.get("fsk_usb_pdl_in_use") == "1",
         "sms_gateway": bool(sms and str(sms.get("status") or "").lower() == "ok"),
+        "sms_auth": bool(sms_auth and sms_auth.get("ok")),
         "gsm_modem": str(modem.get("state") or "").lower() == "online",
     }
     tailscale = tailscale_status()
@@ -131,7 +151,10 @@ def check_once() -> dict[str, Any]:
     )
     remote_required = bool(sms_gateway_url)
     remote_ready = (not remote_required) or (
-        checks["tailscale"] and checks["sms_gateway"] and checks["gsm_modem"]
+        checks["tailscale"]
+        and checks["sms_gateway"]
+        and checks["sms_auth"]
+        and checks["gsm_modem"]
     )
     return {
         "local_ready": local_ready,
@@ -141,6 +164,8 @@ def check_once() -> dict[str, Any]:
         "tailscale": tailscale,
         "sms_configured": remote_required,
         "sms_status": str(sms.get("status") or "offline") if isinstance(sms, dict) else "offline",
+        "sms_auth_ok": bool(sms_auth and sms_auth.get("ok")),
+        "sms_token_configured": bool(SMS_GATEWAY_TOKEN),
         "gsm_state": str(modem.get("state") or "unknown"),
     }
 
