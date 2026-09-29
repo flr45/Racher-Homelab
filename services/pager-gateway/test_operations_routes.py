@@ -107,6 +107,18 @@ class OperationsRoutesTests(unittest.TestCase):
                 assert delivery['failed_count'] == 1, delivery
                 assert 'Sekundær' in delivery['last_error'], delivery
 
+                with client.session_transaction() as sess:
+                    csrf = sess['csrf_token']
+                managed_test = client.post(
+                    '/api/system/test-delivery',
+                    json={}, headers={'X-CSRF-Token': csrf},
+                )
+                assert managed_test.status_code == 200
+                managed_payload = managed_test.get_json()
+                assert managed_payload['ok'] is False, managed_payload
+                assert managed_payload['checks']['pushover']['status'] == 'partial'
+                assert '1/2 sendt' in managed_payload['checks']['pushover']['detail']
+
                 # Delivery telemetry must decorate the existing rolling seven-day
                 # feed instead of replacing it with Operations' two-hour window.
                 six_days_ago = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
