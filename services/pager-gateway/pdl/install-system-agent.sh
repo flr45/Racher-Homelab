@@ -9,6 +9,8 @@ INTEGRATION_DIR="${PAGER_INTEGRATION_DIR:-/opt/racher-pager/integration}"
 NETWORK_DIR="${PAGER_NETWORK_INSTALL_DIR:-/opt/racher-pager/network}"
 BACKUP_DIR="${PAGER_BACKUP_DIR:-/var/backups/racher-pager}"
 RUNTIME_REPO="${PAGER_RUNTIME_REPO:-/opt/racher-pager/runtime-repo}"
+GATEWAY_ENV="${PAGER_GATEWAY_ENV:-/etc/racher-pager/gateway.env}"
+TMPFILES_PATH="/etc/tmpfiles.d/racher-pager-runtime.conf"
 UNIT_PATH="/etc/systemd/system/racher-pager-system-agent.service"
 FSK_UNIT_PATH="/etc/systemd/system/racher-pager-fsk-status.service"
 FSK_TIMER_PATH="/etc/systemd/system/racher-pager-fsk-status.timer"
@@ -30,13 +32,113 @@ for required in backup-pager.sh restore-pager.sh update-pager.sh rollback-pager.
   [[ -f "$SERVICE_DIR/pdl/$required" ]] || { echo "Mangler $SERVICE_DIR/pdl/$required" >&2; exit 1; }
 done
 
-sudo mkdir -p "$DATA_DIR" "$AGENT_DIR" "$INTEGRATION_DIR" "$NETWORK_DIR" "$BACKUP_DIR" "$DATA_DIR/update" "$WATCHDOG_RUNTIME_DIR"
+# Persisted runtime identity is the source of truth for every component that
+# writes shared pager state. Legacy appliances may not have these keys yet, so
+# recover them from the non-root PDL service or an already-correct state owner.
+if [[ -f "$GATEWAY_ENV" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$GATEWAY_ENV"
+  set +a
+fi
+
+resolve_runtime_identity() {
+  local uid="${PAGER_RUNTIME_UID:-}"
+  local gid="${PAGER_RUNTIME_GID:-}"
+  local pdl_user=""
+  local state_uid=""
+  local state_gid=""
+
+  if [[ -z "$uid" || -z "$gid" || "$uid" == "0" || "$gid" == "0" ]]; then
+    pdl_user="$(systemctl show -p User --value racher-pdl.service 2>/dev/null || true)"
+    if [[ -n "$pdl_user" && "$pdl_user" != "root" ]] && id "$pdl_user" >/dev/null 2>&1; then
+      uid="$(id -u "$pdl_user")"
+      gid="$(id -g "$pdl_user")"
+    fi
+  fi
+
+  if [[ ( -z "$uid" || -z "$gid" || "$uid" == "0" || "$gid" == "0" ) && -d "$DATA_DIR" ]]; then
+    state_uid="$(stat -c '%u' "$DATA_DIR" 2>/dev/null || true)"
+    state_gid="$(stat -c '%g' "$DATA_DIR" 2>/dev/null || true)"
+    if [[ -n "$state_uid" && -n "$state_gid" && "$state_uid" != "0" && "$state_gid" != "0" ]]; then
+      uid="$state_uid"
+      gid="$state_gid"
+    fi
+  fi
+
+  if [[ ( -z "$uid" || -z "$gid" || "$uid" == "0" || "$gid" == "0" ) && -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    uid="$(id -u "$SUDO_USER")"
+    gid="$(id -g "$SUDO_USER")"
+  fi
+
+  if [[ -z "$uid" || -z "$gid" || "$uid" == "0" || "$gid" == "0" ]]; then
+    echo "Kan ikke fastslå en sikker non-root runtime-bruger til Racher Pager." >&2
+    exit 1
+  fi
+
+  RUNTIME_UID="$uid"
+  RUNTIME_GID="$gid"
+}
+resolve_runtime_identity
+
+persist_runtime_identity() {
+  sudo mkdir -p "$(dirname "$GATEWAY_ENV")"
+  sudo touch "$GATEWAY_ENV"
+  sudo chmod 0640 "$GATEWAY_ENV"
+  for entry in "PAGER_RUNTIME_UID=$RUNTIME_UID" "PAGER_RUNTIME_GID=$RUNTIME_GID"; do
+    key="${entry%%=*}"
+    if sudo grep -q "^$key=" "$GATEWAY_ENV" 2>/dev/null; then
+      sudo sed -i "s/^$key=.*/$entry/" "$GATEWAY_ENV"
+    else
+      printf '%s\n' "$entry" | sudo tee -a "$GATEWAY_ENV" >/dev/null
+    fi
+  done
+}
+persist_runtime_identity
+
+sudo mkdir -p "$DATA_DIR" "$DATA_DIR/pdl" "$AGENT_DIR" "$INTEGRATION_DIR" "$NETWORK_DIR" "$BACKUP_DIR" "$DATA_DIR/update" "$WATCHDOG_RUNTIME_DIR"
 sudo touch "$DATA_DIR/pager.db"
-# SQLite is shared between the unprivileged web container and root-owned host
-# status agents. Keep the state directory setgid + group-writable so WAL/SHM files
-# created by either side inherit the appliance user's group instead of becoming
-# inaccessible after a checkpoint/restart boundary.
+
+# SQLite, PDL and the web container share this state. Repair the exact writable
+# runtime paths before services are restarted; this also migrates appliances from
+# older root-running gateway releases without recursively changing backup/update
+# artifacts that are intentionally root-owned.
+sudo chown "$RUNTIME_UID:$RUNTIME_GID" "$DATA_DIR" "$DATA_DIR/pdl" "$DATA_DIR/pager.db"
 sudo chmod 2770 "$DATA_DIR"
+sudo chmod 0750 "$DATA_DIR/pdl"
+sudo chmod 0640 "$DATA_DIR/pager.db"
+for relative in pager.db-wal pager.db-shm pdl.log pdl.log.racher-cursor pdl/pdl.ini session-secret vapid-private.pem; do
+  runtime_path="$DATA_DIR/$relative"
+  if [[ -L "$runtime_path" ]]; then
+    echo "Afviser usikker symlink i pager-state: $runtime_path" >&2
+    exit 1
+  fi
+  if [[ -f "$runtime_path" ]]; then
+    sudo chown "$RUNTIME_UID:$RUNTIME_GID" "$runtime_path"
+    case "$relative" in
+      session-secret|vapid-private.pem) sudo chmod 0600 "$runtime_path" ;;
+      *) sudo chmod 0640 "$runtime_path" ;;
+    esac
+  fi
+done
+
+# Re-assert the runtime ownership during every boot before long-running services
+# start. This makes a stray root-owned state file recoverable without SSH surgery.
+sudo tee "$TMPFILES_PATH" >/dev/null <<EOF
+d $DATA_DIR 2770 $RUNTIME_UID $RUNTIME_GID - -
+d $DATA_DIR/pdl 0750 $RUNTIME_UID $RUNTIME_GID - -
+z $DATA_DIR/pager.db 0640 $RUNTIME_UID $RUNTIME_GID - -
+z $DATA_DIR/pager.db-wal 0640 $RUNTIME_UID $RUNTIME_GID - -
+z $DATA_DIR/pager.db-shm 0640 $RUNTIME_UID $RUNTIME_GID - -
+z $DATA_DIR/pdl.log 0640 $RUNTIME_UID $RUNTIME_GID - -
+z $DATA_DIR/pdl.log.racher-cursor 0640 $RUNTIME_UID $RUNTIME_GID - -
+z $DATA_DIR/pdl/pdl.ini 0640 $RUNTIME_UID $RUNTIME_GID - -
+z $DATA_DIR/session-secret 0600 $RUNTIME_UID $RUNTIME_GID - -
+z $DATA_DIR/vapid-private.pem 0600 $RUNTIME_UID $RUNTIME_GID - -
+EOF
+sudo chmod 0644 "$TMPFILES_PATH"
+sudo systemd-tmpfiles --create "$TMPFILES_PATH"
+
 sudo chmod 0700 "$BACKUP_DIR"
 sudo chmod 0755 "$WATCHDOG_RUNTIME_DIR"
 
@@ -261,6 +363,7 @@ echo "Helpers:         $INTEGRATION_DIR"
 echo "FSK probe:       racher-pager-fsk-status.timer (10 sek.)"
 echo "Gateway watchdog: racher-pager-gateway-watchdog.timer (20 sek., 3 fejl)"
 echo "PDL logrotation:  daglig/20 MB, 30 rotationer"
+echo "Runtime identity: uid=$RUNTIME_UID gid=$RUNTIME_GID (boot-guard aktiv)"
 echo "Reception diag:  $INTEGRATION_DIR/diagnose-reception.sh"
 echo "Pi watchdog:     $HARDWARE_WATCHDOG_STATUS"
 echo "Status: sudo systemctl status racher-pager-system-agent --no-pager"
