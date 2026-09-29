@@ -110,6 +110,85 @@ class RicSmsTests(unittest.TestCase):
         self.assertEqual(delivery["status"], "queued")
         self.assertEqual(set(delivery["matched_rics"].split(",")), {"0006210", "0006240"})
 
+
+    def test_restart_recovers_pending_sms_before_external_submission(self):
+        core = SimpleNamespace(
+            DB_PATH=self.db,
+            storage=self.storage,
+            maybe_notify_pushover=lambda message_id, event: None,
+            app=SimpleNamespace(logger=_Logger()),
+        )
+        router = RicSmsRouter(core)
+        router.store.update_config(enabled=True, gateway_url="http://sms-gateway:8090")
+        message_id = self.storage.add_message({
+            "received_at": "2026-09-29T06:00:00+00:00",
+            "protocol": "POCSAG",
+            "baud": 1200,
+            "ric": "0006240",
+            "station": "Ringsted",
+            "message": "BRANDALARM Ringsted",
+            "raw_line": "raw",
+            "source": "pdl-file",
+            "delivery_eligible": True,
+        })
+        self.assertTrue(
+            router.store.reserve_delivery(message_id, "+4512345678", {"0006240"})
+        )
+        sent = []
+        router._post_outgoing = lambda gateway_url, recipient, body: sent.append(
+            (gateway_url, recipient, body)
+        ) or {"id": 101, "status": "pending"}
+
+        original_thread = ric_sms.threading.Thread
+        ric_sms.threading.Thread = _ImmediateThread
+        try:
+            result = router.recover_after_restart()
+        finally:
+            ric_sms.threading.Thread = original_thread
+
+        self.assertEqual(result["recovered"], 1)
+        self.assertEqual(result["uncertain"], 0)
+        self.assertEqual(len(sent), 1)
+        delivery = router.store.list_deliveries()[0]
+        self.assertEqual(delivery["status"], "queued")
+        self.assertEqual(delivery["gateway_message_id"], "101")
+
+    def test_restart_never_auto_retries_uncertain_inflight_sms(self):
+        core = SimpleNamespace(
+            DB_PATH=self.db,
+            storage=self.storage,
+            maybe_notify_pushover=lambda message_id, event: None,
+            app=SimpleNamespace(logger=_Logger()),
+        )
+        router = RicSmsRouter(core)
+        router.store.update_config(enabled=True, gateway_url="http://sms-gateway:8090")
+        message_id = self.storage.add_message({
+            "received_at": "2026-09-29T06:00:00+00:00",
+            "protocol": "POCSAG",
+            "baud": 1200,
+            "ric": "0006240",
+            "station": "Ringsted",
+            "message": "BRANDALARM Ringsted",
+            "raw_line": "raw",
+            "source": "pdl-file",
+            "delivery_eligible": True,
+        })
+        self.assertTrue(
+            router.store.reserve_delivery(message_id, "+4512345678", {"0006240"})
+        )
+        self.assertTrue(router.store.mark_sending(message_id, "+4512345678"))
+        router._post_outgoing = lambda *_args, **_kwargs: self.fail(
+            "uncertain sending rows must not be submitted again automatically"
+        )
+
+        result = router.recover_after_restart()
+
+        self.assertEqual(result["recovered"], 0)
+        self.assertEqual(result["uncertain"], 1)
+        delivery = router.store.list_deliveries()[0]
+        self.assertEqual(delivery["status"], "uncertain")
+        self.assertIn("undgå dublet-SMS", delivery["error"])
+
     def test_simulator_never_sends_sms(self):
         core = SimpleNamespace(
             DB_PATH=self.db,

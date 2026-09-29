@@ -251,6 +251,26 @@ class RicSmsStore:
             )
             conn.commit()
 
+    def mark_sending(self, message_id: int, recipient: str) -> bool:
+        with self._lock, self.connect() as conn:
+            cur = conn.execute(
+                """UPDATE ric_sms_deliveries
+                   SET status='sending', error=NULL, updated_at=?
+                   WHERE message_id=? AND recipient=? AND status='pending'""",
+                (_now(), int(message_id), recipient),
+            )
+            conn.commit()
+        return cur.rowcount > 0
+
+    def interrupted_deliveries(self) -> list[dict[str, Any]]:
+        with self._lock, self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM ric_sms_deliveries
+                   WHERE status IN ('pending','sending')
+                   ORDER BY id ASC"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_deliveries(self, limit: Any = 50) -> list[dict[str, Any]]:
         try:
             clean_limit = int(limit)
@@ -336,6 +356,8 @@ class RicSmsRouter:
             raise RuntimeError("SMS Gateway returnerede ugyldigt JSON") from exc
 
     def _send_reserved(self, message_id: int, recipient: str, gateway_url: str, body: str) -> None:
+        if not self.store.mark_sending(message_id, recipient):
+            return
         try:
             result = self._post_outgoing(gateway_url, recipient, body)
             self.store.finish_delivery(
@@ -346,6 +368,99 @@ class RicSmsRouter:
             self.core.app.logger.warning(
                 "RIC SMS failed for message %s to %s: %s", message_id, recipient, exc
             )
+
+    def recover_after_restart(self) -> dict[str, int]:
+        """Recover only SMS jobs that definitely had not begun submission.
+
+        'pending' is the durable hand-off between alarm routing and the worker
+        thread. It is safe to resume briefly after a restart because _send_reserved
+        changes the row to 'sending' before contacting the remote gateway.
+        A row left as 'sending' is deliberately not retried automatically: the
+        process may have died after the remote gateway accepted it but before the
+        local status update, so retrying could create a duplicate SMS.
+        """
+        recovered = 0
+        uncertain = 0
+        expired = 0
+        now = datetime.now(timezone.utc)
+        config = self.store.config()
+        gateway_url = str(config.get("gateway_url") or "")
+        for delivery in self.store.interrupted_deliveries():
+            status = str(delivery.get("status") or "")
+            message_id = int(delivery["message_id"])
+            recipient = str(delivery["recipient"])
+            try:
+                updated = datetime.fromisoformat(
+                    str(delivery.get("updated_at") or "").replace("Z", "+00:00")
+                )
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=timezone.utc)
+                age = (now - updated.astimezone(timezone.utc)).total_seconds()
+            except ValueError:
+                age = 999999.0
+
+            if status == "sending":
+                self.store.finish_delivery(
+                    message_id,
+                    recipient,
+                    status="uncertain",
+                    error=(
+                        "Gatewayen genstartede mens SMS-aflevering var i gang. "
+                        "Ikke gensendt automatisk for at undgå dublet-SMS."
+                    ),
+                )
+                uncertain += 1
+                continue
+
+            if age > 300 or not gateway_url:
+                self.store.finish_delivery(
+                    message_id,
+                    recipient,
+                    status="failed",
+                    error=(
+                        "Afbrudt SMS-kø blev ikke genoptaget inden for 5 minutter."
+                        if age > 300
+                        else "SMS Gateway URL mangler efter genstart."
+                    ),
+                )
+                expired += 1
+                continue
+
+            try:
+                with self.core.storage.connect() as conn:
+                    row = conn.execute(
+                        "SELECT * FROM messages WHERE id=?",
+                        (message_id,),
+                    ).fetchone()
+                event = dict(row) if row else None
+            except Exception as exc:  # noqa: BLE001
+                event = None
+                self.core.app.logger.warning(
+                    "Could not restore pending RIC SMS message %s: %s", message_id, exc
+                )
+            if not event or not bool(event.get("delivery_eligible")):
+                self.store.finish_delivery(
+                    message_id, recipient, status="failed",
+                    error="Den tilhørende pageralarm findes ikke længere som leveringsklar.",
+                )
+                expired += 1
+                continue
+
+            body = format_alarm_sms(event)
+            threading.Thread(
+                target=self._send_reserved,
+                args=(message_id, recipient, gateway_url, body),
+                name=f"ric-sms-recover-{message_id}",
+                daemon=True,
+            ).start()
+            recovered += 1
+
+        if recovered or uncertain or expired:
+            self.core.app.logger.warning(
+                "RIC SMS restart recovery: recovered=%s uncertain=%s expired=%s",
+                recovered, uncertain, expired,
+            )
+        return {"recovered": recovered, "uncertain": uncertain, "expired": expired}
 
     def queue_for_event(self, message_id: int, event: dict[str, Any]) -> int:
         if not event.get("delivery_eligible", True):
