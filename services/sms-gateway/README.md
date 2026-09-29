@@ -83,6 +83,8 @@ Pager-maskinen skal bruge præcis samme værdi som `PAGER_SMS_GATEWAY_TOKEN`. Ek
 
 De interne claim/complete-endpoints er kun beregnet til modem-workerens loopback-adgang og skal ikke bruges fra Pager-maskinen.
 
+Når porten er eksponeret på Tailscale, er den eksterne API bevidst minimal: `GET /api/auth-check`, autentificeret `POST /api/outgoing` og autentificeret `GET /api/outgoing/<id>`. Øvrige `/api/*`-routes — bl.a. indgående SMS, brandmandsregister, beskedhistorik og kø-claim/complete — er kun tilgængelige over loopback.
+
 ## API
 
 - `GET /health`
