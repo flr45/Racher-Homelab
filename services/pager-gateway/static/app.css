@@ -111,6 +111,11 @@ input:focus, select:focus { border-color: #697586; box-shadow: 0 0 0 3px rgba(10
 .toast.success { border-color: rgba(102,229,140,.45); }
 .toast.error { border-color: rgba(255,107,107,.55); }
 .toast strong { display: block; margin-bottom: 2px; }
+.pager-dialog { width: min(460px, calc(100vw - 32px)); color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 22px; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
+.pager-dialog::backdrop { background: rgba(0,0,0,.68); backdrop-filter: blur(3px); }
+.pager-dialog h2 { margin-bottom: 8px; }
+.dialog-field { display: grid; gap: 7px; margin-top: 18px; color: var(--muted); font-size: 13px; }
+.dialog-actions { justify-content: flex-end; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
 
 @media (max-width: 700px) {
