@@ -31,6 +31,8 @@ ENV_DIR="/etc/racher-pager"
 GATEWAY_ENV="$ENV_DIR/gateway.env"
 DEFAULT_GATEWAY_PORT="${PAGER_GATEWAY_PORT:-8088}"
 DEFAULT_VAPID_SUBJECT="${PAGER_VAPID_SUBJECT:-mailto:admin@racher.local}"
+RUNTIME_UID="$(id -u)"
+RUNTIME_GID="$(id -g)"
 
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
 env_value() {
@@ -98,6 +100,8 @@ PAGER_RUNTIME_REPO=$RUNTIME_REPO
 PAGER_DEPLOY_BRANCH=$DEPLOY_BRANCH
 PAGER_REPO_URL=$ORIGIN_URL
 PAGER_PUBLIC_HOSTNAME=
+PAGER_RUNTIME_UID=$RUNTIME_UID
+PAGER_RUNTIME_GID=$RUNTIME_GID
 EOF
   sudo chmod 0640 "$GATEWAY_ENV"
 else
@@ -105,6 +109,8 @@ else
   ensure_env PAGER_DEPLOY_BRANCH "$DEPLOY_BRANCH"
   ensure_env PAGER_REPO_URL "$ORIGIN_URL"
   ensure_env PAGER_PUBLIC_HOSTNAME ""
+  ensure_env PAGER_RUNTIME_UID "$RUNTIME_UID"
+  ensure_env PAGER_RUNTIME_GID "$RUNTIME_GID"
 fi
 
 STATE_ROOT="$(env_value PAGER_DATA_HOST_PATH)"; STATE_ROOT="${STATE_ROOT:-$DEFAULT_STATE_ROOT}"
@@ -113,7 +119,7 @@ COOKIE_SECURE="$(env_value PAGER_COOKIE_SECURE)"; COOKIE_SECURE="${COOKIE_SECURE
 VAPID_SUBJECT="$(env_value PAGER_VAPID_SUBJECT)"; VAPID_SUBJECT="${VAPID_SUBJECT:-$DEFAULT_VAPID_SUBJECT}"
 
 sudo mkdir -p "$STATE_ROOT" "$STATE_ROOT/pdl" "$STATE_ROOT/update" "$BACKUP_DIR" /opt/racher-pager/integration
-sudo chown -R "$(id -un):$(id -gn)" "$STATE_ROOT"
+sudo chown -R "$RUNTIME_UID:$RUNTIME_GID" "$STATE_ROOT"
 sudo chmod 2770 "$STATE_ROOT"
 sudo chmod 0700 "$BACKUP_DIR"
 sudo install -m 0755 "$PDL_DIR/pager-compose.sh" /opt/racher-pager/integration/pager-compose.sh

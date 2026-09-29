@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-STATE_ROOT="${PAGER_STATE_ROOT:-/var/lib/racher-pager}"
+ENV_FILE="${PAGER_GATEWAY_ENV:-/etc/racher-pager/gateway.env}"
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
+STATE_ROOT="${PAGER_STATE_ROOT:-${PAGER_DATA_HOST_PATH:-/var/lib/racher-pager}}"
 BACKUP_DIR="${PAGER_BACKUP_DIR:-/var/backups/racher-pager}"
 INTEGRATION_DIR="${PAGER_INTEGRATION_DIR:-/opt/racher-pager/integration}"
 BACKUP_SCRIPT="$INTEGRATION_DIR/backup-pager.sh"
@@ -31,11 +39,15 @@ mkdir -p "$(dirname "$LOCK_FILE")"
 exec 9>"$LOCK_FILE"
 flock -n 9 || { echo "En update/rollback/restore kører allerede." >&2; exit 1; }
 
-# The gateway container runs as the owner of STATE_ROOT rather than as root.
-# Remember that identity before replacing files so a restore cannot accidentally
-# turn pager.db/VAPID/session files into root-owned, read-only state for Gunicorn.
-STATE_UID="$(stat -c '%u' "$STATE_ROOT" 2>/dev/null || echo 0)"
-STATE_GID="$(stat -c '%g' "$STATE_ROOT" 2>/dev/null || echo 0)"
+# Restore files to the persisted appliance identity. Falling back to a
+# root-owned STATE_ROOT would recreate the exact failure mode where PDL/Gunicorn
+# can no longer read or write shared state after a restart.
+STATE_UID="${PAGER_RUNTIME_UID:-$(stat -c '%u' "$STATE_ROOT" 2>/dev/null || echo 0)}"
+STATE_GID="${PAGER_RUNTIME_GID:-$(stat -c '%g' "$STATE_ROOT" 2>/dev/null || echo 0)}"
+if [[ -z "$STATE_UID" || -z "$STATE_GID" || "$STATE_UID" == "0" || "$STATE_GID" == "0" ]]; then
+  echo "Afviser restore med root runtime-identitet. Kør system-agent-installationen for at reparere PAGER_RUNTIME_UID/GID først." >&2
+  exit 1
+fi
 
 TMP_DIR="$(mktemp -d)"
 RUNTIME_PAUSED=0
@@ -102,6 +114,8 @@ RUNTIME_PAUSED=1
 # New writes are suppressed by the maintenance lock before the database swap.
 sleep 2
 rm -f "$STATE_ROOT/pager.db-wal" "$STATE_ROOT/pager.db-shm"
+chown "$STATE_UID:$STATE_GID" "$STATE_ROOT"
+chmod 2770 "$STATE_ROOT"
 install -m 0640 "$TMP_DIR/data/pager.db" "$STATE_ROOT/pager.db"
 chown "$STATE_UID:$STATE_GID" "$STATE_ROOT/pager.db"
 

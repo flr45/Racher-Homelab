@@ -9,7 +9,7 @@ services:
     # state-directory uid/gid. Root is only the compatibility fallback for the
     # one upgrade where the previously-installed helper does not know these vars;
     # install-system-agent.sh immediately recreates the container unprivileged.
-    user: "${PAGER_RUNTIME_UID:-0}:${PAGER_RUNTIME_GID:-0}"
+    user: "${PAGER_RUNTIME_UID:?Kør via pager-compose.sh}:${PAGER_RUNTIME_GID:?Kør via pager-compose.sh}"
     read_only: true
     cap_drop:
       - ALL

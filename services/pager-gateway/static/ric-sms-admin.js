@@ -17,7 +17,7 @@
         <div><span class="label">RIC → SMS</span><h2>Send SMS på bestemte RIC-koder</h2></div>
         <span id="ric-sms-state" class="status-badge">Deaktiveret</span>
       </div>
-      <p class="hint">En SMS sendes kun efter den normale støj-, dublet- og burstbehandling. Flere kopier af samme alarm giver derfor kun én SMS pr. telefonnummer. Simulator og replay sender aldrig SMS.</p>
+      <p class="hint">En aktiv RIC-regel sender SMS, når den valgte live-capcode bliver kaldt — også hvis PDL kun dekoder NUMERIC/TONE og derfor ikke laver en normal alarm. Dubletter og korte gentagelser samles, og simulator/replay sender aldrig SMS. Manuelle ord- og RIC-filtre respekteres stadig.</p>
 
       <div class="split-section">
         <div>
@@ -65,8 +65,21 @@
   }
 
   function statusLabel(value) {
-    const names = {pending: 'Afventer', queued: 'I SMS-kø', failed: 'Fejlet'};
+    const names = {
+      pending: 'Afventer',
+      reserved: 'Reserveret',
+      sending: 'Sender',
+      queued: 'I SMS-kø',
+      failed: 'Fejlet',
+      unknown: 'Ukendt efter genstart',
+      expired: 'Udløbet',
+      cancelled: 'Annulleret',
+    };
     return names[value] || value || '—';
+  }
+
+  function triggerLabel(value) {
+    return value === 'ric-call' ? 'RIC kaldt' : 'Alarm';
   }
 
   function renderRules() {
@@ -111,7 +124,7 @@
       <div class="command-row">
         <div>
           <strong>${escapeHtml(statusLabel(row.status))} · ${escapeHtml(maskPhone(row.recipient))}</strong>
-          <small>RIC ${escapeHtml(String(row.matched_rics || '').replaceAll(',', ', '))} · melding #${row.message_id} · ${formatDate(row.created_at)}</small>
+          <small>${escapeHtml(triggerLabel(row.trigger_kind))} · RIC ${escapeHtml(String(row.matched_rics || '').replaceAll(',', ', '))} · melding #${row.message_id} · ${formatDate(row.created_at)}</small>
           ${row.error ? `<p>${escapeHtml(row.error)}</p>` : ''}
         </div>
       </div>`).join('') : '<p class="muted">Ingen RIC-SMS’er endnu.</p>';
