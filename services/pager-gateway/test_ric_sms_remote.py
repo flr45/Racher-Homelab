@@ -84,6 +84,52 @@ class RicSmsRemoteTests(unittest.TestCase):
         self.assertEqual(captured[0].get_header("Authorization"), "Bearer bridge-secret")
         self.assertEqual(captured[0].full_url, "http://100.64.0.10:8090/api/outgoing")
 
+    def test_selected_numeric_ric_call_triggers_sms_even_when_not_alarm_eligible(self):
+        router = AuthenticatedRicSmsRouter(self.core)
+        router.store.update_config(enabled=True, gateway_url="http://sms-gateway:8090")
+        router.store.add_rule("0001133", "+4512345678", "Slagelse")
+
+        sent = []
+        router._post_outgoing = lambda gateway_url, recipient, body: sent.append(
+            (gateway_url, recipient, body)
+        ) or {"id": 66, "status": "pending"}
+
+        event = _Event({
+            "received_at": "2026-09-29T12:00:02",
+            "protocol": "POCSAG",
+            "baud": 1200,
+            "function": "1",
+            "ric": "0001133",
+            "station": "Slagelse",
+            "message": "123456",
+            "raw_line": "0001133 NUMERIC 1200 123456",
+            "source": "pdl-file",
+            "delivery_eligible": False,
+            "suppressed_reason": "decoder-non-alpha",
+            "relevance_class": "noise",
+        })
+
+        original_thread = ric_sms.threading.Thread
+        ric_sms.threading.Thread = _ImmediateThread
+        try:
+            first = self.core.ingest_event(event)
+            second = self.core.ingest_event(_Event({
+                **event.to_dict(),
+                "received_at": "2026-09-29T12:00:03",
+                "raw_line": "0001133 NUMERIC 1200 123456 second",
+            }))
+        finally:
+            ric_sms.threading.Thread = original_thread
+
+        self.assertGreater(second, first)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0][1], "+4512345678")
+        self.assertIn("RIC 0001133 kaldt", sent[0][2])
+        deliveries = router.store.list_deliveries()
+        self.assertEqual(len(deliveries), 1)
+        self.assertEqual(deliveries[0]["trigger_kind"], "ric-call")
+        self.assertEqual(deliveries[0]["status"], "queued")
+
     def test_late_transitive_duplicate_ric_triggers_one_sms_for_root_alarm(self):
         router = AuthenticatedRicSmsRouter(self.core)
         router.store.update_config(enabled=True, gateway_url="http://sms-gateway:8090")
