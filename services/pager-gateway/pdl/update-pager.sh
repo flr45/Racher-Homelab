@@ -142,22 +142,14 @@ step "Skifter runtime til ${TARGET:0:12}"
 git -C "$RUNTIME_REPO" reset --hard "$TARGET"
 
 step "Validerer Python og shell"
-python3 -m py_compile \
-  "$RUNTIME_REPO/services/pager-gateway/app.py" \
-  "$RUNTIME_REPO/services/pager-gateway/app_core.py" \
-  "$RUNTIME_REPO/services/pager-gateway/gateway.py" \
-  "$RUNTIME_REPO/services/pager-gateway/push_service.py" \
-  "$RUNTIME_REPO/services/pager-gateway/pushover_destinations.py" \
-  "$RUNTIME_REPO/services/pager-gateway/storage.py" \
-  "$RUNTIME_REPO/services/pager-gateway/operations.py" \
-  "$RUNTIME_REPO/services/pager-gateway/rss_updates.py" \
-  "$RUNTIME_REPO/services/pager-gateway/alarm_rules.py" \
-  "$RUNTIME_REPO/services/pager-gateway/wsgi.py" \
-  "$RUNTIME_REPO/services/pager-gateway/system_agent.py" \
-  "$RUNTIME_REPO/services/pager-gateway/network_portal.py" \
-  "$RUNTIME_REPO/services/pager-gateway/gateway_watchdog.py" \
-  "$RUNTIME_REPO/services/pager-gateway/fsk_status_agent.py" \
-  "$RUNTIME_REPO/services/pager-gateway/external_monitor.py"
+# Validate every top-level gateway module instead of maintaining a manual list.
+# New delivery/filter modules have repeatedly been added to this service; a stale
+# allow-list could otherwise let an uncompiled module reach the appliance update
+# path and rely on container startup/rollback to discover a trivial syntax error.
+while IFS= read -r -d '' module; do
+  python3 -m py_compile "$module"
+done < <(find "$RUNTIME_REPO/services/pager-gateway" -maxdepth 1 -type f -name '*.py' -print0 | sort -z)
+
 for script in "$RUNTIME_REPO/services/pager-gateway/"*.sh "$RUNTIME_REPO/services/pager-gateway/pdl/"*.sh; do
   bash -n "$script"
 done

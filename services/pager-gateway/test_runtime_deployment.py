@@ -31,14 +31,19 @@ class RuntimeDeploymentTests(unittest.TestCase):
     def test_update_validates_recovery_layers_and_restores_host_files(self):
         script = (PDL / "update-pager.sh").read_text(encoding="utf-8")
         self.assertIn("restore_host_runtime_from_checkout", script)
-        self.assertIn("gateway_watchdog.py", script)
-        self.assertIn("fsk_status_agent.py", script)
-        self.assertIn("external_monitor.py", script)
+        self.assertIn("install-system-agent.sh", script)
         self.assertIn("systemctl is-active --quiet racher-pager-system-agent.service", script)
         self.assertIn("systemctl is-active --quiet racher-pager-gateway-watchdog.timer", script)
         self.assertIn("systemctl is-active --quiet racher-pdl.service", script)
         self.assertIn("racher-pager-post-update", script)
         self.assertIn("--force-recreate pager-gateway", script)
+
+    def test_update_compiles_all_top_level_gateway_modules(self):
+        script = (PDL / "update-pager.sh").read_text(encoding="utf-8")
+        self.assertIn("-maxdepth 1 -type f -name '*.py' -print0", script)
+        self.assertIn('python3 -m py_compile "$module"', script)
+        # Guard against drifting back to a hand-maintained module allow-list.
+        self.assertNotIn('"$RUNTIME_REPO/services/pager-gateway/app.py" \\', script)
 
     def test_update_migrates_runtime_permissions_before_healthcheck(self):
         script = (PDL / "update-pager.sh").read_text(encoding="utf-8")
