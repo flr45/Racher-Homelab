@@ -189,4 +189,5 @@ def install_ric_sms(core: Any, auth_required: Callable) -> AuthenticatedRicSmsRo
     # Preserve the base router's restart recovery so a reservation created before
     # a Pager restart is not left stuck forever.
     router.recover_reserved()
+    router.start_status_monitor()
     return router
