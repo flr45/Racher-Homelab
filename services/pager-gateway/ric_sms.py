@@ -495,6 +495,17 @@ class RicSmsRouter:
                 if response.status != 200:
                     raise RuntimeError(f"SMS Gateway svarede HTTP {response.status}")
         except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                # The remote outbox is retention-pruned. A missing historical
+                # row is terminal for status reconciliation, not a transport
+                # outage, and must never block newer queue items.
+                return {
+                    "status": "missing",
+                    "error": (
+                        "SMS Gateway har ikke længere denne køpost; "
+                        "endelig modemstatus kan ikke fastslås."
+                    ),
+                }
             details = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(
                 f"SMS Gateway-status svarede HTTP {exc.code}: {details[:300]}"
@@ -532,14 +543,15 @@ class RicSmsRouter:
                 break
 
             status = str(remote.get("status") or "").lower()
-            if status not in {"sent", "failed", "unknown"}:
+            if status not in {"sent", "failed", "unknown", "missing"}:
                 continue
 
+            local_status = "unknown" if status == "missing" else status
             error = remote.get("error")
             self.store.finish_delivery(
                 int(row["message_id"]),
                 str(row["recipient"]),
-                status=status,
+                status=local_status,
                 gateway_message_id=remote_id,
                 error=error,
             )
