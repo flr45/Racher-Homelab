@@ -71,6 +71,18 @@ SMS_DRY_RUN=false
 
 Tjenesten sender i SMS-teksttilstand med `AT+CMGF=1` og `AT+CMGS`.
 
+## Fjernadgang fra Pager Gateway
+
+Hvis port 8090 bindes til en Tailscale-adresse, skal SMS Gateway have en delt hemmelighed:
+
+```text
+SMS_GATEWAY_API_TOKEN=<lang-tilfældig-hemmelighed>
+```
+
+Pager-maskinen skal bruge præcis samme værdi som `PAGER_SMS_GATEWAY_TOKEN`. Eksterne `POST /api/outgoing`-kald afvises, hvis token mangler eller er forkert. `GET /api/auth-check` kan bruges til at verificere den delte hemmelighed uden at oprette en SMS.
+
+De interne claim/complete-endpoints er kun beregnet til modem-workerens loopback-adgang og skal ikke bruges fra Pager-maskinen.
+
 ## API
 
 - `GET /health`
