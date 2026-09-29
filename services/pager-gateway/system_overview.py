@@ -109,8 +109,10 @@ class SystemOverview:
     def snapshot(self, runtime: dict[str, Any]) -> dict[str, Any]:
         heartbeat_age = _age_seconds(runtime.get("agent_heartbeat"))
         agent_ok = heartbeat_age is not None and heartbeat_age <= 35
-        fsk_connected = str(runtime.get("fsk_usb_connected") or "") == "1"
-        fsk_in_use = str(runtime.get("fsk_usb_pdl_in_use") or "") == "1"
+        fsk_age = _age_seconds(runtime.get("fsk_usb_last_seen"))
+        fsk_fresh = fsk_age is not None and fsk_age <= 30
+        fsk_connected = fsk_fresh and str(runtime.get("fsk_usb_connected") or "") == "1"
+        fsk_in_use = fsk_fresh and str(runtime.get("fsk_usb_pdl_in_use") or "") == "1"
         pdl_ok = str(runtime.get("pdl_service") or "") == "active"
         gateway_ok = str(runtime.get("gateway_container") or "") == "running"
         internet_ok = str(runtime.get("internet_online") or "") == "1"
@@ -148,9 +150,10 @@ class SystemOverview:
                 "FSK-USB / scanner",
                 fsk_connected and fsk_in_use,
                 "Forbundet og åbnet af PDL" if fsk_connected and fsk_in_use
+                else "FSK-status er for gammel; afventer ny hardwaremåling" if not fsk_fresh
                 else "FSK-USB fundet, men PDL bruger den ikke" if fsk_connected
                 else "FSK-USB ikke registreret",
-                warning=fsk_connected,
+                warning=(not fsk_fresh) or fsk_connected,
             ),
             self._item(
                 "pdl",
