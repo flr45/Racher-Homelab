@@ -28,6 +28,7 @@ class _Response:
                 "state": "online",
                 "signal": "+CSQ: 23,99",
                 "network": "+CREG: 0,5",
+                "dry_run": False,
             },
         }).encode("utf-8")
 
@@ -140,6 +141,36 @@ class SystemOverviewTests(unittest.TestCase):
         self.assertFalse(result["sms"]["auth_ok"])
         states = {item["key"]: item["state"] for item in result["chain"]}
         self.assertEqual(states["sms-auth"], "warning")
+
+    def test_dry_run_sms_gateway_is_visible_and_not_end_to_end_ready(self):
+        overview = SystemOverview(SimpleNamespace())
+
+        class _DryRunResponse(_Response):
+            def read(self):
+                payload = json.loads(super().read().decode("utf-8"))
+                payload["modem"]["dry_run"] = True
+                return json.dumps(payload).encode("utf-8")
+
+        with patch.dict(
+            os.environ,
+            {
+                "PAGER_SMS_GATEWAY_URL": "http://100.111.28.12:8090",
+                "PAGER_SMS_GATEWAY_TOKEN": "bridge-secret",
+            },
+            clear=False,
+        ):
+            with patch(
+                "system_overview.urllib.request.urlopen",
+                side_effect=[_DryRunResponse(), _AuthResponse()],
+            ):
+                result = overview.snapshot(self._runtime())
+
+        self.assertTrue(result["local_ready"])
+        self.assertFalse(result["end_to_end_ready"])
+        self.assertTrue(result["sms"]["modem_dry_run"])
+        rows = {item["key"]: item for item in result["chain"]}
+        self.assertEqual(rows["sms-mode"]["state"], "warning")
+        self.assertIn("DRY RUN", rows["sms-mode"]["detail"])
 
     def test_local_pager_can_be_ready_when_sms_gateway_is_not_configured(self):
         overview = SystemOverview(SimpleNamespace())
