@@ -162,7 +162,7 @@ def cleanup_outbox():
     retention_days = max(1, int(os.getenv("SMS_OUTBOX_RETENTION_DAYS", "7")))
     cutoff = utcnow() - timedelta(days=retention_days)
     deleted = OutboundMessage.query.filter(
-        OutboundMessage.status.in_({"sent", "failed"}),
+        OutboundMessage.status.in_({"sent", "failed", "unknown"}),
         OutboundMessage.completed_at.is_not(None),
         OutboundMessage.completed_at < cutoff,
     ).delete(synchronize_session=False)
@@ -170,10 +170,63 @@ def cleanup_outbox():
         db.session.commit()
 
 
-def claim_outbound_message():
-    cleanup_outbox()
+def recover_stale_outbound_messages():
+    """Reconcile work left behind by a dead modem worker without duplicating SMS.
+
+    "reserved" means the worker claimed the database row but has not told the API
+    that it is about to touch the modem yet. That state is safe to requeue.
+
+    "sending" means the worker crossed the external side-effect boundary. If the
+    process disappears there, the modem may already have transmitted the SMS even
+    though the database never received a completion callback. Never retry that
+    state automatically; mark it "unknown" so an operator can inspect it.
+    """
     stale_seconds = max(30, int(os.getenv("SMS_OUTBOX_STALE_SECONDS", "120")))
     stale_before = utcnow() - timedelta(seconds=stale_seconds)
+    now = utcnow()
+
+    stale_reserved = OutboundMessage.query.filter(
+        OutboundMessage.status == "reserved",
+        OutboundMessage.claimed_at.is_not(None),
+        OutboundMessage.claimed_at < stale_before,
+    ).all()
+    for message in stale_reserved:
+        message.status = "pending"
+        message.claimed_at = None
+        message.completed_at = None
+        message.error = "Forrige modem-worker stoppede før modemafsendelsen startede; sikkert genkøet."
+
+    stale_sending = OutboundMessage.query.filter(
+        OutboundMessage.status == "sending",
+        OutboundMessage.claimed_at.is_not(None),
+        OutboundMessage.claimed_at < stale_before,
+    ).all()
+    for message in stale_sending:
+        message.status = "unknown"
+        message.completed_at = now
+        message.error = (
+            "Modem-worker stoppede efter SMS-afsendelsen var startet. "
+            "Automatisk retry er blokeret for at undgå en dublet-SMS."
+        )
+        if message.delivery_id:
+            delivery = db.session.get(base.Delivery, message.delivery_id)
+            if delivery:
+                delivery.status = "unknown"
+                delivery.error = message.error
+                delivery.attempted_at = now
+
+    if stale_reserved or stale_sending:
+        db.session.commit()
+
+    return {
+        "requeued": len(stale_reserved),
+        "unknown": len(stale_sending),
+    }
+
+
+def claim_outbound_message():
+    cleanup_outbox()
+    recover_stale_outbound_messages()
 
     message = (
         OutboundMessage.query.filter_by(status="pending")
@@ -181,25 +234,26 @@ def claim_outbound_message():
         .first()
     )
     if message is None:
-        message = (
-            OutboundMessage.query.filter(
-                OutboundMessage.status == "sending",
-                OutboundMessage.claimed_at.is_not(None),
-                OutboundMessage.claimed_at < stale_before,
-            )
-            .order_by(OutboundMessage.claimed_at.asc())
-            .first()
-        )
-    if message is None:
         return None
 
-    message.status = "sending"
+    message.status = "reserved"
     message.claimed_at = utcnow()
     message.completed_at = None
     message.error = None
     message.attempts = int(message.attempts or 0) + 1
     db.session.commit()
     return message
+
+
+def start_outbound_message(message: OutboundMessage) -> bool:
+    if message.status != "reserved":
+        return False
+    message.status = "sending"
+    message.claimed_at = utcnow()
+    message.completed_at = None
+    message.error = None
+    db.session.commit()
+    return True
 
 
 def complete_outbound_message(
@@ -448,6 +502,21 @@ def claim_outgoing():
     )
 
 
+@app.post("/api/outgoing/<int:message_id>/start")
+def outgoing_start(message_id):
+    message = db.get_or_404(OutboundMessage, message_id)
+    if not start_outbound_message(message):
+        return jsonify(
+            error=f"SMS kan ikke startes fra status {message.status}",
+            status=message.status,
+        ), 409
+    return jsonify(
+        id=message.id,
+        status=message.status,
+        attempts=message.attempts,
+    )
+
+
 @app.get("/api/outgoing/<int:message_id>")
 def outgoing_status(message_id):
     message = db.get_or_404(OutboundMessage, message_id)
@@ -469,8 +538,8 @@ def outgoing_complete(message_id):
     message = db.get_or_404(OutboundMessage, message_id)
     payload = request.get_json(force=True)
     status = str(payload.get("status", "")).lower()
-    if status not in {"sent", "failed"}:
-        return jsonify(error="Status skal være sent eller failed"), 400
+    if status not in {"sent", "failed", "unknown"}:
+        return jsonify(error="Status skal være sent, failed eller unknown"), 400
 
     retried = complete_outbound_message(
         message,
@@ -530,10 +599,13 @@ def health_with_outbox():
     payload = response.get_json()
     try:
         payload["gateway"]["outbox_pending"] = OutboundMessage.query.filter(
-            OutboundMessage.status.in_({"pending", "sending"})
+            OutboundMessage.status.in_({"pending", "reserved", "sending"})
         ).count()
         payload["gateway"]["outbox_failed"] = (
             OutboundMessage.query.filter_by(status="failed").count()
+        )
+        payload["gateway"]["outbox_unknown"] = (
+            OutboundMessage.query.filter_by(status="unknown").count()
         )
         payload["gateway"]["commands_pending"] = CommandRequest.query.filter(
             CommandRequest.status.in_({"pending", "processing"})
