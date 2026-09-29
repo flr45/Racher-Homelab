@@ -57,6 +57,20 @@ class LoginSessionTests(unittest.TestCase):
                 status = client.get('/api/status')
                 assert status.status_code == 200, status.get_data(as_text=True)
 
+                # A password reset must revoke every already-issued browser
+                # session for that user. Flask's signed cookie remains valid
+                # cryptographically, so session_version must invalidate it.
+                user = app.storage.get_user_by_username('admin')
+                previous_version = int(user['session_version'])
+                app.storage.set_user_password_hash(user['id'], 'replacement-hash')
+                updated = app.storage.get_user(user['id'])
+                assert int(updated['session_version']) == previous_version + 1
+
+                revoked = client.get('/api/me')
+                assert revoked.status_code == 401, revoked.get_data(as_text=True)
+                with client.session_transaction() as sess:
+                    assert 'user_id' not in sess
+
                 app.source.stop()
                 """
             )
