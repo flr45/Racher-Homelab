@@ -13,8 +13,9 @@ COPY sitecustomize.py /usr/local/lib/python3.12/site-packages/sitecustomize.py
 COPY app.py base_app.py
 COPY queued_app.py queued_app.py
 COPY secure_app.py app.py
-COPY modem_reader.py gsm0338.py sms_pdu.py ./
+COPY modem_reader.py gsm0338.py sms_pdu.py entrypoint.sh ./
 RUN python -m py_compile app.py queued_app.py base_app.py modem_reader.py gsm0338.py sms_pdu.py
+RUN sh -n entrypoint.sh
 RUN python -c 'import modem_reader; assert modem_reader.MODEM_DSRDTR_FLOW_CONTROL is False; assert modem_reader.MODEM_WRITE_TIMEOUT_SECONDS == 10'
 RUN MODEM_DSRDTR_FLOW_CONTROL=true MODEM_WRITE_TIMEOUT_SECONDS=4 python -c 'import modem_reader; assert modem_reader.MODEM_DSRDTR_FLOW_CONTROL is True; assert modem_reader.MODEM_WRITE_TIMEOUT_SECONDS == 4'
 RUN python -c 'from gsm0338 import decode_modem_bytes, encode_gsm0338; text="p\u00e5 f\u00e6rdigt h\u00f8stet \u00c6\u00d8\u00c5"; assert decode_modem_bytes(encode_gsm0338(text)) == text'
@@ -26,8 +27,8 @@ RUN DATABASE_URL=sqlite:////tmp/sms-gateway-station-build.db python -c 'from dat
 RUN DATABASE_URL=sqlite:////tmp/sms-gateway-outbox-build.db python -c 'from app import app; c=app.test_client(); q=c.post("/api/outgoing", json={"recipient":"+4512345678","body":"test"}); assert q.status_code == 202; i=q.get_json()["id"]; claim=c.post("/api/outgoing/claim", json={}); assert claim.status_code == 200 and claim.get_json()["id"] == i; done=c.post(f"/api/outgoing/{i}/complete", json={"status":"sent"}); status=c.get(f"/api/outgoing/{i}").get_json(); assert status["status"] == "sent"'
 RUN DATABASE_URL=sqlite:////tmp/sms-gateway-auth-build.db SMS_GATEWAY_API_TOKEN=bridge-secret python -c 'from app import app; c=app.test_client(); p={"recipient":"+4512345678","body":"test"}; denied=c.post("/api/outgoing",json=p,environ_base={"REMOTE_ADDR":"100.64.0.2"}); assert denied.status_code == 401; allowed=c.post("/api/outgoing",json=p,headers={"Authorization":"Bearer bridge-secret"},environ_base={"REMOTE_ADDR":"100.64.0.2"}); assert allowed.status_code == 202'
 RUN DATABASE_URL=sqlite:////tmp/sms-gateway-command-build.db RACHER_MONITOR_SMS_TO=+4512345678 python -c 'from app import app; c=app.test_client(); r=c.post("/api/incoming", json={"sender":"+4512345678","body":"status"}); assert r.status_code == 201 and r.get_json()["vagtbytte_created"] is False; q=c.post("/api/commands/claim", json={}); assert q.status_code == 200 and q.get_json()["sender"] == "+4512345678" and q.get_json()["command"] == "status"; i=q.get_json()["id"]; done=c.post(f"/api/commands/{i}/complete", json={"status":"done"}); assert done.status_code == 200 and done.get_json()["status"] == "done"'
-RUN mkdir -p /data && chown -R appuser:appuser /app /data
+RUN chmod +x /app/entrypoint.sh && mkdir -p /data && chown -R appuser:appuser /app /data
 USER appuser
 
 EXPOSE 8080
-CMD ["sh", "-c", "python modem_reader.py & reader_pid=$!; trap 'kill $reader_pid' TERM INT; gunicorn --bind 0.0.0.0:8080 --workers 1 --threads 4 --timeout 60 app:app & web_pid=$!; wait $web_pid; kill $reader_pid 2>/dev/null || true"]
+CMD ["/app/entrypoint.sh"]
