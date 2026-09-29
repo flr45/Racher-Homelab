@@ -229,35 +229,168 @@ class WhatsAppDelivery:
                 (status, openwa_message_id[:200], error[:1000], _now(), message_id, user_id),
             )
 
-    def dispatch(self, message_id: int, event: dict[str, Any]) -> None:
+    def _mark_sending(self, message_id: int, user_id: int) -> bool:
+        with self.storage.connect() as conn:
+            cur = conn.execute(
+                """UPDATE whatsapp_deliveries
+                   SET status='sending', error=NULL, updated_at=?
+                   WHERE message_id=? AND user_id=? AND status='queued'""",
+                (_now(), message_id, user_id),
+            )
+            return cur.rowcount == 1
+
+    def _interrupted_deliveries(self) -> list[dict[str, Any]]:
+        with self.storage.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM whatsapp_deliveries
+                   WHERE status IN ('queued','sending')
+                   ORDER BY id ASC"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _send_reserved(self, message_id: int, user_id: int, phone: str, text: str) -> None:
+        if not self._mark_sending(message_id, user_id):
+            return
+        try:
+            result = self.client.send_text(phone, text)
+            remote_id = str(result.get("messageId") or result.get("id") or "")
+            self._finish_delivery(
+                message_id, user_id, status="sent", openwa_message_id=remote_id
+            )
+        except Exception as exc:
+            self._finish_delivery(message_id, user_id, status="failed", error=str(exc))
+            self.app.logger.warning(
+                "WhatsApp failed for message=%s user=%s: %s", message_id, user_id, exc
+            )
+
+    def _queue(self, message_id: int, event: dict[str, Any], *, async_send: bool) -> int:
         if not event.get("delivery_eligible", True):
-            return
+            return 0
         if not _as_bool(os.getenv("PAGER_WHATSAPP_ENABLED", "0")):
-            return
+            return 0
         if not self.client.configured:
             self.app.logger.warning("WhatsApp delivery enabled but OpenWA is not configured")
-            return
+            return 0
+
         text = self.format_alarm(event)
+        queued = 0
         for recipient in self.recipients_for_event(event.get("station")):
             user_id = int(recipient["user_id"])
             phone = str(recipient["phone_e164"])
+            # Reserve synchronously before handing work to a daemon thread. A
+            # process restart can then recover rows that were durably queued but
+            # whose worker never got CPU time.
             if not self._reserve_delivery(message_id, user_id, phone):
                 continue
-            try:
-                result = self.client.send_text(phone, text)
-                remote_id = str(result.get("messageId") or result.get("id") or "")
-                self._finish_delivery(message_id, user_id, status="sent", openwa_message_id=remote_id)
-            except Exception as exc:
-                self._finish_delivery(message_id, user_id, status="failed", error=str(exc))
-                self.app.logger.warning("WhatsApp failed for message=%s user=%s: %s", message_id, user_id, exc)
+            queued += 1
+            if async_send:
+                threading.Thread(
+                    target=self._send_reserved,
+                    args=(message_id, user_id, phone, text),
+                    name=f"whatsapp-{message_id}-{user_id}",
+                    daemon=True,
+                ).start()
+            else:
+                self._send_reserved(message_id, user_id, phone, text)
+        return queued
 
-    def dispatch_async(self, message_id: int, event: dict[str, Any]) -> None:
-        threading.Thread(
-            target=self.dispatch,
-            args=(message_id, dict(event)),
-            name=f"whatsapp-{message_id}",
-            daemon=True,
-        ).start()
+    def dispatch(self, message_id: int, event: dict[str, Any]) -> None:
+        self._queue(message_id, event, async_send=False)
+
+    def dispatch_async(self, message_id: int, event: dict[str, Any]) -> int:
+        return self._queue(message_id, dict(event), async_send=True)
+
+    def recover_after_restart(self) -> dict[str, int]:
+        """Recover durable WhatsApp hand-offs without blindly duplicating sends."""
+        recovered = 0
+        uncertain = 0
+        expired = 0
+        now = datetime.now(timezone.utc)
+
+        for delivery in self._interrupted_deliveries():
+            message_id = int(delivery["message_id"])
+            user_id = int(delivery["user_id"])
+            phone = str(delivery["phone_e164"])
+            status = str(delivery.get("status") or "")
+            try:
+                updated = datetime.fromisoformat(
+                    str(delivery.get("updated_at") or "").replace("Z", "+00:00")
+                )
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=timezone.utc)
+                age = (now - updated.astimezone(timezone.utc)).total_seconds()
+            except ValueError:
+                age = 999999.0
+
+            if status == "sending":
+                self._finish_delivery(
+                    message_id,
+                    user_id,
+                    status="uncertain",
+                    error=(
+                        "Gatewayen genstartede mens WhatsApp-aflevering var i gang. "
+                        "Ikke gensendt automatisk for at undgå dubletbesked."
+                    ),
+                )
+                uncertain += 1
+                continue
+
+            if age > 300:
+                self._finish_delivery(
+                    message_id,
+                    user_id,
+                    status="failed",
+                    error="Afbrudt WhatsApp-kø blev ikke genoptaget inden for 5 minutter.",
+                )
+                expired += 1
+                continue
+
+            if not _as_bool(os.getenv("PAGER_WHATSAPP_ENABLED", "0")) or not self.client.configured:
+                self._finish_delivery(
+                    message_id,
+                    user_id,
+                    status="failed",
+                    error="WhatsApp/OpenWA er ikke aktiv eller konfigureret efter genstart.",
+                )
+                expired += 1
+                continue
+
+            try:
+                with self.storage.connect() as conn:
+                    row = conn.execute(
+                        "SELECT * FROM messages WHERE id=?", (message_id,)
+                    ).fetchone()
+                event = dict(row) if row else None
+            except Exception as exc:
+                event = None
+                self.app.logger.warning(
+                    "Could not restore pending WhatsApp message %s: %s", message_id, exc
+                )
+            if not event or not bool(event.get("delivery_eligible")):
+                self._finish_delivery(
+                    message_id,
+                    user_id,
+                    status="failed",
+                    error="Den tilhørende pageralarm findes ikke længere som leveringsklar.",
+                )
+                expired += 1
+                continue
+
+            text = self.format_alarm(event)
+            threading.Thread(
+                target=self._send_reserved,
+                args=(message_id, user_id, phone, text),
+                name=f"whatsapp-recover-{message_id}-{user_id}",
+                daemon=True,
+            ).start()
+            recovered += 1
+
+        if recovered or uncertain or expired:
+            self.app.logger.warning(
+                "WhatsApp restart recovery: recovered=%s uncertain=%s expired=%s",
+                recovered, uncertain, expired,
+            )
+        return {"recovered": recovered, "uncertain": uncertain, "expired": expired}
 
     def list_recent(self, limit: int = 100) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 200))
@@ -296,6 +429,7 @@ def install_whatsapp(app, storage, routing, auth_required, *, core=None) -> What
         return original_notify(message_id, event)
 
     core.maybe_notify_pushover = notify_and_whatsapp
+    delivery.recover_after_restart()
 
     @app.get("/api/whatsapp/me")
     @auth_required()
