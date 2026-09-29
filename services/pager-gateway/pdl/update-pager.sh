@@ -59,9 +59,13 @@ if ! git -C "$RUNTIME_REPO" merge-base --is-ancestor "$CURRENT" "$TARGET"; then
 fi
 
 PDL_CHANGED=0
+# Rebuild the native decoder whenever any build-time PDL patch changes. The
+# installer applies several patch_*.py files; checking only patch_headless.py
+# would silently leave an old binary in place after changes to the other decoder
+# fixes/diagnostics.
 if ! git -C "$RUNTIME_REPO" diff --quiet "$CURRENT" "$TARGET" -- \
-  services/pager-gateway/pdl/patch_headless.py \
-  services/pager-gateway/pdl/install-pdl.sh; then
+  services/pager-gateway/pdl/install-pdl.sh \
+  'services/pager-gateway/pdl/patch_*.py'; then
   PDL_CHANGED=1
 fi
 
