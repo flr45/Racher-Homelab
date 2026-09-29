@@ -76,6 +76,13 @@ class PagerEvent:
         return data
 
 
+def public_notification_title(event: dict[str, Any], fallback: str = "Pageralarm") -> str:
+    """Build a user-facing notification title and make simulator traffic obvious."""
+    base = str(event.get("station") or fallback or "Pageralarm").strip() or "Pageralarm"
+    source = str(event.get("source") or "").strip().lower()
+    return f"TEST · {base}" if source == "mock" else base
+
+
 def public_message(text: str) -> str:
     """Return readable user-facing alarm text with decoder metadata removed.
 
