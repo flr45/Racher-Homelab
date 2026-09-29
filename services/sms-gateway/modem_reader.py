@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import signal
 import time
 import urllib.error
@@ -35,6 +36,11 @@ SMS_SEND_TIMEOUT_SECONDS = max(
     25, int(os.getenv("SMS_SEND_TIMEOUT_SECONDS", "60"))
 )
 OUTBOX_BATCH_SIZE = max(1, int(os.getenv("SMS_OUTBOX_BATCH_SIZE", "20")))
+NETWORK_REFRESH_SECONDS = max(
+    5, int(os.getenv("MODEM_NETWORK_REFRESH_SECONDS", "15"))
+)
+_CREG_RE = re.compile(r"\+CREG:\s*(?:\d\s*,\s*)?(\d)")
+_CSQ_RE = re.compile(r"\+CSQ:\s*(\d+)\s*,\s*(\d+)")
 
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("sms-modem-reader")
@@ -158,6 +164,51 @@ def complete_outgoing(message_id, status, error=None, retry=False):
     )
 
 
+def parse_registration(response: str) -> tuple[bool, str]:
+    match = _CREG_RE.search(str(response or ""))
+    if not match:
+        return False, "unknown"
+    code = int(match.group(1))
+    states = {
+        0: "not-registered",
+        1: "registered-home",
+        2: "searching",
+        3: "denied",
+        4: "unknown",
+        5: "registered-roaming",
+    }
+    return code in {1, 5}, states.get(code, f"code-{code}")
+
+
+def parse_signal_quality(response: str) -> dict:
+    match = _CSQ_RE.search(str(response or ""))
+    if not match:
+        return {"rssi": None, "ber": None, "dbm": None}
+    rssi = int(match.group(1))
+    ber = int(match.group(2))
+    dbm = None if rssi == 99 else -113 + (2 * rssi)
+    return {"rssi": rssi, "ber": ber, "dbm": dbm}
+
+
+def refresh_network_status(port) -> bool:
+    network = command(port, "AT+CREG?")
+    signal_quality = command(port, "AT+CSQ")
+    registered, registration_state = parse_registration(network)
+    signal = parse_signal_quality(signal_quality)
+    write_status(
+        state="online" if registered else "degraded",
+        network=network.strip(),
+        signal=signal_quality.strip(),
+        network_registered=registered,
+        registration_state=registration_state,
+        signal_rssi=signal["rssi"],
+        signal_ber=signal["ber"],
+        signal_dbm=signal["dbm"],
+        last_error=None if registered else f"Mobilnetværk: {registration_state}",
+    )
+    return registered
+
+
 def initialize(port):
     for value in (
         "AT",
@@ -168,14 +219,7 @@ def initialize(port):
         response = command(port, value)
         if "ERROR" in response:
             raise RuntimeError(f"Modemmet afviste {value}: {response.strip()}")
-    network = command(port, "AT+CREG?")
-    signal_quality = command(port, "AT+CSQ")
-    write_status(
-        state="online",
-        network=network.strip(),
-        signal=signal_quality.strip(),
-        last_error=None,
-    )
+    return refresh_network_status(port)
 
 
 def send_outgoing_sms(port, recipient, body):
@@ -301,7 +345,8 @@ def run():
                 timeout=0.3,
                 dsrdtr=MODEM_DISABLE_DTR_TOGGLE,
             ) as port:
-                initialize(port)
+                network_registered = initialize(port)
+                last_network_refresh = time.monotonic()
                 retry_seconds = 2
                 log.info(
                     "Huawei-modem online på %s; én proces ejer serieporten",
@@ -309,9 +354,19 @@ def run():
                 )
 
                 while running:
+                    now_monotonic = time.monotonic()
+                    if now_monotonic - last_network_refresh >= NETWORK_REFRESH_SECONDS:
+                        network_registered = refresh_network_status(port)
+                        last_network_refresh = now_monotonic
+
                     response = command(port, "AT+CMGL=0", timeout=15)
                     messages = parse_cmgl_response(response)
-                    write_status(state="online", last_error=None)
+                    write_status(
+                        state="online" if network_registered else "degraded",
+                        last_error=None
+                        if network_registered
+                        else "Mobilnetværket er ikke registreret",
+                    )
 
                     for message in messages:
                         message_label = "+".join(
@@ -351,7 +406,8 @@ def run():
                             log.exception("Kunne ikke behandle SMS %s", message_label)
                             write_status(state="degraded", last_error=str(exc))
 
-                    process_outbox(port)
+                    if network_registered:
+                        process_outbox(port)
                     time.sleep(POLL_SECONDS)
         except (
             serial.SerialException,
