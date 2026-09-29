@@ -125,6 +125,7 @@ class Storage:
                     created_at TEXT NOT NULL,
                     created_by INTEGER,
                     last_login_at TEXT,
+                    session_version INTEGER NOT NULL DEFAULT 1,
                     FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
                 );
 
@@ -171,6 +172,10 @@ class Storage:
                 CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log(created_at DESC);
                 """
             )
+
+            user_columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+            if "session_version" not in user_columns:
+                conn.execute("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1")
 
             system_columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(system_commands)").fetchall()}
             if "payload" not in system_columns:
@@ -361,13 +366,21 @@ class Storage:
 
     def set_user_active(self, user_id: int, active: bool) -> None:
         with self.connect() as conn:
-            conn.execute("UPDATE users SET active=? WHERE id=?", (1 if active else 0, user_id))
-            if not active:
+            if active:
+                conn.execute("UPDATE users SET active=1 WHERE id=?", (user_id,))
+            else:
+                conn.execute(
+                    "UPDATE users SET active=0, session_version=session_version+1 WHERE id=?",
+                    (user_id,),
+                )
                 conn.execute("DELETE FROM push_subscriptions WHERE user_id=?", (user_id,))
 
     def set_user_password_hash(self, user_id: int, password_hash: str) -> None:
         with self.connect() as conn:
-            conn.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash, user_id))
+            conn.execute(
+                "UPDATE users SET password_hash=?, session_version=session_version+1 WHERE id=?",
+                (password_hash, user_id),
+            )
 
     def upsert_push_subscription(self, user_id: int, endpoint: str, p256dh: str,
                                  auth: str, user_agent: str = "") -> None:
