@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -379,6 +380,19 @@ class RicSmsStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def queued_remote_rows(self, limit: int = 40) -> list[dict[str, Any]]:
+        clean_limit = max(1, min(int(limit), 100))
+        with self._lock, self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM ric_sms_deliveries
+                   WHERE status='queued'
+                     AND gateway_message_id IS NOT NULL
+                     AND gateway_message_id!=''
+                   ORDER BY id ASC LIMIT ?""",
+                (clean_limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_deliveries(self, limit: Any = 50) -> list[dict[str, Any]]:
         try:
             clean_limit = int(limit)
@@ -398,6 +412,8 @@ class RicSmsRouter:
         self.store = RicSmsStore(core.DB_PATH)
         self._original_notify = core.maybe_notify_pushover
         core.maybe_notify_pushover = self.notify_and_sms
+        self._status_monitor_thread: threading.Thread | None = None
+        self._status_monitor_stop = threading.Event()
 
     def _event_rics(self, message_id: int, event: dict[str, Any]) -> set[str]:
         result: set[str] = set()
@@ -462,6 +478,99 @@ class RicSmsRouter:
             return json.loads(raw) if raw else {}
         except json.JSONDecodeError as exc:
             raise RuntimeError("SMS Gateway returnerede ugyldigt JSON") from exc
+
+    def _get_outgoing_status(self, gateway_url: str, remote_id: str) -> dict[str, Any]:
+        remote = str(remote_id or "").strip()
+        if not remote.isdigit():
+            raise ValueError("SMS Gateway message-id er ugyldigt")
+        endpoint = gateway_url.rstrip("/") + f"/api/outgoing/{remote}"
+        headers: dict[str, str] = {}
+        token = os.getenv("PAGER_SMS_GATEWAY_TOKEN", "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        request_obj = urllib.request.Request(endpoint, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(request_obj, timeout=4) as response:
+                raw = response.read().decode("utf-8")
+                if response.status != 200:
+                    raise RuntimeError(f"SMS Gateway svarede HTTP {response.status}")
+        except urllib.error.HTTPError as exc:
+            details = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"SMS Gateway-status svarede HTTP {exc.code}: {details[:300]}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Kunne ikke hente SMS Gateway-status: {exc.reason}"
+            ) from exc
+        try:
+            payload = json.loads(raw) if raw else {}
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("SMS Gateway-status var ugyldig JSON") from exc
+        return payload if isinstance(payload, dict) else {}
+
+    def reconcile_remote_statuses(self, limit: int = 40) -> int:
+        """Mirror final modem status into Pager without ever resending an SMS."""
+        config = self.store.config()
+        if not config["gateway_url"]:
+            return 0
+
+        changed = 0
+        for row in self.store.queued_remote_rows(limit=limit):
+            remote_id = str(row.get("gateway_message_id") or "")
+            try:
+                remote = self._get_outgoing_status(config["gateway_url"], remote_id)
+            except Exception as exc:  # network/status failure must not alter delivery
+                # Every pending row uses the same configured gateway. If that
+                # gateway is unreachable, stop this cycle after one bounded
+                # request instead of multiplying the outage by the queue length.
+                self.core.app.logger.warning(
+                    "Could not reconcile SMS Gateway delivery %s; remaining rows deferred: %s",
+                    remote_id,
+                    exc,
+                )
+                break
+
+            status = str(remote.get("status") or "").lower()
+            if status not in {"sent", "failed", "unknown"}:
+                continue
+
+            error = remote.get("error")
+            self.store.finish_delivery(
+                int(row["message_id"]),
+                str(row["recipient"]),
+                status=status,
+                gateway_message_id=remote_id,
+                error=error,
+            )
+            changed += 1
+        return changed
+
+    @staticmethod
+    def _status_poll_seconds() -> int:
+        try:
+            value = int(os.getenv("PAGER_SMS_STATUS_POLL_SECONDS", "5"))
+        except ValueError:
+            value = 5
+        return max(2, min(value, 60))
+
+    def _status_monitor_loop(self) -> None:
+        while not self._status_monitor_stop.wait(self._status_poll_seconds()):
+            try:
+                self.reconcile_remote_statuses()
+            except Exception as exc:  # noqa: BLE001
+                self.core.app.logger.warning("RIC SMS status monitor failed: %s", exc)
+
+    def start_status_monitor(self) -> None:
+        if self._status_monitor_thread and self._status_monitor_thread.is_alive():
+            return
+        self._status_monitor_stop.clear()
+        self._status_monitor_thread = threading.Thread(
+            target=self._status_monitor_loop,
+            name="ric-sms-status-monitor",
+            daemon=True,
+        )
+        self._status_monitor_thread.start()
 
     def _send_reserved(self, message_id: int, recipient: str, gateway_url: str, body: str) -> None:
         if not self.store.claim_delivery(message_id, recipient):
@@ -749,4 +858,5 @@ def install_ric_sms(core: Any, auth_required: Callable) -> RicSmsRouter:
     register_ric_sms_routes(core, router, auth_required)
     core.ric_sms_router = router
     router.recover_reserved()
+    router.start_status_monitor()
     return router
