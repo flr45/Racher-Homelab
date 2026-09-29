@@ -23,6 +23,13 @@ SERIAL_FORMAT = "8N1"
 MAINTENANCE_LOCK = Path(os.getenv("PAGER_MAINTENANCE_LOCK", "/run/racher-pager/maintenance.lock"))
 
 
+def current_boot_id(path: Path = Path("/proc/sys/kernel/random/boot_id")) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 def maintenance_in_progress(path: Path = MAINTENANCE_LOCK) -> bool:
     if not path.exists():
         return False
@@ -271,6 +278,10 @@ def main() -> int:
         previous = bootstrap_storage.get_runtime_status()
 
     status = collect_status()
+    # runtime_status survives reboot, so stamp each probe with the current Linux
+    # boot id. The boot verifier can then distinguish a fresh hardware probe from
+    # a green FSK state left behind by the previous boot.
+    status["fsk_usb_boot_id"] = current_boot_id()
     previous_ever_seen = str(previous.get("fsk_usb_ever_seen", {}).get("value") or "0") == "1"
     previous_last_seen = str(previous.get("fsk_usb_last_seen", {}).get("value") or "")
 
