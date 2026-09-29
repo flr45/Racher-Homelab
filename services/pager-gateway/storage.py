@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import secrets
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -417,22 +419,70 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def _command_secret_dir(self) -> Path:
+        path = Path(self.path).parent / "command-secrets"
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            os.chmod(path, 0o700)
+        except OSError:
+            pass
+        return path
+
+    def _store_command_secret(self, value: str) -> str:
+        ref = secrets.token_urlsafe(24)
+        path = self._command_secret_dir() / f"{ref}.secret"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(str(value), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        return ref
+
+    def _read_command_secret(self, ref: str) -> str:
+        clean = str(ref or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{16,80}", clean):
+            raise ValueError("invalid command secret reference")
+        path = self._command_secret_dir() / f"{clean}.secret"
+        return path.read_text(encoding="utf-8")
+
+    def _delete_command_secret(self, ref: str) -> None:
+        clean = str(ref or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{16,80}", clean):
+            return
+        try:
+            (self._command_secret_dir() / f"{clean}.secret").unlink()
+        except FileNotFoundError:
+            pass
+
     def queue_system_command(self, action: str, requested_by: int,
                              payload: dict[str, Any] | None = None) -> int:
         normalized = validate_system_command(action, payload)
+        secret_ref = ""
+        stored_payload = dict(normalized)
+        if action == "wifi-add":
+            # Never persist Wi-Fi passwords in SQLite. system_commands is part of
+            # pager.db and therefore enters normal backups. Keep the short-lived
+            # secret in a 0600 sidecar file while SQLite stores only a reference.
+            secret_ref = self._store_command_secret(str(stored_payload.pop("password")))
+            stored_payload["password_secret"] = secret_ref
+
         now = self._now()
-        with self.connect() as conn:
-            cur = conn.execute(
-                """INSERT INTO system_commands(action, requested_by, requested_at, status, payload)
-                   VALUES (?, ?, ?, 'queued', ?)""",
-                (action, requested_by, now, json.dumps(normalized, ensure_ascii=False)),
-            )
-            command_id = int(cur.lastrowid)
-            conn.execute(
-                "INSERT INTO audit_log(user_id, action, detail, created_at) VALUES (?, ?, ?, ?)",
-                (requested_by, "system-command", f"action={action}; command_id={command_id}", now),
-            )
-            return command_id
+        try:
+            with self.connect() as conn:
+                cur = conn.execute(
+                    """INSERT INTO system_commands(action, requested_by, requested_at, status, payload)
+                       VALUES (?, ?, ?, 'queued', ?)""",
+                    (action, requested_by, now, json.dumps(stored_payload, ensure_ascii=False)),
+                )
+                command_id = int(cur.lastrowid)
+                conn.execute(
+                    "INSERT INTO audit_log(user_id, action, detail, created_at) VALUES (?, ?, ?, ?)",
+                    (requested_by, "system-command", f"action={action}; command_id={command_id}", now),
+                )
+                return command_id
+        except Exception:
+            if secret_ref:
+                self._delete_command_secret(secret_ref)
+            raise
 
     def list_system_commands(self, limit: int = 20) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 100))
@@ -461,14 +511,44 @@ class Storage:
                 result["payload"] = json.loads(str(result.get("payload") or "{}"))
             except json.JSONDecodeError:
                 result["payload"] = {}
+
+            if str(result.get("action") or "") == "wifi-add":
+                ref = str(result["payload"].get("password_secret") or "")
+                try:
+                    password = self._read_command_secret(ref)
+                except (OSError, ValueError):
+                    conn.execute(
+                        "UPDATE system_commands SET status='failed', processed_at=?, result=?, payload='{}' WHERE id=?",
+                        (self._now(), "Wi-Fi-hemmeligheden mangler eller er ugyldig.", int(row["id"])),
+                    )
+                    self._delete_command_secret(ref)
+                    return None
+                result["payload"] = {
+                    "ssid": str(result["payload"].get("ssid") or ""),
+                    "password": password,
+                    "_password_secret_ref": ref,
+                }
             return result
 
     def finish_system_command(self, command_id: int, success: bool, result: str) -> None:
+        secret_ref = ""
         with self.connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM system_commands WHERE id=?",
+                (int(command_id),),
+            ).fetchone()
+            if row:
+                try:
+                    payload = json.loads(str(row["payload"] or "{}"))
+                except json.JSONDecodeError:
+                    payload = {}
+                secret_ref = str(payload.get("password_secret") or "")
             conn.execute(
                 "UPDATE system_commands SET status=?, processed_at=?, result=?, payload='{}' WHERE id=?",
                 ("done" if success else "failed", self._now(), result[:2000], command_id),
             )
+        if secret_ref:
+            self._delete_command_secret(secret_ref)
 
     def update_runtime_status(self, values: dict[str, Any]) -> None:
         updated_at = self._now()
