@@ -214,8 +214,19 @@ class WhatsAppDelivery:
             cur = conn.execute(
                 """INSERT OR IGNORE INTO whatsapp_deliveries(
                        message_id, user_id, phone_e164, status, created_at, updated_at
-                   ) VALUES (?, ?, ?, 'queued', ?, ?)""",
+                   ) VALUES (?, ?, ?, 'reserved', ?, ?)""",
                 (message_id, user_id, phone, now, now),
+            )
+            return cur.rowcount == 1
+
+    def _claim_delivery(self, message_id: int, user_id: int) -> bool:
+        """Enter the externally ambiguous phase before calling OpenWA."""
+        with self.storage.connect() as conn:
+            cur = conn.execute(
+                """UPDATE whatsapp_deliveries
+                   SET status='sending', error=NULL, updated_at=?
+                   WHERE message_id=? AND user_id=? AND status='reserved'""",
+                (_now(), message_id, user_id),
             )
             return cur.rowcount == 1
 
@@ -228,6 +239,44 @@ class WhatsAppDelivery:
                    WHERE message_id=? AND user_id=?""",
                 (status, openwa_message_id[:200], error[:1000], _now(), message_id, user_id),
             )
+
+    def _mark_interrupted_sending_unknown(self) -> int:
+        with self.storage.connect() as conn:
+            cur = conn.execute(
+                """UPDATE whatsapp_deliveries
+                   SET status='unknown',
+                       error='Gateway genstartede under OpenWA-levering; automatisk retry er blokeret for at undgå dublet.',
+                       updated_at=?
+                   WHERE status='sending'""",
+                (_now(),),
+            )
+            return cur.rowcount
+
+    def _reserved_rows(self) -> list[dict[str, Any]]:
+        with self.storage.connect() as conn:
+            rows = conn.execute(
+                """SELECT d.*, m.received_at, m.ric, m.station, m.message,
+                          m.delivery_eligible, u.active,
+                          COALESCE(w.enabled,0) AS whatsapp_enabled
+                   FROM whatsapp_deliveries d
+                   JOIN messages m ON m.id=d.message_id
+                   JOIN users u ON u.id=d.user_id
+                   LEFT JOIN user_whatsapp_preferences w ON w.user_id=d.user_id
+                   WHERE d.status='reserved'
+                   ORDER BY d.id ASC LIMIT 100"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _send_reserved(self, message_id: int, user_id: int, phone: str, text: str) -> None:
+        if not self._claim_delivery(message_id, user_id):
+            return
+        try:
+            result = self.client.send_text(phone, text)
+            remote_id = str(result.get("messageId") or result.get("id") or "")
+            self._finish_delivery(message_id, user_id, status="sent", openwa_message_id=remote_id)
+        except Exception as exc:
+            self._finish_delivery(message_id, user_id, status="failed", error=str(exc))
+            self.app.logger.warning("WhatsApp failed for message=%s user=%s: %s", message_id, user_id, exc)
 
     def dispatch(self, message_id: int, event: dict[str, Any]) -> None:
         if not event.get("delivery_eligible", True):
@@ -243,13 +292,60 @@ class WhatsAppDelivery:
             phone = str(recipient["phone_e164"])
             if not self._reserve_delivery(message_id, user_id, phone):
                 continue
+            self._send_reserved(message_id, user_id, phone, text)
+
+    def recover_reserved(self, max_age_seconds: int = 120) -> int:
+        """Retry only reservations that never started an OpenWA request."""
+        self._mark_interrupted_sending_unknown()
+        enabled = _as_bool(os.getenv("PAGER_WHATSAPP_ENABLED", "0"))
+        now = datetime.now(timezone.utc)
+        recovered = 0
+        for row in self._reserved_rows():
             try:
-                result = self.client.send_text(phone, text)
-                remote_id = str(result.get("messageId") or result.get("id") or "")
-                self._finish_delivery(message_id, user_id, status="sent", openwa_message_id=remote_id)
-            except Exception as exc:
-                self._finish_delivery(message_id, user_id, status="failed", error=str(exc))
-                self.app.logger.warning("WhatsApp failed for message=%s user=%s: %s", message_id, user_id, exc)
+                created = datetime.fromisoformat(str(row.get("created_at") or "").replace("Z", "+00:00"))
+            except ValueError:
+                created = None
+            if created is not None and created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age = (
+                (now - created.astimezone(timezone.utc)).total_seconds()
+                if created is not None else max_age_seconds + 1
+            )
+
+            message_id = int(row["message_id"])
+            user_id = int(row["user_id"])
+            if not enabled or not self.client.configured:
+                self._finish_delivery(
+                    message_id, user_id, status="cancelled",
+                    error="WhatsApp er deaktiveret eller OpenWA mangler konfiguration efter genstart.",
+                )
+                continue
+            if not bool(row.get("delivery_eligible")) or not bool(row.get("active")) or not bool(row.get("whatsapp_enabled")):
+                self._finish_delivery(
+                    message_id, user_id, status="cancelled",
+                    error="Modtager eller alarm er ikke længere aktiv efter genstart.",
+                )
+                continue
+            if age < 0 or age > max_age_seconds:
+                self._finish_delivery(
+                    message_id, user_id, status="expired",
+                    error="Reserveret WhatsApp-besked blev ikke sendt før genstart og er nu for gammel.",
+                )
+                continue
+
+            self._send_reserved(
+                message_id,
+                user_id,
+                str(row["phone_e164"]),
+                self.format_alarm(row),
+            )
+            recovered += 1
+
+        if recovered:
+            self.app.logger.warning(
+                "Recovered %s WhatsApp delivery reservation(s) after gateway restart", recovered
+            )
+        return recovered
 
     def dispatch_async(self, message_id: int, event: dict[str, Any]) -> None:
         threading.Thread(
@@ -373,6 +469,8 @@ def install_whatsapp(app, storage, routing, auth_required, *, core=None) -> What
             "session": delivery.client.session_id,
             "api_key_set": bool(delivery.client.api_key),
         })
+
+    delivery.recover_reserved()
 
     @app.after_request
     def inject_whatsapp_ui(response):
