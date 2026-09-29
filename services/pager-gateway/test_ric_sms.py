@@ -169,6 +169,93 @@ class RicSmsTests(unittest.TestCase):
         self.assertEqual(delivery["status"], "queued")
         self.assertEqual(delivery["gateway_message_id"], "88")
 
+    def test_remote_gateway_sent_status_is_mirrored_locally(self):
+        core = SimpleNamespace(
+            DB_PATH=self.db,
+            storage=self.storage,
+            maybe_notify_pushover=lambda message_id, event: None,
+            app=SimpleNamespace(logger=_Logger()),
+        )
+        router = RicSmsRouter(core)
+        router.store.update_config(enabled=True, gateway_url="http://sms-gateway:8090")
+        message_id = self.storage.add_message({
+            "received_at": "2026-09-29T10:00:00+00:00",
+            "protocol": "POCSAG",
+            "baud": 1200,
+            "ric": "0006240",
+            "station": "Ringsted",
+            "message": "BRANDALARM Testvej 1",
+            "raw_line": "raw",
+            "source": "pdl-file",
+            "delivery_eligible": True,
+        })
+        self.assertTrue(
+            router.store.reserve_delivery(message_id, "+4512345678", {"0006240"})
+        )
+        self.assertTrue(router.store.claim_delivery(message_id, "+4512345678"))
+        router.store.finish_delivery(
+            message_id,
+            "+4512345678",
+            status="queued",
+            gateway_message_id="88",
+        )
+        router._get_outgoing_status = lambda gateway_url, remote_id: {
+            "id": 88,
+            "status": "sent",
+            "error": None,
+        }
+
+        changed = router.reconcile_remote_statuses()
+
+        self.assertEqual(changed, 1)
+        delivery = router.store.list_deliveries()[0]
+        self.assertEqual(delivery["status"], "sent")
+        self.assertEqual(delivery["gateway_message_id"], "88")
+        self.assertIsNone(delivery["error"])
+
+    def test_remote_gateway_failure_is_mirrored_without_retry(self):
+        core = SimpleNamespace(
+            DB_PATH=self.db,
+            storage=self.storage,
+            maybe_notify_pushover=lambda message_id, event: None,
+            app=SimpleNamespace(logger=_Logger()),
+        )
+        router = RicSmsRouter(core)
+        router.store.update_config(enabled=True, gateway_url="http://sms-gateway:8090")
+        message_id = self.storage.add_message({
+            "received_at": "2026-09-29T10:00:00+00:00",
+            "protocol": "POCSAG",
+            "baud": 1200,
+            "ric": "0006240",
+            "station": "Ringsted",
+            "message": "BRANDALARM Testvej 1",
+            "raw_line": "raw",
+            "source": "pdl-file",
+            "delivery_eligible": True,
+        })
+        self.assertTrue(
+            router.store.reserve_delivery(message_id, "+4512345678", {"0006240"})
+        )
+        self.assertTrue(router.store.claim_delivery(message_id, "+4512345678"))
+        router.store.finish_delivery(
+            message_id,
+            "+4512345678",
+            status="queued",
+            gateway_message_id="89",
+        )
+        router._get_outgoing_status = lambda gateway_url, remote_id: {
+            "id": 89,
+            "status": "failed",
+            "error": "SMS-afsendelse fik ikke kvittering fra modem",
+        }
+
+        changed = router.reconcile_remote_statuses()
+
+        self.assertEqual(changed, 1)
+        delivery = router.store.list_deliveries()[0]
+        self.assertEqual(delivery["status"], "failed")
+        self.assertIn("ikke kvittering", delivery["error"])
+
     def test_ambiguous_sending_sms_is_not_retried_after_restart(self):
         core = SimpleNamespace(
             DB_PATH=self.db,
