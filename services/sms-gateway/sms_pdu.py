@@ -24,11 +24,12 @@ class DecodedSmsPart:
     concat_part: int | None = None
 
 
-def parse_cmgl_response(response: str) -> list[dict]:
-    """Parse and assemble unread SMS messages from an AT+CMGL PDU response."""
+def parse_cmgl_response_detailed(response: str) -> tuple[list[dict], list[dict]]:
+    """Parse unread SMS rows without letting one malformed PDU poison the batch."""
 
     lines = [line.strip() for line in response.replace("\r", "").split("\n")]
     parts: list[DecodedSmsPart] = []
+    errors: list[dict] = []
 
     index = 0
     while index < len(lines):
@@ -37,6 +38,7 @@ def parse_cmgl_response(response: str) -> list[dict]:
             index += 1
             continue
 
+        modem_index = int(match.group("index"))
         pdu_line = ""
         cursor = index + 1
         while cursor < len(lines):
@@ -49,10 +51,28 @@ def parse_cmgl_response(response: str) -> list[dict]:
             cursor += 1
 
         if pdu_line:
-            parts.append(decode_sms_deliver_pdu(int(match.group("index")), pdu_line))
+            try:
+                parts.append(decode_sms_deliver_pdu(modem_index, pdu_line))
+            except (ValueError, UnicodeError) as exc:
+                errors.append({
+                    "index": modem_index,
+                    "error": str(exc)[:300],
+                })
+        else:
+            errors.append({
+                "index": modem_index,
+                "error": "CMGL-rækken havde ingen gyldig hex-PDU",
+            })
+
         index = max(cursor + 1, index + 1)
 
-    return assemble_parts(parts)
+    return assemble_parts(parts), errors
+
+
+def parse_cmgl_response(response: str) -> list[dict]:
+    """Backward-compatible parser used by existing tests/callers."""
+    messages, _errors = parse_cmgl_response_detailed(response)
+    return messages
 
 
 def decode_sms_deliver_pdu(index: int, pdu_hex: str) -> DecodedSmsPart:
