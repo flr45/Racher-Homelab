@@ -79,6 +79,49 @@ function notify(message, type = 'info', title = '') {
 }
 window.pagerNotify = notify;
 
+function requestPagerPassword() {
+  const dialog = $('#password-dialog');
+  const form = $('#password-dialog-form');
+  const input = $('#password-dialog-input');
+  const cancel = $('#password-dialog-cancel');
+  if (!dialog || !form || !input || !cancel || typeof dialog.showModal !== 'function') {
+    notify('Denne browser understøtter ikke den sikre adgangskodedialog.', 'error');
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      form.removeEventListener('submit', onSubmit);
+      cancel.removeEventListener('click', onCancel);
+      dialog.removeEventListener('cancel', onDialogCancel);
+      input.value = '';
+      if (dialog.open) dialog.close();
+      resolve(value);
+    };
+    const onSubmit = (event) => {
+      event.preventDefault();
+      if (!input.reportValidity()) return;
+      finish(input.value);
+    };
+    const onCancel = () => finish(null);
+    const onDialogCancel = (event) => {
+      event.preventDefault();
+      finish(null);
+    };
+
+    form.addEventListener('submit', onSubmit);
+    cancel.addEventListener('click', onCancel);
+    dialog.addEventListener('cancel', onDialogCancel);
+    input.value = '';
+    dialog.showModal();
+    window.setTimeout(() => input.focus(), 0);
+  });
+}
+window.requestPagerPassword = requestPagerPassword;
+
 async function api(url, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers || {});
@@ -442,7 +485,7 @@ async function refreshUsers() {
     catch (error) { notify(error.message, 'error'); }
   }));
   $$('[data-user-password]').forEach((button) => button.addEventListener('click', async () => {
-    const password = prompt('Indtast ny adgangskode (mindst 10 tegn):');
+    const password = await requestPagerPassword();
     if (password === null) return;
     try { await api(`/api/users/${button.dataset.userPassword}`, {method: 'PATCH', body: JSON.stringify({password})}); notify('Adgangskoden er ændret.', 'success'); }
     catch (error) { notify(error.message, 'error'); }
