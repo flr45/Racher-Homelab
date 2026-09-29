@@ -26,6 +26,13 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def current_boot_id(path: Path = Path("/proc/sys/kernel/random/boot_id")) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 def run(argv: list[str], timeout: int = 4) -> tuple[int, str]:
     try:
         result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
@@ -92,10 +99,14 @@ def check_once() -> dict[str, Any]:
     if not isinstance(modem, dict):
         modem = {}
 
+    boot_id = current_boot_id()
     checks = {
         "gateway": bool(gateway and gateway.get("ok")),
         "pdl": service_active("racher-pdl.service"),
         "system_agent": service_active("racher-pager-system-agent.service"),
+        "fsk_current_boot": bool(
+            boot_id and runtime.get("fsk_usb_boot_id") == boot_id
+        ),
         "fsk_connected": runtime.get("fsk_usb_connected") == "1",
         "fsk_in_use": runtime.get("fsk_usb_pdl_in_use") == "1",
         "sms_gateway": bool(sms and str(sms.get("status") or "").lower() == "ok"),
@@ -108,7 +119,10 @@ def check_once() -> dict[str, Any]:
 
     local_ready = all(
         checks[key]
-        for key in ("gateway", "pdl", "system_agent", "fsk_connected", "fsk_in_use")
+        for key in (
+            "gateway", "pdl", "system_agent",
+            "fsk_current_boot", "fsk_connected", "fsk_in_use",
+        )
     )
     remote_required = bool(SMS_GATEWAY_URL)
     remote_ready = (not remote_required) or (
