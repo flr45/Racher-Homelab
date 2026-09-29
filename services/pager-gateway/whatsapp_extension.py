@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from flask import g, jsonify, request
 
@@ -18,6 +19,14 @@ _PHONE_RE = re.compile(r"^\+[1-9]\d{6,14}$")
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _local_timezone() -> ZoneInfo:
+    name = os.getenv("PAGER_LOCAL_TIMEZONE", "Europe/Copenhagen").strip() or "Europe/Copenhagen"
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return ZoneInfo("Europe/Copenhagen")
 
 
 def _as_bool(value: Any) -> bool:
@@ -200,7 +209,11 @@ class WhatsAppDelivery:
         # that routing identifier into a recipient's chat history.
         if received:
             try:
-                dt = datetime.fromisoformat(received.replace("Z", "+00:00")).astimezone()
+                dt = datetime.fromisoformat(received.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=_local_timezone())
+                else:
+                    dt = dt.astimezone(_local_timezone())
                 meta.append(dt.strftime("%d-%m-%Y %H:%M:%S"))
             except ValueError:
                 meta.append(received)
