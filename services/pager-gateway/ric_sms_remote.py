@@ -185,4 +185,8 @@ def install_ric_sms(core: Any, auth_required: Callable) -> AuthenticatedRicSmsRo
     router = AuthenticatedRicSmsRouter(core)
     register_ric_sms_routes(core, router, auth_required)
     core.ric_sms_router = router
+    # The production WSGI imports this installer, not ric_sms.install_ric_sms().
+    # Preserve the base router's restart recovery so a reservation created before
+    # a Pager restart is not left stuck forever.
+    router.recover_reserved()
     return router
