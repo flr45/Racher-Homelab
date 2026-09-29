@@ -82,6 +82,11 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn("systemctl start racher-pager-fsk-status.timer", script)
         self.assertIn("maintenance flock", script)
 
+    def test_boot_verifier_timeout_covers_remote_retry_window(self):
+        script = (PDL / "install-boot-verifier.sh").read_text(encoding="utf-8")
+        self.assertIn("TimeoutStartSec=360s", script)
+        self.assertNotIn("TimeoutStartSec=130s", script)
+
     def test_pdl_wrapper_waits_for_pinned_or_ftdi_device(self):
         script = (PDL / "run-pdl-headless.sh").read_text(encoding="utf-8")
         self.assertIn("select_fsk_device", script)
