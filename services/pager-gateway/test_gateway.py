@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from gateway import (
     FileTailSource,
+    PushoverClient,
     decode_pocsag_danish_charset,
     detect_station,
     parse_pdl_line,
@@ -124,6 +125,21 @@ class PagerParsingTests(unittest.TestCase):
         text = public_message("RIC: 1234567 MESSAGE: BRANDALARM Testvej 1")
         self.assertEqual(text, "BRANDALARM Testvej 1")
         self.assertNotIn("1234567", text)
+
+
+    def test_pushover_default_title_uses_pager_branding(self):
+        client = PushoverClient()
+        with patch("gateway.requests.post") as post:
+            post.return_value.raise_for_status.return_value = None
+            client.send("app-token", "user-key", "Racher Pager Gateway", "test")
+        self.assertEqual(post.call_args.kwargs["data"]["title"], "Racher Pager Gateway")
+
+    def test_pushover_custom_alarm_title_is_preserved(self):
+        client = PushoverClient()
+        with patch("gateway.requests.post") as post:
+            post.return_value.raise_for_status.return_value = None
+            client.send("app-token", "user-key", "Slagelse", "test")
+        self.assertEqual(post.call_args.kwargs["data"]["title"], "Slagelse")
 
     def test_file_tail_detects_replaced_log_file(self):
         with tempfile.TemporaryDirectory() as tmp:
