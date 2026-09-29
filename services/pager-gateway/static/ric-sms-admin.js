@@ -51,6 +51,9 @@
       <div class="card-head" style="margin-top:1rem"><div><span class="label">Regler</span><h3>Aktive RIC → SMS-koblinger</h3></div><button id="ric-sms-refresh" type="button">Opdater</button></div>
       <div id="ric-sms-rules" class="command-list"><p class="muted">Henter SMS-regler…</p></div>
 
+      <div class="card-head" style="margin-top:1rem"><div><span class="label">Seneste match</span><h3>Valgte RIC-koder set i live PDL</h3></div></div>
+      <div id="ric-sms-matches" class="command-list"><p class="muted">Ingen RIC-match hentet endnu.</p></div>
+
       <div class="card-head" style="margin-top:1rem"><div><span class="label">Levering</span><h3>Seneste SMS-kørsler</h3></div></div>
       <div id="ric-sms-deliveries" class="command-list"><p class="muted">Ingen SMS-data hentet endnu.</p></div>`;
 
@@ -117,6 +120,35 @@
     }));
   }
 
+  function matchDecision(row) {
+    if (row.delivery_eligible) return 'Normal alarm';
+    const reason = String(row.suppressed_reason || '');
+    const names = {
+      'decoder-non-alpha': 'NUMERIC/TONE · RIC-call fallback',
+      'decoder-code': 'Decoder-kode · RIC-call fallback',
+      'decoder-empty': 'Tom decoderlinje · RIC-call fallback',
+      'decoder-fragment': 'Decoder-fragment · RIC-call fallback',
+      'duplicate': 'Dublet',
+      'burst-candidate': 'Afventer/indgik i burst',
+      'ric-filter': 'Blokeret af RIC-filter',
+    };
+    if (reason.startsWith('word-filter:')) return `Blokeret af ordfilter: ${reason.slice('word-filter:'.length)}`;
+    return names[reason] || reason || 'Undertrykt';
+  }
+
+  function renderMatches(rows) {
+    const target = document.querySelector('#ric-sms-matches');
+    if (!target) return;
+    target.innerHTML = rows.length ? rows.map((row) => `
+      <div class="command-row">
+        <div>
+          <strong>RIC ${escapeHtml(row.ric || '—')} · ${escapeHtml(matchDecision(row))}</strong>
+          <small>melding #${row.message_id} · ${formatDate(row.received_at)}${row.station ? ` · ${escapeHtml(row.station)}` : ''}</small>
+          ${row.duplicate_of ? `<p class="muted">Dublet af melding #${row.duplicate_of}</p>` : ''}
+        </div>
+      </div>`).join('') : '<p class="muted">Ingen aktive RIC-regler er set i live PDL endnu.</p>';
+  }
+
   function renderDeliveries(rows) {
     const target = document.querySelector('#ric-sms-deliveries');
     if (!target) return;
@@ -132,10 +164,11 @@
 
   async function refresh() {
     installUi();
-    const [config, loadedRules, deliveries] = await Promise.all([
+    const [config, loadedRules, deliveries, matches] = await Promise.all([
       api('/api/ric-sms/config'),
       api('/api/ric-sms/rules'),
       api('/api/ric-sms/deliveries?limit=30'),
+      api('/api/ric-sms/matches?limit=20'),
     ]);
     rules = loadedRules || [];
     document.querySelector('#ric-sms-enabled').checked = Boolean(config.enabled);
@@ -144,6 +177,7 @@
     state.textContent = config.enabled ? 'Aktiv' : 'Deaktiveret';
     state.classList.toggle('active', Boolean(config.enabled));
     renderRules();
+    renderMatches(matches || []);
     renderDeliveries(deliveries || []);
     decorateRicRows();
   }
