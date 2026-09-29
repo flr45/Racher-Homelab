@@ -45,6 +45,15 @@ class RuntimeDeploymentTests(unittest.TestCase):
         # Guard against drifting back to a hand-maintained module allow-list.
         self.assertNotIn('"$RUNTIME_REPO/services/pager-gateway/app.py" \\', script)
 
+    def test_update_rebuilds_pdl_for_any_build_time_patch_change(self):
+        script = (PDL / "update-pager.sh").read_text(encoding="utf-8")
+        self.assertIn("services/pager-gateway/pdl/install-pdl.sh", script)
+        self.assertIn("'services/pager-gateway/pdl/patch_*.py'", script)
+        self.assertNotIn(
+            "services/pager-gateway/pdl/patch_headless.py \\",
+            script,
+        )
+
     def test_update_migrates_runtime_permissions_before_healthcheck(self):
         script = (PDL / "update-pager.sh").read_text(encoding="utf-8")
         migrate = script.index('step "Migrerer gateway-runtime og filrettigheder"')
