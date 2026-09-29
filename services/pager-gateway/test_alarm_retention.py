@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import contextmanager
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -60,6 +61,7 @@ class AlarmRetentionTests(unittest.TestCase):
                     relevance_score REAL NOT NULL DEFAULT 1.0,
                     delivery_eligible INTEGER NOT NULL DEFAULT 1
                 );
+                CREATE INDEX idx_messages_received_at ON messages(received_at DESC);
                 CREATE TABLE stations (
                     station_key TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -122,6 +124,11 @@ class AlarmRetentionTests(unittest.TestCase):
 
     def _core(self, routing: _Routing):
         return SimpleNamespace(storage=_Storage(self.db_path), routing=routing)
+
+    def test_sql_prefilter_keeps_received_at_index_usable(self):
+        source = (Path(__file__).parent / "alarm_retention.py").read_text(encoding="utf-8")
+        self.assertIn('"AND received_at >= ?"', source)
+        self.assertNotIn('"AND datetime(received_at) >= datetime(?)"', source)
 
     def test_admin_feed_contains_only_delivery_eligible_rows_from_last_seven_days(self):
         rows = _recent_rows(self._core(_Routing()))
