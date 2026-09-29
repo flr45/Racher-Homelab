@@ -4,6 +4,7 @@ import json
 import os
 import re
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -54,10 +55,105 @@ class OpenWAClient:
         self.api_key = os.getenv("PAGER_OPENWA_API_KEY", "").strip()
         self.session_id = os.getenv("PAGER_OPENWA_SESSION", "pager").strip() or "pager"
         self.timeout = max(2.0, min(float(os.getenv("PAGER_OPENWA_TIMEOUT", "10")), 30.0))
+        self._health_lock = threading.Lock()
+        self._health_cached_at = 0.0
+        self._health_cache: dict[str, Any] = {
+            "reachable": False,
+            "ready": False,
+            "status": "unknown",
+            "error": "",
+        }
 
     @property
     def configured(self) -> bool:
         return bool(self.base_url and self.api_key and self.session_id)
+
+    def session_health(self, *, force: bool = False) -> dict[str, Any]:
+        """Probe OpenWA and verify that the configured session is actually ready."""
+        if not self.configured:
+            return {
+                "reachable": False,
+                "ready": False,
+                "status": "not-configured",
+                "error": "OpenWA er ikke konfigureret.",
+            }
+
+        now = time.monotonic()
+        with self._health_lock:
+            if not force and now - self._health_cached_at < 8.0:
+                return dict(self._health_cache)
+
+        request_obj = urllib.request.Request(
+            f"{self.base_url}/api/sessions?limit=100&offset=0",
+            method="GET",
+            headers={
+                "X-API-Key": self.api_key,
+                "User-Agent": "Racher-Pager-Gateway/WhatsApp",
+            },
+        )
+        result: dict[str, Any]
+        try:
+            with urllib.request.urlopen(request_obj, timeout=min(self.timeout, 3.0)) as response:
+                raw = response.read().decode("utf-8", errors="replace")
+                payload = json.loads(raw) if raw else []
+            if isinstance(payload, list):
+                sessions = payload
+            elif isinstance(payload, dict):
+                candidates = payload.get("data")
+                if not isinstance(candidates, list):
+                    candidates = payload.get("sessions")
+                sessions = candidates if isinstance(candidates, list) else []
+            else:
+                sessions = []
+
+            wanted = self.session_id.casefold()
+            matched = None
+            for item in sessions:
+                if not isinstance(item, dict):
+                    continue
+                identities = {
+                    str(item.get("id") or "").strip().casefold(),
+                    str(item.get("sessionId") or "").strip().casefold(),
+                    str(item.get("name") or "").strip().casefold(),
+                }
+                if wanted in identities:
+                    matched = item
+                    break
+
+            if matched is None:
+                result = {
+                    "reachable": True,
+                    "ready": False,
+                    "status": "session-not-found",
+                    "error": f"OpenWA-session '{self.session_id}' blev ikke fundet.",
+                }
+            else:
+                status = str(matched.get("status") or matched.get("state") or "unknown").strip().lower()
+                result = {
+                    "reachable": True,
+                    "ready": status == "ready",
+                    "status": status or "unknown",
+                    "error": "",
+                }
+        except urllib.error.HTTPError as exc:
+            result = {
+                "reachable": True,
+                "ready": False,
+                "status": f"http-{exc.code}",
+                "error": f"OpenWA HTTP {exc.code}",
+            }
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+            result = {
+                "reachable": False,
+                "ready": False,
+                "status": "unreachable",
+                "error": str(exc)[:300],
+            }
+
+        with self._health_lock:
+            self._health_cached_at = time.monotonic()
+            self._health_cache = dict(result)
+        return result
 
     def send_text(self, phone: str, text: str) -> dict[str, Any]:
         if not self.configured:
@@ -449,10 +545,13 @@ def install_whatsapp(app, storage, routing, auth_required, *, core=None) -> What
     @app.get("/api/whatsapp/me")
     @auth_required()
     def whatsapp_me_get():
+        health = delivery.client.session_health()
         return jsonify({
             **delivery.get_preference(int(g.user["id"])),
             "gateway_enabled": _as_bool(os.getenv("PAGER_WHATSAPP_ENABLED", "0")),
             "gateway_configured": delivery.client.configured,
+            "gateway_ready": bool(health.get("ready")),
+            "gateway_status": str(health.get("status") or "unknown"),
         })
 
     @app.put("/api/whatsapp/me")
@@ -515,9 +614,14 @@ def install_whatsapp(app, storage, routing, auth_required, *, core=None) -> What
     @app.get("/api/whatsapp/status")
     @auth_required(admin=True)
     def whatsapp_status():
+        health = delivery.client.session_health()
         return jsonify({
             "enabled": _as_bool(os.getenv("PAGER_WHATSAPP_ENABLED", "0")),
             "configured": delivery.client.configured,
+            "ready": bool(health.get("ready")),
+            "reachable": bool(health.get("reachable")),
+            "session_status": str(health.get("status") or "unknown"),
+            "health_error": str(health.get("error") or ""),
             "url": delivery.client.base_url,
             "session": delivery.client.session_id,
             "api_key_set": bool(delivery.client.api_key),
