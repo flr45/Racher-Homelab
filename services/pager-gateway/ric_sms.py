@@ -521,12 +521,15 @@ class RicSmsRouter:
             try:
                 remote = self._get_outgoing_status(config["gateway_url"], remote_id)
             except Exception as exc:  # network/status failure must not alter delivery
+                # Every pending row uses the same configured gateway. If that
+                # gateway is unreachable, stop this cycle after one bounded
+                # request instead of multiplying the outage by the queue length.
                 self.core.app.logger.warning(
-                    "Could not reconcile SMS Gateway delivery %s: %s",
+                    "Could not reconcile SMS Gateway delivery %s; remaining rows deferred: %s",
                     remote_id,
                     exc,
                 )
-                continue
+                break
 
             status = str(remote.get("status") or "").lower()
             if status not in {"sent", "failed", "unknown"}:
