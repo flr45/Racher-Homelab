@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import re
 
 import queued_app as runtime
 from flask import jsonify, request
@@ -20,16 +21,20 @@ detect_station_code = runtime.detect_station_code
 normalize_phone = runtime.normalize_phone
 
 
-def _remote_enqueue_authorized() -> bool:
+_OUTGOING_STATUS_RE = re.compile(r"^/api/outgoing/\d+$")
+
+
+def _loopback_request() -> bool:
+    return str(request.remote_addr or "") in {"127.0.0.1", "::1"}
+
+
+def _remote_authenticated() -> bool:
     expected = os.getenv("SMS_GATEWAY_API_TOKEN", "").strip()
-    # modem_reader.py talks to 127.0.0.1 inside this same container. Do not make
-    # the local modem queue depend on a network secret.
-    if str(request.remote_addr or "") in {"127.0.0.1", "::1"}:
+    if _loopback_request():
         return True
 
     # A remote bind (for example Tailscale) must never silently become an
-    # unauthenticated SMS-sending capability just because the shared token is
-    # missing from the environment.
+    # unauthenticated SMS capability just because the shared token is missing.
     if not expected:
         return False
 
@@ -45,17 +50,31 @@ def _remote_enqueue_authorized() -> bool:
 @app.get("/api/auth-check")
 def sms_gateway_auth_check():
     expected = os.getenv("SMS_GATEWAY_API_TOKEN", "").strip()
-    if not _remote_enqueue_authorized():
+    if not _remote_authenticated():
         return jsonify(ok=False, auth_configured=bool(expected)), 401
     return jsonify(ok=True, auth_configured=bool(expected))
 
 
 @app.before_request
-def protect_remote_sms_enqueue():
-    # POST /api/outgoing is the capability that creates a billable/real SMS.
-    # Health, modem claim/complete and existing local administration retain their
-    # previous behaviour, so this hardening does not break the modem worker.
-    if request.method == "POST" and request.path == "/api/outgoing":
-        if not _remote_enqueue_authorized():
-            return jsonify(error="unauthorized SMS enqueue"), 401
+def protect_remote_sms_api():
+    # The host-local web/admin/modem worker keeps the full API over loopback.
+    # Remote peers (for example the Pager Pi over Tailscale) receive only the
+    # minimum contract required for RIC→SMS: auth-check, enqueue and read-only
+    # status for the queue item they already know by id.
+    if _loopback_request() or not request.path.startswith("/api/"):
+        return None
+
+    allowed_remote = (
+        request.path == "/api/auth-check"
+        or (request.method == "POST" and request.path == "/api/outgoing")
+        or (
+            request.method == "GET"
+            and _OUTGOING_STATUS_RE.fullmatch(request.path) is not None
+        )
+    )
+    if not allowed_remote:
+        return jsonify(error="SMS Gateway API is loopback-only"), 403
+
+    if not _remote_authenticated():
+        return jsonify(error="unauthorized SMS Gateway request"), 401
     return None
