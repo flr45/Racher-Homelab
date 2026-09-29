@@ -199,7 +199,9 @@ def install_pushover_destinations(core: Any) -> PushoverDestinationStore:
                 core.pushover.send(
                     token,
                     destination["user_key"],
-                    event.get("station") or settings.get("gateway_name", "Pager"),
+                    core.public_notification_title(
+                        event, settings.get("gateway_name", "Pager")
+                    ),
                     core.public_message(event.get("message", "")),
                 )
                 sent += 1

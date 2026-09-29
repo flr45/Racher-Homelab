@@ -286,10 +286,13 @@ async function refreshAdminStatus() {
 }
 
 $('#send-mock')?.addEventListener('click', async () => {
+  const message = $('#mock-message').value;
+  if (!confirm('Send testalarmen gennem de aktive notifikationskanaler? Modtagere vil tydeligt se TEST i notifikationens titel.')) return;
   const button = $('#send-mock'); button.disabled = true;
   try {
-    await api('/api/mock', {method: 'POST', body: JSON.stringify({message: $('#mock-message').value})});
+    await api('/api/mock', {method: 'POST', body: JSON.stringify({message})});
     await refreshAlarms(); await refreshAdminStatus();
+    alert('Testalarmen er sendt gennem simulatoren.');
   } catch (error) { alert(error.message); } finally { button.disabled = false; }
 });
 
