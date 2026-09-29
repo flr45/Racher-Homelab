@@ -100,6 +100,7 @@ class BootVerifierTests(unittest.TestCase):
         with patch.object(boot_verifier, "DB_PATH", self.db), \
              patch.object(boot_verifier, "SMS_GATEWAY_URL", "http://100.111.28.12:8090"), \
              patch.object(boot_verifier, "service_active", return_value=True), \
+             patch.object(boot_verifier, "current_boot_id", return_value="test-boot"), \
              patch.object(boot_verifier, "http_json", side_effect=fake_http), \
              patch.object(boot_verifier, "tailscale_status", return_value={"installed": True, "service": "active", "ip": "100.81.169.71"}):
             result = boot_verifier.check_once()
