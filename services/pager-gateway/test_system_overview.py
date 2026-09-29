@@ -31,6 +31,22 @@ class _Response:
         }).encode("utf-8")
 
 
+class _AuthResponse:
+    status = 200
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return json.dumps({
+            "ok": True,
+            "auth_configured": True,
+        }).encode("utf-8")
+
+
 class SystemOverviewTests(unittest.TestCase):
     @staticmethod
     def _runtime():
@@ -46,8 +62,18 @@ class SystemOverviewTests(unittest.TestCase):
 
     def test_complete_chain_is_green_when_remote_sms_and_modem_are_online(self):
         overview = SystemOverview(SimpleNamespace())
-        with patch.dict(os.environ, {"PAGER_SMS_GATEWAY_URL": "http://100.111.28.12:8090"}, clear=False):
-            with patch("system_overview.urllib.request.urlopen", return_value=_Response()):
+        with patch.dict(
+            os.environ,
+            {
+                "PAGER_SMS_GATEWAY_URL": "http://100.111.28.12:8090",
+                "PAGER_SMS_GATEWAY_TOKEN": "bridge-secret",
+            },
+            clear=False,
+        ):
+            with patch(
+                "system_overview.urllib.request.urlopen",
+                side_effect=[_Response(), _AuthResponse()],
+            ):
                 result = overview.snapshot(self._runtime())
 
         self.assertTrue(result["local_ready"])
@@ -55,6 +81,7 @@ class SystemOverviewTests(unittest.TestCase):
         self.assertEqual(result["state"], "ok")
         self.assertEqual(result["sms"]["endpoint"], "100.111.28.12:8090")
         self.assertEqual(result["sms"]["modem_state"], "online")
+        self.assertTrue(result["sms"]["auth_ok"])
         states = {item["key"]: item["state"] for item in result["chain"]}
         self.assertEqual(states["fsk"], "ok")
         self.assertEqual(states["pdl"], "ok")
@@ -68,13 +95,50 @@ class SystemOverviewTests(unittest.TestCase):
             )
         )
         overview = SystemOverview(SimpleNamespace(storage=storage))
-        with patch.dict(os.environ, {"PAGER_SMS_GATEWAY_URL": ""}, clear=False):
-            with patch("system_overview.urllib.request.urlopen", return_value=_Response()):
+        with patch.dict(
+            os.environ,
+            {"PAGER_SMS_GATEWAY_URL": "", "PAGER_SMS_GATEWAY_TOKEN": "bridge-secret"},
+            clear=False,
+        ):
+            with patch(
+                "system_overview.urllib.request.urlopen",
+                side_effect=[_Response(), _AuthResponse()],
+            ):
                 result = overview.snapshot(self._runtime())
 
         self.assertTrue(result["sms"]["configured"])
         self.assertEqual(result["sms"]["endpoint"], "100.90.80.70:8090")
         self.assertTrue(result["end_to_end_ready"])
+
+    def test_reachable_sms_gateway_with_rejected_token_is_not_end_to_end_ready(self):
+        overview = SystemOverview(SimpleNamespace())
+        unauthorized = urllib.error.HTTPError(
+            "http://100.111.28.12:8090/api/auth-check",
+            401,
+            "Unauthorized",
+            hdrs=None,
+            fp=None,
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "PAGER_SMS_GATEWAY_URL": "http://100.111.28.12:8090",
+                "PAGER_SMS_GATEWAY_TOKEN": "wrong-secret",
+            },
+            clear=False,
+        ):
+            with patch(
+                "system_overview.urllib.request.urlopen",
+                side_effect=[_Response(), unauthorized],
+            ):
+                result = overview.snapshot(self._runtime())
+
+        self.assertTrue(result["local_ready"])
+        self.assertFalse(result["end_to_end_ready"])
+        self.assertTrue(result["sms"]["reachable"])
+        self.assertFalse(result["sms"]["auth_ok"])
+        states = {item["key"]: item["state"] for item in result["chain"]}
+        self.assertEqual(states["sms-auth"], "warning")
 
     def test_local_pager_can_be_ready_when_sms_gateway_is_not_configured(self):
         overview = SystemOverview(SimpleNamespace())
