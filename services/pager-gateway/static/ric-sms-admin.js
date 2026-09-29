@@ -65,7 +65,13 @@
   }
 
   function statusLabel(value) {
-    const names = {pending: 'Afventer', queued: 'I SMS-kø', failed: 'Fejlet'};
+    const names = {
+      pending: 'Afventer',
+      sending: 'Sender til SMS Gateway',
+      queued: 'I SMS-kø',
+      failed: 'Fejlet',
+      uncertain: 'Ukendt efter genstart',
+    };
     return names[value] || value || '—';
   }
 
