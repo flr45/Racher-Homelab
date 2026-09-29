@@ -481,6 +481,40 @@ def _run_script(script: Path, args: list[str] | None = None, timeout: int = 900)
     return bool(result and result.returncode == 0), _command_text(result)
 
 
+def _run_maintenance_script(
+    script: Path,
+    unit_name: str,
+    args: list[str] | None = None,
+    timeout: int = 1200,
+) -> tuple[bool, str]:
+    """Run a fixed maintenance helper in its own root systemd unit.
+
+    The long-running host agent is deliberately filesystem-sandboxed with
+    ProtectSystem=full. Update/rollback must refresh files such as logrotate,
+    systemd units and one-time migration config outside that namespace. A
+    transient unit gets a fresh mount namespace from PID 1 while still executing
+    only the fixed, root-owned helper path selected by this code.
+    """
+    if not script.exists():
+        return False, f"Mangler helper: {script}"
+    systemd_run = shutil.which("systemd-run")
+    if not systemd_run:
+        return False, "systemd-run mangler; vedligeholdelse kan ikke køres sikkert uden for host-agent sandbox"
+    argv = [
+        systemd_run,
+        "--quiet",
+        "--wait",
+        "--pipe",
+        "--collect",
+        "--service-type=exec",
+        f"--unit={unit_name}",
+        str(script),
+        *(args or []),
+    ]
+    result = _run(argv, timeout=timeout)
+    return bool(result and result.returncode == 0), _command_text(result)
+
+
 def _schedule_restore(storage: Storage, command_id: int, payload: dict[str, Any]) -> None:
     filename = str(payload["filename"])
     if not RESTORE_SCRIPT.exists():
@@ -528,9 +562,13 @@ def run_command(storage: Storage, command: dict[str, Any]) -> None:
         elif action == "backup-now":
             ok, text = _run_script(BACKUP_SCRIPT, timeout=180)
         elif action == "update-gateway":
-            ok, text = _run_script(UPDATE_SCRIPT, timeout=1200)
+            ok, text = _run_maintenance_script(
+                UPDATE_SCRIPT, f"racher-pager-update-{command_id}", timeout=1200
+            )
         elif action == "rollback-gateway":
-            ok, text = _run_script(ROLLBACK_SCRIPT, timeout=1200)
+            ok, text = _run_maintenance_script(
+                ROLLBACK_SCRIPT, f"racher-pager-rollback-{command_id}", timeout=1200
+            )
         elif action == "wifi-add":
             ok, text = _wifi_add(payload)
         elif action == "wifi-remove":
