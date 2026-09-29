@@ -5,6 +5,14 @@ from pathlib import Path
 
 
 class NotificationWrapperOrderTests(unittest.TestCase):
+    def test_managed_pushover_uses_shared_public_notification_title(self):
+        source = (Path(__file__).with_name("pushover_destinations.py")).read_text(encoding="utf-8")
+        self.assertIn("core.public_notification_title(", source)
+        self.assertNotIn(
+            'event.get("station") or settings.get("gateway_name", "Pager"),',
+            source,
+        )
+
     def test_ric_sms_wraps_operations_pushover_layer(self):
         source = (Path(__file__).with_name("wsgi.py")).read_text(encoding="utf-8")
         operations = source.index("operations = install_operations(core)")
