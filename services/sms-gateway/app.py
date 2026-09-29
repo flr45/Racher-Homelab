@@ -462,7 +462,11 @@ def health():
             "last_message_at": modem_status.get("last_message_at"),
             "last_error": modem_status.get("last_error"),
             "network": modem_status.get("network"),
+            "network_registered": bool(modem_status.get("network_registered")),
+            "registration_state": modem_status.get("registration_state"),
             "signal": modem_status.get("signal"),
+            "signal_rssi": modem_status.get("signal_rssi"),
+            "signal_dbm": modem_status.get("signal_dbm"),
         },
         gateway={
             "state": gateway_status.get("state", "unknown"),
