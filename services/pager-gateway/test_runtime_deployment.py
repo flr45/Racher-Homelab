@@ -40,6 +40,13 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn("racher-pager-post-update", script)
         self.assertIn("--force-recreate pager-gateway", script)
 
+    def test_update_compiles_all_top_level_gateway_modules(self):
+        script = (PDL / "update-pager.sh").read_text(encoding="utf-8")
+        self.assertIn("-maxdepth 1 -type f -name '*.py' -print0", script)
+        self.assertIn('python3 -m py_compile "$module"', script)
+        # Guard against drifting back to a hand-maintained module allow-list.
+        self.assertNotIn('"$RUNTIME_REPO/services/pager-gateway/app.py" \\', script)
+
     def test_update_migrates_runtime_permissions_before_healthcheck(self):
         script = (PDL / "update-pager.sh").read_text(encoding="utf-8")
         migrate = script.index('step "Migrerer gateway-runtime og filrettigheder"')
