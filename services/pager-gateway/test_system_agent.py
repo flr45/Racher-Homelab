@@ -58,6 +58,17 @@ class SystemAgentTests(unittest.TestCase):
             self.assertNotIn("payload", listed[0])
             self.assertNotIn("megethemmelig", str(listed))
 
+            with storage.connect() as conn:
+                queued = conn.execute(
+                    "SELECT payload FROM system_commands WHERE id=?", (command_id,)
+                ).fetchone()
+            self.assertNotIn("megethemmelig", queued["payload"])
+            self.assertIn("password_secret", queued["payload"])
+            secret_files = list((Path(tmp) / "command-secrets").glob("*.secret"))
+            self.assertEqual(len(secret_files), 1)
+            self.assertEqual(secret_files[0].read_text(encoding="utf-8"), "megethemmelig")
+            self.assertEqual(secret_files[0].stat().st_mode & 0o777, 0o600)
+
             claimed = storage.claim_next_system_command()
             self.assertEqual(claimed["id"], command_id)
             self.assertEqual(claimed["payload"]["password"], "megethemmelig")
@@ -68,6 +79,30 @@ class SystemAgentTests(unittest.TestCase):
                     "SELECT payload FROM system_commands WHERE id=?", (command_id,)
                 ).fetchone()
             self.assertEqual(row["payload"], "{}")
+            self.assertEqual(list((Path(tmp) / "command-secrets").glob("*.secret")), [])
+
+    def test_missing_wifi_secret_fails_closed_without_exposing_password(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = Storage(str(Path(tmp) / "pager.db"))
+            user_id = storage.create_user("admin", "Admin", "hash", "admin", None)
+            command_id = storage.queue_system_command(
+                "wifi-add",
+                user_id,
+                {"ssid": "Station WiFi", "password": "megethemmelig"},
+            )
+            for path in (Path(tmp) / "command-secrets").glob("*.secret"):
+                path.unlink()
+
+            claimed = storage.claim_next_system_command()
+            self.assertIsNone(claimed)
+            with storage.connect() as conn:
+                row = conn.execute(
+                    "SELECT status, payload, result FROM system_commands WHERE id=?",
+                    (command_id,),
+                ).fetchone()
+            self.assertEqual(row["status"], "failed")
+            self.assertEqual(row["payload"], "{}")
+            self.assertIn("mangler", row["result"])
 
     def test_decoder_settings_are_applied_without_overwriting_hardware_values(self):
         with tempfile.TemporaryDirectory() as tmp:
