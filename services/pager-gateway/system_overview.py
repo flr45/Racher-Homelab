@@ -46,8 +46,22 @@ class SystemOverview:
         self._sms_checked = 0.0
         self._sms_cache: dict[str, Any] = {"configured": False, "reachable": False}
 
+    def _configured_sms_gateway_url(self) -> str:
+        # RIC-SMS can be configured either through the admin UI (SQLite) or the
+        # appliance environment. Mirror RicSmsStore.config(): the explicit
+        # database setting wins, with the environment as fallback.
+        stored = ""
+        try:
+            storage = getattr(self.core, "storage", None)
+            if storage is not None:
+                stored = str(storage.get_setting("ric_sms_gateway_url", "") or "")
+        except Exception:  # health reporting must degrade safely
+            stored = ""
+        env_url = str(os.getenv("PAGER_SMS_GATEWAY_URL", "") or "")
+        return (stored.strip() or env_url.strip()).rstrip("/")
+
     def _probe_sms_gateway(self) -> dict[str, Any]:
-        base_url = str(os.getenv("PAGER_SMS_GATEWAY_URL", "") or "").strip().rstrip("/")
+        base_url = self._configured_sms_gateway_url()
         if not base_url:
             return {
                 "configured": False,
