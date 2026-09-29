@@ -44,6 +44,10 @@ done
 
 mkdir -p "$TMP_DIR/data"
 sqlite3 "$DB_PATH" ".timeout 10000" ".backup '$TMP_DIR/data/pager.db'"
+if ! sqlite3 "$TMP_DIR/data/pager.db" "PRAGMA integrity_check;" | grep -qx 'ok'; then
+  echo "Den konsistente databasekopi bestod ikke integrity_check; backup afbrydes." >&2
+  exit 1
+fi
 
 for file in session-secret vapid-private.pem; do
   [[ -f "$STATE_ROOT/$file" ]] && cp -p "$STATE_ROOT/$file" "$TMP_DIR/data/$file"
@@ -65,9 +69,17 @@ database=$DB_PATH
 state_root=$STATE_ROOT
 EOF
 
-tar -C "$TMP_DIR" -czf "$ARCHIVE" .
-chmod 0600 "$ARCHIVE"
+PARTIAL="$ARCHIVE.partial.$"
+rm -f "$PARTIAL"
+tar -C "$TMP_DIR" -czf "$PARTIAL" .
+if ! tar -tzf "$PARTIAL" >/dev/null; then
+  echo "Backup-arkivet kunne ikke valideres; den ufærdige fil slettes." >&2
+  rm -f "$PARTIAL"
+  exit 1
+fi
+chmod 0600 "$PARTIAL"
+mv -f "$PARTIAL" "$ARCHIVE"
 find "$BACKUP_DIR" -maxdepth 1 -type f -name 'racher-pager-*.tar.gz' \
   -mtime "+$RETENTION_DAYS" -delete
 
-echo "Backup oprettet: $ARCHIVE"
+echo "Backup oprettet og verificeret: $ARCHIVE"
