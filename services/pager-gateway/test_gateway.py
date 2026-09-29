@@ -11,6 +11,7 @@ from gateway import (
     detect_station,
     parse_pdl_line,
     public_message,
+    public_notification_title,
 )
 
 
@@ -124,6 +125,25 @@ class PagerParsingTests(unittest.TestCase):
         text = public_message("RIC: 1234567 MESSAGE: BRANDALARM Testvej 1")
         self.assertEqual(text, "BRANDALARM Testvej 1")
         self.assertNotIn("1234567", text)
+
+
+    def test_mock_notification_title_is_clearly_marked_as_test(self):
+        self.assertEqual(
+            public_notification_title(
+                {"source": "mock", "station": "Slagelse"},
+                "Racher Pager Gateway",
+            ),
+            "TEST · Slagelse",
+        )
+
+    def test_live_notification_title_is_not_changed(self):
+        self.assertEqual(
+            public_notification_title(
+                {"source": "pdl-file", "station": "Slagelse"},
+                "Racher Pager Gateway",
+            ),
+            "Slagelse",
+        )
 
     def test_file_tail_detects_replaced_log_file(self):
         with tempfile.TemporaryDirectory() as tmp:
