@@ -138,12 +138,60 @@ async function api(url, options = {}) {
   return data;
 }
 
+const deliveryChannelLabels = {
+  pushover: 'Pushover',
+  web_push: 'Web Push',
+};
+
+function deliveryEntries(row) {
+  const delivery = row && row.delivery && typeof row.delivery === 'object' ? row.delivery : {};
+  return Object.entries(delivery).filter(([, value]) => value && typeof value === 'object');
+}
+
+function deliveryText(row) {
+  return deliveryEntries(row).map(([channel, value]) => {
+    const label = deliveryChannelLabels[channel] || channel;
+    const status = String(value.status || 'ukendt');
+    const sent = Number(value.sent_count || 0);
+    const targets = Number(value.target_count || 0);
+    if (status === 'sent') return targets > 1 ? `${label} ${sent}/${targets} sendt` : `${label} sendt`;
+    if (status === 'partial') return `${label} delvist ${sent}/${targets}`;
+    if (status === 'failed') return `${label} fejlede`;
+    if (status === 'no-target') return `${label} ingen modtager`;
+    if (status === 'disabled') return `${label} deaktiveret`;
+    return `${label} ${status}`;
+  });
+}
+
+function deliveryBadges(row) {
+  const html = deliveryEntries(row).map(([channel, value]) => {
+    const label = deliveryChannelLabels[channel] || channel;
+    const status = String(value.status || 'unknown').toLowerCase();
+    const sent = Number(value.sent_count || 0);
+    const targets = Number(value.target_count || 0);
+    const detail = status === 'sent' && targets > 1
+      ? `${sent}/${targets}`
+      : status === 'partial'
+        ? `${sent}/${targets}`
+        : status === 'failed'
+          ? 'fejl'
+          : status === 'no-target'
+            ? 'ingen modtager'
+            : status === 'disabled'
+              ? 'fra'
+              : status;
+    const stateClass = ['sent', 'partial', 'failed'].includes(status) ? status : 'muted';
+    return `<span class="delivery-badge ${stateClass}" title="${escapeHtml(`${label}: ${status}`)}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(detail)}</strong></span>`;
+  }).join('');
+  return html ? `<div class="delivery-strip" aria-label="Leveringsstatus">${html}</div>` : '';
+}
+
 function messageRow(row) {
   const wordFilter = String(row.suppressed_reason || '').startsWith('word-filter:')
     ? `Filtreret: ${String(row.suppressed_reason).slice('word-filter:'.length)}`
     : '';
-  const meta = [row.protocol, row.ric && `RIC ${row.ric}`, row.baud && `${row.baud} baud`, row.source, wordFilter, row.notification_sent ? 'Pushover ✓' : ''].filter(Boolean).join(' · ');
-  return `<div class="history-row"><div class="history-time"><strong>Alarmtid ${escapeHtml(formatAlarmTime(row.received_at))}</strong><br>${escapeHtml(formatAlarmDate(row.received_at))}</div><div><strong>${escapeHtml(row.station || 'Pager-melding')}</strong><p>${escapeHtml(row.message)}</p><small>${escapeHtml(meta)}</small></div></div>`;
+  const meta = [row.protocol, row.ric && `RIC ${row.ric}`, row.baud && `${row.baud} baud`, row.source, wordFilter].filter(Boolean).join(' · ');
+  return `<div class="history-row"><div class="history-time"><strong>Alarmtid ${escapeHtml(formatAlarmTime(row.received_at))}</strong><br>${escapeHtml(formatAlarmDate(row.received_at))}</div><div><strong>${escapeHtml(row.station || 'Pager-melding')}</strong><p>${escapeHtml(row.message)}</p><small>${escapeHtml(meta)}</small>${deliveryBadges(row)}</div></div>`;
 }
 
 async function refreshAlarms() {
@@ -153,7 +201,13 @@ async function refreshAlarms() {
     $('#latest-title').textContent = latest.station || 'Pager-melding';
     $('#latest-time').textContent = `Alarmtid ${formatAlarmTime(latest.received_at)}`;
     $('#latest-message').textContent = latest.message;
-    $('#latest-meta').textContent = [latest.protocol, latest.ric && `RIC ${latest.ric}`, latest.baud && `${latest.baud} baud`, latest.source].filter(Boolean).join(' · ');
+    $('#latest-meta').textContent = [
+      latest.protocol,
+      latest.ric && `RIC ${latest.ric}`,
+      latest.baud && `${latest.baud} baud`,
+      latest.source,
+      ...deliveryText(latest),
+    ].filter(Boolean).join(' · ');
   } else {
     $('#latest-title').textContent = 'Ingen aktuelle alarmer';
     $('#latest-time').textContent = '';

@@ -41,6 +41,13 @@ class AdminTemplateTests(unittest.TestCase):
         self.assertNotIn("fetch('/api/status'", self.overview_js)
         self.assertNotIn("setInterval(refresh, 10000)", self.overview_js)
 
+    def test_alarm_rows_render_delivery_badges(self):
+        self.assertIn("function deliveryBadges(row)", self.app_js)
+        self.assertIn("deliveryChannelLabels", self.app_js)
+        self.assertIn("Pushover", self.app_js)
+        self.assertIn("Web Push", self.app_js)
+        self.assertIn("delivery-strip", self.app_js)
+
     def test_combined_1200_2400_decoder_option_is_visible(self):
         self.assertIn('<option value="1200+2400">1200 + 2400</option>', self.html)
         self.assertIn("deaktiverer 512 i PDL", self.html)

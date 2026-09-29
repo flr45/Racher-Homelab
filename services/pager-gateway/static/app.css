@@ -69,6 +69,12 @@ input:focus, select:focus { border-color: #697586; box-shadow: 0 0 0 3px rgba(10
 .history-row:first-child { border-top: 0; }
 .history-row p { margin: 5px 0; overflow-wrap: anywhere; }
 .history-time { color: var(--muted); font-size: 13px; }
+.delivery-strip { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.delivery-badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 4px 8px; font-size: 11px; color: var(--muted); background: var(--surface-3); }
+.delivery-badge strong { font-weight: 750; color: inherit; }
+.delivery-badge.sent { color: var(--accent); border-color: rgba(102,229,140,.32); }
+.delivery-badge.partial { color: var(--warning); border-color: rgba(247,198,92,.34); }
+.delivery-badge.failed { color: var(--danger); border-color: rgba(255,107,107,.34); }
 .user-list { margin-top: 12px; }
 .user-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; border-top: 1px solid var(--border); padding: 16px 0; }
 .user-row:first-child { border-top: 0; }
