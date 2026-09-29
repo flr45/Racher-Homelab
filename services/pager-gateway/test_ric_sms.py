@@ -213,6 +213,75 @@ class RicSmsTests(unittest.TestCase):
         self.assertEqual(delivery["gateway_message_id"], "88")
         self.assertIsNone(delivery["error"])
 
+    def test_missing_remote_gateway_row_becomes_unknown_and_does_not_block_newer_rows(self):
+        core = SimpleNamespace(
+            DB_PATH=self.db,
+            storage=self.storage,
+            maybe_notify_pushover=lambda message_id, event: None,
+            app=SimpleNamespace(logger=_Logger()),
+        )
+        router = RicSmsRouter(core)
+        router.store.update_config(enabled=True, gateway_url="http://sms-gateway:8090")
+
+        first_id = self.storage.add_message({
+            "received_at": "2026-09-29T09:00:00+00:00",
+            "protocol": "POCSAG",
+            "baud": 1200,
+            "ric": "0001133",
+            "station": "Slagelse",
+            "message": "Gammel alarm",
+            "raw_line": "raw-old",
+            "source": "pdl-file",
+            "delivery_eligible": True,
+        })
+        second_id = self.storage.add_message({
+            "received_at": "2026-09-29T10:00:00+00:00",
+            "protocol": "POCSAG",
+            "baud": 1200,
+            "ric": "0001133",
+            "station": "Slagelse",
+            "message": "Ny alarm",
+            "raw_line": "raw-new",
+            "source": "pdl-file",
+            "delivery_eligible": True,
+        })
+
+        for message_id, recipient, remote_id in (
+            (first_id, "+4511111111", "47"),
+            (second_id, "+4522222222", "143"),
+        ):
+            self.assertTrue(
+                router.store.reserve_delivery(message_id, recipient, {"0001133"})
+            )
+            self.assertTrue(router.store.claim_delivery(message_id, recipient))
+            router.store.finish_delivery(
+                message_id,
+                recipient,
+                status="queued",
+                gateway_message_id=remote_id,
+            )
+
+        def fake_status(_url, remote_id):
+            if remote_id == "47":
+                return {
+                    "status": "missing",
+                    "error": "SMS Gateway har ikke længere denne køpost",
+                }
+            return {"id": 143, "status": "sent", "error": None}
+
+        router._get_outgoing_status = fake_status
+
+        changed = router.reconcile_remote_statuses()
+
+        self.assertEqual(changed, 2)
+        deliveries = {
+            row["gateway_message_id"]: row
+            for row in router.store.list_deliveries(limit=10)
+        }
+        self.assertEqual(deliveries["47"]["status"], "unknown")
+        self.assertIn("ikke længere", deliveries["47"]["error"])
+        self.assertEqual(deliveries["143"]["status"], "sent")
+
     def test_remote_gateway_failure_is_mirrored_without_retry(self):
         core = SimpleNamespace(
             DB_PATH=self.db,
