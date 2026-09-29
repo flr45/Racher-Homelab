@@ -69,6 +69,27 @@ class SystemAgentTests(unittest.TestCase):
                 ).fetchone()
             self.assertEqual(row["payload"], "{}")
 
+    def test_interrupted_processing_command_is_failed_on_agent_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = Storage(str(Path(tmp) / "pager.db"))
+            user_id = storage.create_user("admin", "Admin", "hash", "admin", None)
+            command_id = storage.queue_system_command("backup-now", user_id, {})
+            claimed = storage.claim_next_system_command()
+            self.assertEqual(claimed["id"], command_id)
+
+            recovered = storage.fail_interrupted_system_commands()
+
+            self.assertEqual(recovered, 1)
+            with storage.connect() as conn:
+                row = conn.execute(
+                    "SELECT status, payload, result, processed_at FROM system_commands WHERE id=?",
+                    (command_id,),
+                ).fetchone()
+            self.assertEqual(row["status"], "failed")
+            self.assertEqual(row["payload"], "{}")
+            self.assertIn("genstartede", row["result"])
+            self.assertTrue(row["processed_at"])
+
     def test_decoder_settings_are_applied_without_overwriting_hardware_values(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
