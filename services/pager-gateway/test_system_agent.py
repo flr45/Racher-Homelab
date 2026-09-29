@@ -10,6 +10,7 @@ from system_agent import (
     COMMANDS,
     _internet_online,
     _maintenance_in_progress,
+    _run_maintenance_script,
     _wifi_profile_name,
     sync_pdl_settings,
 )
@@ -44,6 +45,45 @@ class SystemAgentTests(unittest.TestCase):
             validate_system_command("wifi-remove", {"profile": "home-wifi"})
         with self.assertRaises(ValueError):
             validate_system_command("shell", {"command": "id"})
+
+    def test_maintenance_script_uses_transient_systemd_unit_without_shell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "update-pager.sh"
+            script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            script.chmod(0o755)
+            completed = MagicMock(returncode=0, stdout="ok", stderr="")
+            with patch("system_agent.shutil.which", return_value="/usr/bin/systemd-run"), \
+                 patch("system_agent._run", return_value=completed) as run:
+                ok, text = _run_maintenance_script(
+                    script,
+                    "racher-pager-update-42",
+                    timeout=1200,
+                )
+
+        self.assertTrue(ok)
+        self.assertEqual(text, "ok")
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[0], "/usr/bin/systemd-run")
+        self.assertIn("--wait", argv)
+        self.assertIn("--pipe", argv)
+        self.assertIn("--collect", argv)
+        self.assertIn("--service-type=exec", argv)
+        self.assertIn("--unit=racher-pager-update-42", argv)
+        self.assertEqual(argv[-1], str(script))
+        self.assertNotIn("-c", argv)
+        self.assertNotIn("/bin/sh", argv)
+        self.assertNotIn("/bin/bash", argv)
+
+    def test_maintenance_script_fails_closed_without_systemd_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "update-pager.sh"
+            script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            with patch("system_agent.shutil.which", return_value=None):
+                ok, text = _run_maintenance_script(
+                    script, "racher-pager-update-43"
+                )
+        self.assertFalse(ok)
+        self.assertIn("systemd-run mangler", text)
 
     def test_command_payload_is_not_returned_and_is_cleared_after_processing(self):
         with tempfile.TemporaryDirectory() as tmp:
