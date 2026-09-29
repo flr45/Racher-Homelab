@@ -333,12 +333,17 @@ class WhatsAppDelivery:
                 )
                 continue
 
-            self._send_reserved(
-                message_id,
-                user_id,
-                str(row["phone_e164"]),
-                self.format_alarm(row),
-            )
+            threading.Thread(
+                target=self._send_reserved,
+                args=(
+                    message_id,
+                    user_id,
+                    str(row["phone_e164"]),
+                    self.format_alarm(row),
+                ),
+                name=f"whatsapp-recover-{message_id}-{user_id}",
+                daemon=True,
+            ).start()
             recovered += 1
 
         if recovered:
