@@ -202,7 +202,9 @@ class WhatsAppDelivery:
         station = str(event.get("station") or "Pageralarm")
         message = str(event.get("message") or "").strip()
         received = str(event.get("received_at") or "").strip()
-        lines = [f"🚨 ALARM – {station}", "", message]
+        source = str(event.get("source") or "").strip().lower()
+        heading = f"🧪 TESTALARM – {station}" if source == "mock" else f"🚨 ALARM – {station}"
+        lines = [heading, "", message]
         meta = []
         # RIC/capcode is admin-only decoder metadata elsewhere in Pager Gateway.
         # Keep user-facing WhatsApp aligned with Web Push/Pushover and never leak
