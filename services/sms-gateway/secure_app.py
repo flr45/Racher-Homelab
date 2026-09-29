@@ -20,6 +20,25 @@ detect_station_code = runtime.detect_station_code
 normalize_phone = runtime.normalize_phone
 
 
+
+def _loopback_request() -> bool:
+    return str(request.remote_addr or "") in {"127.0.0.1", "::1"}
+
+
+def _worker_endpoint() -> bool:
+    path = str(request.path or "")
+    if path == "/api/outgoing/claim":
+        return True
+    if path.startswith("/api/outgoing/") and (
+        path.endswith("/start") or path.endswith("/complete")
+    ):
+        return True
+    if path == "/api/commands/claim":
+        return True
+    if path.startswith("/api/commands/") and path.endswith("/complete"):
+        return True
+    return False
+
 def _remote_enqueue_authorized() -> bool:
     expected = os.getenv("SMS_GATEWAY_API_TOKEN", "").strip()
     if not expected:
@@ -42,10 +61,16 @@ def _remote_enqueue_authorized() -> bool:
 
 
 @app.before_request
-def protect_remote_sms_enqueue():
-    # POST /api/outgoing is the capability that creates a billable/real SMS.
-    # Health, modem claim/complete and existing local administration retain their
-    # previous behaviour, so this hardening does not break the modem worker.
+def protect_sms_gateway_api():
+    # Only modem_reader.py and the local command worker may manipulate the queue
+    # lifecycle. The service can be bound to a Tailscale address so the Pager can
+    # enqueue SMS, but remote peers must never be able to claim, start or complete
+    # someone else's queued message.
+    if request.method == "POST" and _worker_endpoint() and not _loopback_request():
+        return jsonify(error="worker endpoint is loopback-only"), 403
+
+    # POST /api/outgoing is the one remote capability intentionally exposed to
+    # the Pager host. Require the shared bearer token when configured.
     if request.method == "POST" and request.path == "/api/outgoing":
         if not _remote_enqueue_authorized():
             return jsonify(error="unauthorized SMS enqueue"), 401
