@@ -12,7 +12,7 @@ from pathlib import Path
 import serial
 
 from gsm0338 import encode_gsm0338, prepare_gsm0338_sms
-from sms_pdu import parse_cmgl_response
+from sms_pdu import parse_cmgl_response_detailed
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 MODEM_DEVICE = os.getenv("MODEM_DEVICE", "/dev/ttyUSB1")
@@ -310,8 +310,28 @@ def run():
 
                 while running:
                     response = command(port, "AT+CMGL=0", timeout=15)
-                    messages = parse_cmgl_response(response)
-                    write_status(state="online", last_error=None)
+                    messages, pdu_errors = parse_cmgl_response_detailed(response)
+                    if pdu_errors:
+                        summary = "; ".join(
+                            f"index {item['index']}: {item['error']}"
+                            for item in pdu_errors[:3]
+                        )
+                        log.warning(
+                            "Ignorerer %s ugyldig(e) SMS-PDU-række(r): %s",
+                            len(pdu_errors),
+                            summary,
+                        )
+                        write_status(
+                            state="degraded",
+                            last_pdu_error=summary[:1000],
+                            last_pdu_error_at=utc_iso(),
+                        )
+                    else:
+                        write_status(
+                            state="online",
+                            last_error=None,
+                            last_pdu_error=None,
+                        )
 
                     for message in messages:
                         message_label = "+".join(

@@ -434,6 +434,8 @@ def health():
             "updated_at": modem_status.get("updated_at"),
             "last_message_at": modem_status.get("last_message_at"),
             "last_error": modem_status.get("last_error"),
+            "last_pdu_error": modem_status.get("last_pdu_error"),
+            "last_pdu_error_at": modem_status.get("last_pdu_error_at"),
             "network": modem_status.get("network"),
             "signal": modem_status.get("signal"),
         },
