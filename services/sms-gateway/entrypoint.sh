@@ -32,11 +32,15 @@ WEB_PID=$!
 
 attempt=0
 until python - <<'PY'
+import urllib.error
 import urllib.request
 
-with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=1) as response:
-    if response.status != 200:
-        raise SystemExit(1)
+try:
+    with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=1) as response:
+        if response.status != 200:
+            raise SystemExit(1)
+except (urllib.error.URLError, OSError):
+    raise SystemExit(1)
 PY
 do
   if ! kill -0 "$WEB_PID" 2>/dev/null; then
