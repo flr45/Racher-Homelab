@@ -196,6 +196,9 @@ class Storage:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_messages_delivery ON messages(delivery_eligible, id DESC)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_suppressed_reason ON messages(suppressed_reason, id DESC)"
+            )
 
             for key, value in DEFAULT_SETTINGS.items():
                 conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))

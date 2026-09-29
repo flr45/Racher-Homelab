@@ -51,6 +51,7 @@ class StorageMigrationTests(unittest.TestCase):
                 self.assertIn(column, columns)
             self.assertIn("idx_messages_fingerprint", indexes)
             self.assertIn("idx_messages_delivery", indexes)
+            self.assertIn("idx_messages_suppressed_reason", indexes)
             self.assertEqual(row["message"], "Gammel testmelding")
             self.assertEqual(row["relevance_class"], "unknown")
             self.assertEqual(row["delivery_eligible"], 1)
