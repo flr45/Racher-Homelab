@@ -229,11 +229,28 @@ class RicSmsStore:
             cur = conn.execute(
                 """INSERT OR IGNORE INTO ric_sms_deliveries(
                        message_id, recipient, matched_rics, status, created_at, updated_at
-                   ) VALUES (?, ?, ?, 'pending', ?, ?)""",
+                   ) VALUES (?, ?, ?, 'reserved', ?, ?)""",
                 (int(message_id), recipient, ",".join(sorted(matched_rics)), now, now),
             )
             conn.commit()
         return cur.rowcount > 0
+
+    def claim_delivery(self, message_id: int, recipient: str) -> bool:
+        """Move a locally reserved delivery into the externally-ambiguous phase.
+
+        A restart may safely retry only rows that never reached this transition.
+        Once a network request may have started, automatic retry could duplicate
+        an SMS at the remote gateway, so 'sending' is intentionally never retried.
+        """
+        with self._lock, self.connect() as conn:
+            cur = conn.execute(
+                """UPDATE ric_sms_deliveries
+                   SET status='sending', error=NULL, updated_at=?
+                   WHERE message_id=? AND recipient=? AND status='reserved'""",
+                (_now(), int(message_id), recipient),
+            )
+            conn.commit()
+        return cur.rowcount == 1
 
     def finish_delivery(self, message_id: int, recipient: str, *, status: str,
                         gateway_message_id: Any = None, error: Any = None) -> None:
@@ -250,6 +267,31 @@ class RicSmsStore:
                 ),
             )
             conn.commit()
+
+    def mark_interrupted_sending_unknown(self) -> int:
+        with self._lock, self.connect() as conn:
+            cur = conn.execute(
+                """UPDATE ric_sms_deliveries
+                   SET status='unknown',
+                       error='Gateway genstartede under ekstern SMS-levering; automatisk retry er blokeret for at undgå dublet.',
+                       updated_at=?
+                   WHERE status='sending'""",
+                (_now(),),
+            )
+            conn.commit()
+        return cur.rowcount
+
+    def reserved_rows(self) -> list[dict[str, Any]]:
+        with self._lock, self.connect() as conn:
+            rows = conn.execute(
+                """SELECT d.*, m.received_at, m.protocol, m.baud, m.ric, m.function,
+                          m.station, m.message, m.raw_line, m.source, m.delivery_eligible
+                   FROM ric_sms_deliveries d
+                   JOIN messages m ON m.id=d.message_id
+                   WHERE d.status='reserved'
+                   ORDER BY d.id ASC LIMIT 100"""
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def list_deliveries(self, limit: Any = 50) -> list[dict[str, Any]]:
         try:
@@ -336,6 +378,8 @@ class RicSmsRouter:
             raise RuntimeError("SMS Gateway returnerede ugyldigt JSON") from exc
 
     def _send_reserved(self, message_id: int, recipient: str, gateway_url: str, body: str) -> None:
+        if not self.store.claim_delivery(message_id, recipient):
+            return
         try:
             result = self._post_outgoing(gateway_url, recipient, body)
             self.store.finish_delivery(
@@ -346,6 +390,57 @@ class RicSmsRouter:
             self.core.app.logger.warning(
                 "RIC SMS failed for message %s to %s: %s", message_id, recipient, exc
             )
+
+    def recover_reserved(self, max_age_seconds: int = 120) -> int:
+        """Recover only deliveries that provably never started an external request."""
+        self.store.mark_interrupted_sending_unknown()
+        config = self.store.config()
+        now = datetime.now(timezone.utc)
+        recovered = 0
+        for row in self.store.reserved_rows():
+            try:
+                created = datetime.fromisoformat(str(row.get("created_at") or "").replace("Z", "+00:00"))
+            except ValueError:
+                created = None
+            if created is not None and created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age = (
+                (now - created.astimezone(timezone.utc)).total_seconds()
+                if created is not None else max_age_seconds + 1
+            )
+
+            if not config["enabled"] or not config["gateway_url"]:
+                self.store.finish_delivery(
+                    int(row["message_id"]), str(row["recipient"]),
+                    status="cancelled",
+                    error="SMS-routing er deaktiveret eller gateway-URL mangler efter genstart.",
+                )
+                continue
+            if not bool(row.get("delivery_eligible")) or age < 0 or age > max_age_seconds:
+                self.store.finish_delivery(
+                    int(row["message_id"]), str(row["recipient"]),
+                    status="expired",
+                    error="Reserveret SMS blev ikke sendt før genstart og er nu for gammel til automatisk levering.",
+                )
+                continue
+
+            threading.Thread(
+                target=self._send_reserved,
+                args=(
+                    int(row["message_id"]),
+                    str(row["recipient"]),
+                    str(config["gateway_url"]),
+                    format_alarm_sms(row),
+                ),
+                name=f"ric-sms-recover-{row['message_id']}",
+                daemon=True,
+            ).start()
+            recovered += 1
+        if recovered:
+            self.core.app.logger.warning(
+                "Recovered %s SMS delivery reservation(s) after gateway restart", recovered
+            )
+        return recovered
 
     def queue_for_event(self, message_id: int, event: dict[str, Any]) -> int:
         if not event.get("delivery_eligible", True):
@@ -495,4 +590,5 @@ def install_ric_sms(core: Any, auth_required: Callable) -> RicSmsRouter:
     router = RicSmsRouter(core)
     register_ric_sms_routes(core, router, auth_required)
     core.ric_sms_router = router
+    router.recover_reserved()
     return router
