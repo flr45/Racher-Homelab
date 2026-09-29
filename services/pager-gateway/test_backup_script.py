@@ -29,6 +29,9 @@ class BackupScriptTests(unittest.TestCase):
         sqlite.write_text(
             "#!/usr/bin/env python3\n"
             "import os, shutil, sys, time\n"
+            "if any('PRAGMA integrity_check' in arg for arg in sys.argv[2:]):\n"
+            "    print('corrupt' if os.environ.get('FAKE_INTEGRITY_FAIL') == '1' else 'ok')\n"
+            "    raise SystemExit(0)\n"
             "target = sys.argv[3].removeprefix('.backup ').strip().strip(chr(39))\n"
             "time.sleep(float(os.environ.get('FAKE_SQLITE_SLEEP', '0')))\n"
             "shutil.copyfile(sys.argv[1], target)\n",
@@ -98,6 +101,13 @@ class BackupScriptTests(unittest.TestCase):
         self.assertEqual(len(archives), 2)
         self.assertNotEqual(archives[0].name, archives[1].name)
 
+    def test_corrupt_database_copy_is_never_published(self) -> None:
+        result = self.run_backup(FAKE_INTEGRITY_FAIL="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("integrity_check", result.stderr)
+        self.assertEqual(list(self.backups.glob("racher-pager-*.tar.gz")), [])
+        self.assertEqual(list(self.backups.glob("*.partial.*")), [])
+
     def test_backup_contains_recovery_secrets_but_not_live_pdl_log(self) -> None:
         (self.state / "session-secret").write_text("session-secret", encoding="utf-8")
         (self.state / "vapid-private.pem").write_text("vapid-private", encoding="utf-8")
@@ -111,6 +121,7 @@ class BackupScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         archive = next(self.backups.glob("racher-pager-*.tar.gz"))
         self.assertEqual(stat.S_IMODE(archive.stat().st_mode), 0o600)
+        self.assertEqual(list(self.backups.glob("*.partial.*")), [])
 
         with tarfile.open(archive, "r:gz") as tar:
             names = {name.removeprefix("./") for name in tar.getnames()}
