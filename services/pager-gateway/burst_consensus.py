@@ -40,6 +40,7 @@ _BURST_EARLY_MIN_CONFIDENCE = _bounded_float(
     "PAGER_NR_BURST_EARLY_MIN_CONFIDENCE", 0.82, 0.55, 0.98
 )
 _BURST_RECENT_SECONDS = _bounded_float("PAGER_NR_BURST_RECENT_SECONDS", 10.0, 4.0, 30.0)
+_BURST_RECOVERY_SECONDS = _bounded_float("PAGER_NR_BURST_RECOVERY_SECONDS", 120.0, 15.0, 600.0)
 _MAX_BURST_CANDIDATES = 12
 
 
@@ -371,6 +372,94 @@ class PocsagBurstConsensus:
         timer.daemon = True
         burst.timer = timer
         timer.start()
+
+    def recover_pending(self) -> int:
+        """Finish very recent burst candidates left behind by a process restart.
+
+        The live file cursor is advanced after ingest() returns, while a burst is
+        intentionally kept delivery-ineligible until its short consensus timer
+        fires. If Gunicorn restarts inside that window the cursor correctly avoids
+        replaying the raw line, but the in-memory timer disappears. Rehydrate only
+        recent pending rows after every notification wrapper has been installed.
+        Older rows stay in admin history and are never delivered late.
+        """
+        now = datetime.now(timezone.utc)
+        with self.core.storage.connect() as conn:
+            columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(messages)").fetchall()
+            }
+            if "ingested_at" not in columns:
+                return 0
+            rows = conn.execute(
+                """SELECT * FROM messages
+                   WHERE delivery_eligible=0
+                     AND suppressed_reason='burst-candidate'
+                     AND ingested_at!=''
+                   ORDER BY id ASC LIMIT 64"""
+            ).fetchall()
+
+        recent: list[tuple[dict[str, Any], datetime]] = []
+        for row in rows:
+            data = dict(row)
+            try:
+                ingested = datetime.fromisoformat(
+                    str(data.get("ingested_at") or "").replace("Z", "+00:00")
+                )
+            except ValueError:
+                continue
+            if ingested.tzinfo is None:
+                ingested = ingested.replace(tzinfo=timezone.utc)
+            age = (now - ingested.astimezone(timezone.utc)).total_seconds()
+            if 0 <= age <= _BURST_RECOVERY_SECONDS:
+                recent.append((data, ingested.astimezone(timezone.utc)))
+
+        groups: list[list[tuple[dict[str, Any], datetime]]] = []
+        for data, ingested in recent:
+            message = str(data.get("message") or "")
+            matched: list[tuple[dict[str, Any], datetime]] | None = None
+            for group in reversed(groups):
+                first_time = group[0][1]
+                if abs((ingested - first_time).total_seconds()) > _BURST_RECOVERY_SECONDS:
+                    continue
+                if any(
+                    same_nr_burst(message, str(item[0].get("message") or ""))
+                    for item in group
+                ):
+                    matched = group
+                    break
+            if matched is None:
+                matched = []
+                groups.append(matched)
+            matched.append((data, ingested))
+
+        recovered_ids: list[int] = []
+        with self._lock:
+            for group in groups:
+                candidates = [
+                    _Candidate(message_id=int(data["id"]), data=data)
+                    for data, _ingested in group[:_MAX_BURST_CANDIDATES]
+                ]
+                if not candidates:
+                    continue
+                burst = _Burst(
+                    burst_id=self._next_id,
+                    started_monotonic=time.monotonic(),
+                    candidates=candidates,
+                )
+                self._next_id += 1
+                self._bursts[burst.burst_id] = burst
+                recovered_ids.append(burst.burst_id)
+
+        for burst_id in recovered_ids:
+            self._flush(burst_id)
+
+        if recovered_ids:
+            self.core.app.logger.warning(
+                "Recovered %s interrupted POCSAG burst(s) after gateway restart",
+                len(recovered_ids),
+            )
+        return len(recovered_ids)
 
     def ingest(self, event: Any) -> int:
         message = self.core.public_message(str(getattr(event, "message", "") or ""))
