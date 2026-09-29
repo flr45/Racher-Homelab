@@ -5,10 +5,11 @@ import os
 import re
 import sqlite3
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -54,13 +55,30 @@ def normalize_gateway_url(value: Any) -> str:
     return raw
 
 
+def _single_part(text: str) -> str:
+    value = str(text or "").strip()
+    if len(value) <= MAX_SMS_CHARS:
+        return value
+    return value[: MAX_SMS_CHARS - 1].rstrip() + "…"
+
+
 def format_alarm_sms(event: dict[str, Any]) -> str:
     station = " ".join(str(event.get("station") or "Pageralarm").split())
     message = " ".join(str(event.get("message") or "").split())
-    text = f"RACHER PAGER\n{station}\n{message}".strip()
-    if len(text) <= MAX_SMS_CHARS:
-        return text
-    return text[: MAX_SMS_CHARS - 1].rstrip() + "…"
+    return _single_part(f"RACHER PAGER\n{station}\n{message}")
+
+
+def format_ric_call_sms(event: dict[str, Any], ric: str | None = None) -> str:
+    """Short fallback when the selected capcode was called without an alpha alarm.
+
+    PDL can emit NUMERIC/TONE-only rows that the normal alarm cleaner correctly
+    suppresses. An explicit RIC→SMS rule is a capcode-call subscription, so those
+    live pages still need a useful SMS without leaking decoder garbage.
+    """
+    station = " ".join(str(event.get("station") or "Pageralarm").split())
+    selected_ric = str(ric or event.get("ric") or "").strip()
+    detail = f"RIC {selected_ric} kaldt" if selected_ric else "Valgt RIC kaldt"
+    return _single_part(f"RACHER PAGER\n{station}\n{detail}")
 
 
 class RicSmsStore:
@@ -104,6 +122,7 @@ class RicSmsStore:
                     error TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
+                    trigger_kind TEXT NOT NULL DEFAULT 'alarm',
                     UNIQUE(message_id, recipient)
                 );
                 CREATE INDEX IF NOT EXISTS idx_ric_sms_delivery_created
@@ -112,6 +131,19 @@ class RicSmsStore:
                 INSERT OR IGNORE INTO settings(key, value) VALUES ('ric_sms_enabled', '0');
                 INSERT OR IGNORE INTO settings(key, value) VALUES ('ric_sms_gateway_url', '');
                 """
+            )
+            columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(ric_sms_deliveries)").fetchall()
+            }
+            if "trigger_kind" not in columns:
+                conn.execute(
+                    "ALTER TABLE ric_sms_deliveries "
+                    "ADD COLUMN trigger_kind TEXT NOT NULL DEFAULT 'alarm'"
+                )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ric_sms_delivery_recipient_created "
+                "ON ric_sms_deliveries(recipient, created_at DESC)"
             )
             conn.commit()
 
@@ -223,17 +255,88 @@ class RicSmsStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def reserve_delivery(self, message_id: int, recipient: str, matched_rics: set[str]) -> bool:
-        now = _now()
+    @staticmethod
+    def _ric_set(value: Any) -> set[str]:
+        return {
+            item.strip()
+            for item in str(value or "").split(",")
+            if item.strip()
+        }
+
+    @staticmethod
+    def _call_dedupe_seconds() -> int:
+        try:
+            value = int(os.getenv("PAGER_RIC_SMS_CALL_DEDUPE_SECONDS", "15"))
+        except ValueError:
+            value = 15
+        return max(3, min(value, 120))
+
+    def reserve_delivery(
+        self,
+        message_id: int,
+        recipient: str,
+        matched_rics: set[str],
+        *,
+        trigger_kind: str = "alarm",
+    ) -> bool:
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        clean_rics = {str(value).strip() for value in matched_rics if str(value).strip()}
+        kind = "ric-call" if str(trigger_kind) == "ric-call" else "alarm"
+        cutoff = (now_dt - timedelta(seconds=self._call_dedupe_seconds())).isoformat()
+
         with self._lock, self.connect() as conn:
+            recent_calls = conn.execute(
+                """SELECT id, matched_rics FROM ric_sms_deliveries
+                   WHERE recipient=? AND trigger_kind='ric-call' AND created_at>=?
+                     AND status NOT IN ('failed','expired','cancelled')
+                   ORDER BY id DESC LIMIT 20""",
+                (recipient, cutoff),
+            ).fetchall()
+
+            # NUMERIC/TONE + ALPHA representations of the same page must not
+            # create two SMS messages. A call fallback dedupes all selected RIC
+            # calls to the same phone for a very short window. A later normal
+            # alarm is suppressed only when it overlaps a RIC already covered by
+            # the fallback SMS.
+            for row in recent_calls:
+                previous_rics = self._ric_set(row["matched_rics"])
+                same_call = kind == "ric-call"
+                same_ric = bool(previous_rics & clean_rics)
+                if same_call or same_ric:
+                    merged = ",".join(sorted(previous_rics | clean_rics))
+                    conn.execute(
+                        "UPDATE ric_sms_deliveries SET matched_rics=?, updated_at=? WHERE id=?",
+                        (merged, now, int(row["id"])),
+                    )
+                    conn.commit()
+                    return False
+
             cur = conn.execute(
                 """INSERT OR IGNORE INTO ric_sms_deliveries(
-                       message_id, recipient, matched_rics, status, created_at, updated_at
-                   ) VALUES (?, ?, ?, 'pending', ?, ?)""",
-                (int(message_id), recipient, ",".join(sorted(matched_rics)), now, now),
+                       message_id, recipient, matched_rics, status, created_at, updated_at, trigger_kind
+                   ) VALUES (?, ?, ?, 'reserved', ?, ?, ?)""",
+                (int(message_id), recipient, ",".join(sorted(clean_rics)), now, now, kind),
             )
             conn.commit()
         return cur.rowcount > 0
+
+    def claim_delivery(self, message_id: int, recipient: str) -> bool:
+        """Move a locally reserved delivery into the externally-ambiguous phase.
+
+        A restart may safely retry only rows that never reached this transition.
+        Once a network request may have started, automatic retry could duplicate
+        an SMS at the remote gateway, so 'sending' is intentionally never retried.
+        """
+        with self._lock, self.connect() as conn:
+            cur = conn.execute(
+                """UPDATE ric_sms_deliveries
+                   SET status='sending', error=NULL, updated_at=?
+                   WHERE message_id=? AND recipient=? AND status='reserved'""",
+                (_now(), int(message_id), recipient),
+            )
+            conn.commit()
+        return cur.rowcount == 1
 
     def finish_delivery(self, message_id: int, recipient: str, *, status: str,
                         gateway_message_id: Any = None, error: Any = None) -> None:
@@ -250,6 +353,45 @@ class RicSmsStore:
                 ),
             )
             conn.commit()
+
+    def mark_interrupted_sending_unknown(self) -> int:
+        with self._lock, self.connect() as conn:
+            cur = conn.execute(
+                """UPDATE ric_sms_deliveries
+                   SET status='unknown',
+                       error='Gateway genstartede under ekstern SMS-levering; automatisk retry er blokeret for at undgå dublet.',
+                       updated_at=?
+                   WHERE status='sending'""",
+                (_now(),),
+            )
+            conn.commit()
+        return cur.rowcount
+
+    def reserved_rows(self) -> list[dict[str, Any]]:
+        with self._lock, self.connect() as conn:
+            rows = conn.execute(
+                """SELECT d.*, m.received_at, m.protocol, m.baud, m.ric, m.function,
+                          m.station, m.message, m.raw_line, m.source, m.delivery_eligible,
+                          m.suppressed_reason
+                   FROM ric_sms_deliveries d
+                   JOIN messages m ON m.id=d.message_id
+                   WHERE d.status='reserved'
+                   ORDER BY d.id ASC LIMIT 100"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def queued_remote_rows(self, limit: int = 40) -> list[dict[str, Any]]:
+        clean_limit = max(1, min(int(limit), 100))
+        with self._lock, self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM ric_sms_deliveries
+                   WHERE status='queued'
+                     AND gateway_message_id IS NOT NULL
+                     AND gateway_message_id!=''
+                   ORDER BY id ASC LIMIT ?""",
+                (clean_limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def list_deliveries(self, limit: Any = 50) -> list[dict[str, Any]]:
         try:
@@ -270,6 +412,8 @@ class RicSmsRouter:
         self.store = RicSmsStore(core.DB_PATH)
         self._original_notify = core.maybe_notify_pushover
         core.maybe_notify_pushover = self.notify_and_sms
+        self._status_monitor_thread: threading.Thread | None = None
+        self._status_monitor_stop = threading.Event()
 
     def _event_rics(self, message_id: int, event: dict[str, Any]) -> set[str]:
         result: set[str] = set()
@@ -335,7 +479,102 @@ class RicSmsRouter:
         except json.JSONDecodeError as exc:
             raise RuntimeError("SMS Gateway returnerede ugyldigt JSON") from exc
 
+    def _get_outgoing_status(self, gateway_url: str, remote_id: str) -> dict[str, Any]:
+        remote = str(remote_id or "").strip()
+        if not remote.isdigit():
+            raise ValueError("SMS Gateway message-id er ugyldigt")
+        endpoint = gateway_url.rstrip("/") + f"/api/outgoing/{remote}"
+        headers: dict[str, str] = {}
+        token = os.getenv("PAGER_SMS_GATEWAY_TOKEN", "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        request_obj = urllib.request.Request(endpoint, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(request_obj, timeout=4) as response:
+                raw = response.read().decode("utf-8")
+                if response.status != 200:
+                    raise RuntimeError(f"SMS Gateway svarede HTTP {response.status}")
+        except urllib.error.HTTPError as exc:
+            details = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"SMS Gateway-status svarede HTTP {exc.code}: {details[:300]}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Kunne ikke hente SMS Gateway-status: {exc.reason}"
+            ) from exc
+        try:
+            payload = json.loads(raw) if raw else {}
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("SMS Gateway-status var ugyldig JSON") from exc
+        return payload if isinstance(payload, dict) else {}
+
+    def reconcile_remote_statuses(self, limit: int = 40) -> int:
+        """Mirror final modem status into Pager without ever resending an SMS."""
+        config = self.store.config()
+        if not config["gateway_url"]:
+            return 0
+
+        changed = 0
+        for row in self.store.queued_remote_rows(limit=limit):
+            remote_id = str(row.get("gateway_message_id") or "")
+            try:
+                remote = self._get_outgoing_status(config["gateway_url"], remote_id)
+            except Exception as exc:  # network/status failure must not alter delivery
+                # Every pending row uses the same configured gateway. If that
+                # gateway is unreachable, stop this cycle after one bounded
+                # request instead of multiplying the outage by the queue length.
+                self.core.app.logger.warning(
+                    "Could not reconcile SMS Gateway delivery %s; remaining rows deferred: %s",
+                    remote_id,
+                    exc,
+                )
+                break
+
+            status = str(remote.get("status") or "").lower()
+            if status not in {"sent", "failed", "unknown"}:
+                continue
+
+            error = remote.get("error")
+            self.store.finish_delivery(
+                int(row["message_id"]),
+                str(row["recipient"]),
+                status=status,
+                gateway_message_id=remote_id,
+                error=error,
+            )
+            changed += 1
+        return changed
+
+    @staticmethod
+    def _status_poll_seconds() -> int:
+        try:
+            value = int(os.getenv("PAGER_SMS_STATUS_POLL_SECONDS", "5"))
+        except ValueError:
+            value = 5
+        return max(2, min(value, 60))
+
+    def _status_monitor_loop(self) -> None:
+        while not self._status_monitor_stop.wait(self._status_poll_seconds()):
+            try:
+                self.reconcile_remote_statuses()
+            except Exception as exc:  # noqa: BLE001
+                self.core.app.logger.warning("RIC SMS status monitor failed: %s", exc)
+
+    def start_status_monitor(self) -> None:
+        if self._status_monitor_thread and self._status_monitor_thread.is_alive():
+            return
+        self._status_monitor_stop.clear()
+        self._status_monitor_thread = threading.Thread(
+            target=self._status_monitor_loop,
+            name="ric-sms-status-monitor",
+            daemon=True,
+        )
+        self._status_monitor_thread.start()
+
     def _send_reserved(self, message_id: int, recipient: str, gateway_url: str, body: str) -> None:
+        if not self.store.claim_delivery(message_id, recipient):
+            return
         try:
             result = self._post_outgoing(gateway_url, recipient, body)
             self.store.finish_delivery(
@@ -346,6 +585,129 @@ class RicSmsRouter:
             self.core.app.logger.warning(
                 "RIC SMS failed for message %s to %s: %s", message_id, recipient, exc
             )
+
+    def recover_reserved(self, max_age_seconds: int = 120) -> int:
+        """Recover only deliveries that provably never started an external request."""
+        self.store.mark_interrupted_sending_unknown()
+        config = self.store.config()
+        now = datetime.now(timezone.utc)
+        recovered = 0
+        for row in self.store.reserved_rows():
+            try:
+                created = datetime.fromisoformat(str(row.get("created_at") or "").replace("Z", "+00:00"))
+            except ValueError:
+                created = None
+            if created is not None and created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age = (
+                (now - created.astimezone(timezone.utc)).total_seconds()
+                if created is not None else max_age_seconds + 1
+            )
+
+            if not config["enabled"] or not config["gateway_url"]:
+                self.store.finish_delivery(
+                    int(row["message_id"]), str(row["recipient"]),
+                    status="cancelled",
+                    error="SMS-routing er deaktiveret eller gateway-URL mangler efter genstart.",
+                )
+                continue
+            is_ric_call = str(row.get("trigger_kind") or "") == "ric-call"
+            live_pdl_call = is_ric_call and str(row.get("source") or "").lower().startswith("pdl")
+            if (
+                (not bool(row.get("delivery_eligible")) and not live_pdl_call)
+                or age < 0
+                or age > max_age_seconds
+            ):
+                self.store.finish_delivery(
+                    int(row["message_id"]), str(row["recipient"]),
+                    status="expired",
+                    error="Reserveret SMS blev ikke sendt før genstart og er nu for gammel til automatisk levering.",
+                )
+                continue
+
+            matched = sorted(self.store._ric_set(row.get("matched_rics")))
+            body = (
+                format_ric_call_sms(row, matched[0] if matched else None)
+                if is_ric_call
+                else format_alarm_sms(row)
+            )
+            threading.Thread(
+                target=self._send_reserved,
+                args=(
+                    int(row["message_id"]),
+                    str(row["recipient"]),
+                    str(config["gateway_url"]),
+                    body,
+                ),
+                name=f"ric-sms-recover-{row['message_id']}",
+                daemon=True,
+            ).start()
+            recovered += 1
+        if recovered:
+            self.core.app.logger.warning(
+                "Recovered %s SMS delivery reservation(s) after gateway restart", recovered
+            )
+        return recovered
+
+    def queue_for_ric_call(self, message_id: int, event: dict[str, Any]) -> int:
+        """Send a fallback SMS when an explicitly selected live RIC is called.
+
+        This is intentionally narrower than "send every suppressed alarm": it
+        respects explicit word/RIC filters and burst/duplicate handling, but it
+        does not require ALPHA payload eligibility. That makes tone/numeric pages
+        useful for RIC-call subscriptions.
+        """
+        if not str(event.get("source") or "").lower().startswith("pdl"):
+            return 0
+        if bool(event.get("delivery_eligible")):
+            return 0
+
+        reason = str(event.get("suppressed_reason") or "").strip()
+        if reason in {"duplicate", "burst-candidate", "ric-filter"} or reason.startswith("word-filter:"):
+            return 0
+
+        ric = str(event.get("ric") or "").strip()
+        if not ric:
+            return 0
+
+        ric_filter = getattr(self.core, "ric_noise_filter", None)
+        if ric_filter is not None:
+            try:
+                if ric_filter.contains(ric):
+                    return 0
+            except Exception:
+                return 0
+
+        config = self.store.config()
+        if not config["enabled"] or not config["gateway_url"]:
+            return 0
+
+        rules = self.store.rules_for_rics({ric})
+        if not rules:
+            return 0
+
+        recipients: dict[str, set[str]] = {}
+        for rule in rules:
+            recipients.setdefault(str(rule["phone"]), set()).add(str(rule["ric"]))
+
+        body = format_ric_call_sms(event, ric)
+        queued = 0
+        for recipient, matched_rics in recipients.items():
+            if not self.store.reserve_delivery(
+                message_id,
+                recipient,
+                matched_rics,
+                trigger_kind="ric-call",
+            ):
+                continue
+            threading.Thread(
+                target=self._send_reserved,
+                args=(message_id, recipient, config["gateway_url"], body),
+                name=f"ric-call-sms-{message_id}",
+                daemon=True,
+            ).start()
+            queued += 1
+        return queued
 
     def queue_for_event(self, message_id: int, event: dict[str, Any]) -> int:
         if not event.get("delivery_eligible", True):
@@ -495,4 +857,6 @@ def install_ric_sms(core: Any, auth_required: Callable) -> RicSmsRouter:
     router = RicSmsRouter(core)
     register_ric_sms_routes(core, router, auth_required)
     core.ric_sms_router = router
+    router.recover_reserved()
+    router.start_status_monitor()
     return router
