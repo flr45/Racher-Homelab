@@ -262,8 +262,10 @@ def _readiness(runtime: dict[str, str]) -> list[dict[str, str]]:
     agent_online = heartbeat_age is not None and heartbeat_age <= 30
     pdl_installed = runtime.get("pdl_installed") == "1"
     pdl_active = runtime.get("pdl_service") == "active"
-    fsk_connected = runtime.get("fsk_usb_connected") == "1"
-    fsk_in_use = runtime.get("fsk_usb_pdl_in_use") == "1"
+    fsk_age = _iso_age_seconds(runtime.get("fsk_usb_last_seen", ""))
+    fsk_fresh = fsk_age is not None and fsk_age <= 30
+    fsk_connected = fsk_fresh and runtime.get("fsk_usb_connected") == "1"
+    fsk_in_use = fsk_fresh and runtime.get("fsk_usb_pdl_in_use") == "1"
     internet_online = runtime.get("internet_online") == "1"
     hotspot_active = runtime.get("hotspot_active") == "1"
     tunnel_installed = runtime.get("tunnel_installed") == "1"
@@ -286,7 +288,9 @@ def _readiness(runtime: dict[str, str]) -> list[dict[str, str]]:
         "Cloudflare er installeret, men tunnelen er ikke aktiv" if tunnel_installed else
         "Konfigureres når tunnel-token og offentligt hostname er klar"
     )
-    if fsk_connected:
+    if not fsk_fresh:
+        fsk_detail = "FSK-status er for gammel; afventer en ny hardwaremåling"
+    elif fsk_connected:
         fsk_detail = runtime.get("fsk_usb_summary") or runtime.get("fsk_usb_device") or "FSK-USB fundet"
         if fsk_in_use:
             fsk_detail += " · PDL har enheden åben"
