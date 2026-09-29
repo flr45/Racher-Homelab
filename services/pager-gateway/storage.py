@@ -463,6 +463,25 @@ class Storage:
                 result["payload"] = {}
             return result
 
+    def fail_interrupted_system_commands(self) -> int:
+        """Fail commands left in processing by a previous host-agent process.
+
+        Replaying privileged actions such as update, restore or reboot after an
+        agent crash is not generally idempotent. Make the interruption explicit
+        in the UI instead of leaving the row stuck forever or retrying it blindly.
+        """
+        with self.connect() as conn:
+            cur = conn.execute(
+                """UPDATE system_commands
+                   SET status='failed',
+                       processed_at=?,
+                       result='Host-agenten genstartede under behandlingen. Kontroller systemstatus og prøv handlingen igen manuelt.',
+                       payload='{}'
+                   WHERE status='processing'""",
+                (self._now(),),
+            )
+            return cur.rowcount
+
     def finish_system_command(self, command_id: int, success: bool, result: str) -> None:
         with self.connect() as conn:
             conn.execute(
