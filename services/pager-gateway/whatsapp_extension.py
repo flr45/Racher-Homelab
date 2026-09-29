@@ -273,11 +273,10 @@ class WhatsAppDelivery:
         return [dict(row) for row in rows]
 
 
-def install_whatsapp(core) -> WhatsAppDelivery:
-    app = core.app
-    storage = core.storage
-    routing = core.routing
-    auth_required = core.auth_required
+def install_whatsapp(app, storage, routing, auth_required, *, core=None) -> WhatsAppDelivery:
+    if core is None:
+        import app_core as core
+
     delivery = WhatsAppDelivery(app, storage, routing)
 
     # Use the final notification hook rather than wrapping ingest_event. Burst
