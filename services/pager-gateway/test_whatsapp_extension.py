@@ -99,6 +99,15 @@ class WhatsAppExtensionTests(unittest.TestCase):
 
 
 
+
+    def test_mock_whatsapp_alarm_is_clearly_marked_as_test(self):
+        text = WhatsAppDelivery.format_alarm({
+            "station": "Ringsted",
+            "message": "BRANDALARM Ringsted",
+            "source": "mock",
+        })
+        self.assertTrue(text.startswith("🧪 TESTALARM – Ringsted"))
+
     def test_user_whatsapp_alarm_never_contains_ric_metadata(self):
         text = WhatsAppDelivery.format_alarm({
             "station": "Ringsted",
