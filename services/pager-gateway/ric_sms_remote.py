@@ -167,4 +167,5 @@ def install_ric_sms(core: Any, auth_required: Callable) -> AuthenticatedRicSmsRo
     router = AuthenticatedRicSmsRouter(core)
     register_ric_sms_routes(core, router, auth_required)
     core.ric_sms_router = router
+    router.recover_after_restart()
     return router
