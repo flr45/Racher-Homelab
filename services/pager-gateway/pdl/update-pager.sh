@@ -27,6 +27,21 @@ if [[ ! -d "$RUNTIME_REPO/.git" ]]; then
   exit 1
 fi
 
+# Host-agenten kører updateren som root, men Git-checkoutet ejes af den
+# almindelige appliance-bruger. Kør alle Git-operationer som repository-ejeren,
+# ellers efterlader fetch/reset root-ejede objekter og .git/index, hvorefter
+# interaktiv Git som appliance-brugeren fejler med "insufficient permission".
+RUNTIME_REPO_UID="$(stat -c '%u' "$RUNTIME_REPO")"
+RUNTIME_REPO_USER="$(getent passwd "$RUNTIME_REPO_UID" | cut -d: -f1 || true)"
+if [[ -z "$RUNTIME_REPO_USER" || "$RUNTIME_REPO_UID" == "0" ]]; then
+  echo "Runtime-repository skal ejes af en kendt non-root bruger: $RUNTIME_REPO" >&2
+  exit 1
+fi
+
+git_runtime() {
+  runuser -u "$RUNTIME_REPO_USER" -- git_runtime "$@"
+}
+
 mkdir -p "$(dirname "$LOCK_FILE")"
 exec 9>"$LOCK_FILE"
 flock -n 9 || { echo "En update/rollback/restore kører allerede." >&2; exit 1; }
@@ -42,10 +57,10 @@ step() {
   printf '\n[update] %s\n' "$1"
 }
 
-CURRENT="$(git -C "$RUNTIME_REPO" rev-parse HEAD)"
+CURRENT="$(git_runtime rev-parse HEAD)"
 step "Henter $DEPLOY_BRANCH fra origin (nuværende ${CURRENT:0:12})"
-git -C "$RUNTIME_REPO" fetch --prune origin "$DEPLOY_BRANCH"
-TARGET="$(git -C "$RUNTIME_REPO" rev-parse FETCH_HEAD)"
+git_runtime fetch --prune origin "$DEPLOY_BRANCH"
+TARGET="$(git_runtime rev-parse FETCH_HEAD)"
 
 if [[ "$CURRENT" == "$TARGET" ]]; then
   printf '%s\n' "$CURRENT" > "$UPDATE_DIR/current-sha"
@@ -53,13 +68,13 @@ if [[ "$CURRENT" == "$TARGET" ]]; then
   exit 0
 fi
 
-if ! git -C "$RUNTIME_REPO" merge-base --is-ancestor "$CURRENT" "$TARGET"; then
+if ! git_runtime merge-base --is-ancestor "$CURRENT" "$TARGET"; then
   echo "Remote branch er ikke en fast-forward fra nuværende version. Brug rollback eller manuel deployment." >&2
   exit 1
 fi
 
 PDL_CHANGED=0
-if ! git -C "$RUNTIME_REPO" diff --quiet "$CURRENT" "$TARGET" -- \
+if ! git_runtime diff --quiet "$CURRENT" "$TARGET" -- \
   services/pager-gateway/pdl/patch_headless.py \
   services/pager-gateway/pdl/install-pdl.sh; then
   PDL_CHANGED=1
@@ -120,7 +135,7 @@ rollback_failed_update() {
   echo "[update] FEJL exit=$rc linje=$line kommando=$command" >&2
   capture_failed_container
   echo "Ny version fejlede; ruller automatisk hele Pager-runtime tilbage til ${CURRENT:0:12}." >&2
-  git -C "$RUNTIME_REPO" reset --hard "$CURRENT"
+  git_runtime reset --hard "$CURRENT"
 
   if [[ -f "$PDL_BACKUP" ]]; then
     echo "[update] Gendanner tidligere PDL-binary." >&2
@@ -139,7 +154,7 @@ rollback_failed_update() {
 trap 'rollback_failed_update "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
 step "Skifter runtime til ${TARGET:0:12}"
-git -C "$RUNTIME_REPO" reset --hard "$TARGET"
+git_runtime reset --hard "$TARGET"
 
 step "Validerer Python og shell"
 python3 -m py_compile \
