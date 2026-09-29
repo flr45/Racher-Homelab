@@ -93,8 +93,9 @@ def _recent_rows(core: Any, *, user_id: int | None = None) -> list[dict[str, Any
         f"SELECT {columns} FROM messages "
         "WHERE delivery_eligible=1 "
         "AND datetime(received_at) >= datetime(?)"
-        f"{routing_clause} ORDER BY id DESC"
+        f"{routing_clause} ORDER BY id DESC LIMIT ?"
     )
+    parameters.append(max_feed_rows())
     with core.storage.connect() as conn:
         rows = conn.execute(query, tuple(parameters)).fetchall()
 
@@ -120,11 +121,16 @@ def install_alarm_retention(core: Any):
         if not core.g.user:
             return core.jsonify({"ok": False, "error": "login required"}), 401
 
+        try:
+            limit = max(1, min(int(core.request.args.get("limit", "100")), 500))
+        except (TypeError, ValueError):
+            limit = 100
+
         if core.g.user["role"] == "admin":
             rows = _recent_rows(core)
         else:
             rows = _recent_rows(core, user_id=int(core.g.user["id"]))
-        return core.jsonify(rows)
+        return core.jsonify(rows[:limit])
 
     core.app.view_functions["api_messages"] = recent_alarm_messages
     return recent_alarm_messages
