@@ -92,11 +92,27 @@
       $('#wa-phone').value = data.phone_e164 || '';
       $('#wa-enabled').checked = Boolean(data.enabled);
       title.textContent = data.enabled ? 'WhatsApp-alarm aktiv' : 'WhatsApp-alarm ikke aktiveret';
-      const ready = data.gateway_enabled && data.gateway_configured;
-      gateway.textContent = ready ? 'KLAR' : data.gateway_configured ? 'DEAKTIVERET' : 'AFVENTER SETUP';
+      const ready = data.gateway_enabled && data.gateway_configured && data.gateway_ready;
+      if (ready) {
+        gateway.textContent = 'KLAR';
+      } else if (!data.gateway_configured) {
+        gateway.textContent = 'AFVENTER SETUP';
+      } else if (!data.gateway_enabled) {
+        gateway.textContent = 'DEAKTIVERET';
+      } else {
+        gateway.textContent = 'WHATSAPP OFFLINE';
+      }
       gateway.className = `status-badge ${ready ? 'active' : 'inactive'}`;
-      $('#wa-test').disabled = !data.gateway_configured;
-      if (!ready) $('#wa-status').textContent = data.gateway_configured ? 'Gatewayen er konfigureret, men global WhatsApp-afsendelse er slået fra.' : 'OpenWA mangler serveropsætning.';
+      $('#wa-test').disabled = !data.gateway_ready;
+      if (ready) {
+        $('#wa-status').textContent = '';
+      } else if (!data.gateway_configured) {
+        $('#wa-status').textContent = 'OpenWA mangler serveropsætning.';
+      } else if (!data.gateway_enabled) {
+        $('#wa-status').textContent = 'Gatewayen er konfigureret, men global WhatsApp-afsendelse er slået fra.';
+      } else {
+        $('#wa-status').textContent = `OpenWA-sessionen er ikke klar (${data.gateway_status || 'ukendt status'}).`;
+      }
       await loadAdminDeliveries();
     } catch (error) {
       title.textContent = 'WhatsApp-status kunne ikke hentes';

@@ -20,6 +20,8 @@ OpenWA er en uofficiel WhatsApp-gateway. Brug et separat WhatsApp-nummer, som ik
 
 OpenWA-dashboard/API er som standard kun bundet til `127.0.0.1:2785` på Pi'en. Pager-containeren taler med OpenWA på det interne Docker-netværk via `http://openwa:2785`.
 
+Pagerens WhatsApp-status nøjes ikke med at kontrollere, at URL/API-key findes. Den spørger OpenWA's sessions-API og viser først **KLAR**, når den konfigurerede session faktisk har status `ready`. En session i fx `qr_ready` eller en manglende session vises som offline/ikke klar.
+
 ## 1. Opdatér og start stacken
 
 ```bash

@@ -12,7 +12,7 @@ from flask import Flask
 from routing import RoutingStore
 from storage import Storage
 import whatsapp_extension
-from whatsapp_extension import WhatsAppDelivery, install_whatsapp
+from whatsapp_extension import OpenWAClient, WhatsAppDelivery, install_whatsapp
 
 
 class _Logger:
@@ -43,6 +43,23 @@ class _ImmediateThread:
         self.target(*self.args, **self.kwargs)
 
 
+
+
+class _JsonResponse:
+    def __init__(self, payload):
+        import json
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return self._body
+
+
 class WhatsAppExtensionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -69,6 +86,45 @@ class WhatsAppExtensionTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+
+    def test_openwa_health_requires_ready_session_not_just_configuration(self):
+        with patch.dict(os.environ, {
+            "PAGER_OPENWA_URL": "http://openwa:2785",
+            "PAGER_OPENWA_API_KEY": "test-key",
+            "PAGER_OPENWA_SESSION": "pager",
+        }, clear=False):
+            client = OpenWAClient()
+            with patch(
+                "whatsapp_extension.urllib.request.urlopen",
+                return_value=_JsonResponse([
+                    {"id": "session-123", "name": "pager", "status": "ready"}
+                ]),
+            ):
+                health = client.session_health(force=True)
+
+        self.assertTrue(health["reachable"])
+        self.assertTrue(health["ready"])
+        self.assertEqual(health["status"], "ready")
+
+    def test_openwa_qr_ready_is_not_reported_as_connected_whatsapp(self):
+        with patch.dict(os.environ, {
+            "PAGER_OPENWA_URL": "http://openwa:2785",
+            "PAGER_OPENWA_API_KEY": "test-key",
+            "PAGER_OPENWA_SESSION": "pager",
+        }, clear=False):
+            client = OpenWAClient()
+            with patch(
+                "whatsapp_extension.urllib.request.urlopen",
+                return_value=_JsonResponse([
+                    {"id": "session-123", "name": "pager", "status": "qr_ready"}
+                ]),
+            ):
+                health = client.session_health(force=True)
+
+        self.assertTrue(health["reachable"])
+        self.assertFalse(health["ready"])
+        self.assertEqual(health["status"], "qr_ready")
 
     def test_final_notification_hook_queues_whatsapp_and_preserves_existing_channels(self):
         delivery = install_whatsapp(
