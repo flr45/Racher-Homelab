@@ -436,6 +436,7 @@ def health():
             "last_error": modem_status.get("last_error"),
             "network": modem_status.get("network"),
             "signal": modem_status.get("signal"),
+            "dry_run": os.getenv("SMS_DRY_RUN", "false").lower() == "true",
         },
         gateway={
             "state": gateway_status.get("state", "unknown"),

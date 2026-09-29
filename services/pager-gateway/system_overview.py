@@ -108,6 +108,7 @@ class SystemOverview:
                 "modem_state": str(modem.get("state") or "unknown"),
                 "modem_signal": str(modem.get("signal") or ""),
                 "modem_network": str(modem.get("network") or ""),
+                "modem_dry_run": bool(modem.get("dry_run")),
                 "checked_at": str(payload.get("checked_at") or ""),
             })
 
@@ -170,6 +171,7 @@ class SystemOverview:
             and bool(sms.get("auth_ok"))
         )
         modem_ok = str(sms.get("modem_state") or "").lower() == "online"
+        sms_live_mode = not bool(sms.get("modem_dry_run"))
 
         chain: list[dict[str, str]] = []
         boot_state = str(runtime.get("boot_verify_state") or "").lower()
@@ -262,6 +264,15 @@ class SystemOverview:
                 warning=bool(sms.get("reachable")) and not sms_ok,
             ),
             self._item(
+                "sms-mode",
+                "SMS-afsendelse",
+                sms_live_mode,
+                "Live afsendelse"
+                if sms_live_mode
+                else "DRY RUN · SMS bliver kun logget og sendes ikke til telefonen",
+                warning=not sms_live_mode,
+            ),
+            self._item(
                 "gsm",
                 "GSM modem",
                 modem_ok,
@@ -277,7 +288,13 @@ class SystemOverview:
         ])
 
         local_ready = fsk_connected and fsk_in_use and pdl_ok and gateway_ok and agent_ok
-        end_to_end_ready = local_ready and bool(sms.get("reachable")) and sms_ok and modem_ok
+        end_to_end_ready = (
+            local_ready
+            and bool(sms.get("reachable"))
+            and sms_ok
+            and modem_ok
+            and sms_live_mode
+        )
         return {
             "state": "ok" if end_to_end_ready else ("local-ok" if local_ready else "degraded"),
             "local_ready": local_ready,

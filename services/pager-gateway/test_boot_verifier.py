@@ -127,6 +127,30 @@ class BootVerifierTests(unittest.TestCase):
         self.assertFalse(result["checks"]["sms_auth"])
         self.assertFalse(result["sms_auth_ok"])
 
+    def test_dry_run_sms_gateway_is_not_remote_ready(self):
+        def fake_http(url, timeout=0, headers=None):
+            if url.endswith("/healthz"):
+                return {"ok": True}
+            if url.endswith("/api/auth-check"):
+                return {"ok": True, "auth_configured": True}
+            return {
+                "status": "ok",
+                "modem": {"state": "online", "dry_run": True},
+            }
+
+        with patch.object(boot_verifier, "DB_PATH", self.db), \
+             patch.object(boot_verifier, "SMS_GATEWAY_URL", "http://100.111.28.12:8090"), \
+             patch.object(boot_verifier, "SMS_GATEWAY_TOKEN", "bridge-secret"), \
+             patch.object(boot_verifier, "service_active", return_value=True), \
+             patch.object(boot_verifier, "http_json", side_effect=fake_http), \
+             patch.object(boot_verifier, "tailscale_status", return_value={"installed": True, "service": "active", "ip": "100.81.169.71"}):
+            result = boot_verifier.check_once()
+
+        self.assertTrue(result["local_ready"])
+        self.assertFalse(result["remote_ready"])
+        self.assertFalse(result["checks"]["sms_live_mode"])
+        self.assertTrue(result["checks"]["gsm_modem"])
+
     def test_transient_sms_timeout_does_not_crash_check(self):
         def fake_http(url, timeout=0, headers=None):
             if url.endswith("/healthz"):

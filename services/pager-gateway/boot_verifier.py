@@ -138,6 +138,7 @@ def check_once() -> dict[str, Any]:
         "fsk_in_use": runtime.get("fsk_usb_pdl_in_use") == "1",
         "sms_gateway": bool(sms and str(sms.get("status") or "").lower() == "ok"),
         "sms_auth": bool(sms_auth and sms_auth.get("ok")),
+        "sms_live_mode": not bool(modem.get("dry_run")),
         "gsm_modem": str(modem.get("state") or "").lower() == "online",
     }
     tailscale = tailscale_status()
@@ -154,6 +155,7 @@ def check_once() -> dict[str, Any]:
         checks["tailscale"]
         and checks["sms_gateway"]
         and checks["sms_auth"]
+        and checks["sms_live_mode"]
         and checks["gsm_modem"]
     )
     return {
