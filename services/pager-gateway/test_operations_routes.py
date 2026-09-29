@@ -81,6 +81,21 @@ class OperationsRoutesTests(unittest.TestCase):
                 old_alarm = next((row for row in rows if row['id'] == old_alarm_id), None)
                 assert old_alarm is not None, rows
                 assert old_alarm['delivery']['pushover']['status'] == 'sent'
+
+                for index in range(6):
+                    core.storage.add_message({
+                        'received_at': datetime.now(timezone.utc).isoformat(),
+                        'protocol': 'POCSAG',
+                        'baud': 1200,
+                        'station': 'Slagelse',
+                        'message': f'BRANDALARM limit-test {index}',
+                        'raw_line': f'BRANDALARM limit-test {index}',
+                        'source': 'test',
+                        'delivery_eligible': True,
+                    })
+                limited = client.get('/api/messages?scope=feed&limit=3')
+                assert limited.status_code == 200
+                assert len(limited.get_json()) == 3, limited.get_json()
                 core.source.stop()
                 """
             )
