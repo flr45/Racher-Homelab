@@ -39,7 +39,8 @@ class SystemOverviewTests(unittest.TestCase):
             "fsk_usb_connected": "1",
             "fsk_usb_pdl_in_use": "1",
             "pdl_service": "active",
-            "gateway_container": "running",
+            "gateway_container": "healthy",
+            "openwa_container": "healthy",
             "internet_online": "1",
             "host_uptime_seconds": "3600",
         }
@@ -60,6 +61,36 @@ class SystemOverviewTests(unittest.TestCase):
         self.assertEqual(states["pdl"], "ok")
         self.assertEqual(states["sms-link"], "ok")
         self.assertEqual(states["gsm"], "ok")
+
+    def test_openwa_health_is_visible_when_whatsapp_is_enabled(self):
+        overview = SystemOverview(SimpleNamespace())
+        runtime = self._runtime()
+        with patch.dict(
+            os.environ,
+            {"PAGER_SMS_GATEWAY_URL": "", "PAGER_WHATSAPP_ENABLED": "1"},
+            clear=False,
+        ):
+            result = overview.snapshot(runtime)
+
+        rows = {item["key"]: item for item in result["chain"]}
+        self.assertIn("openwa", rows)
+        self.assertEqual(rows["openwa"]["state"], "ok")
+        self.assertIn("healthy", rows["openwa"]["detail"])
+
+    def test_unhealthy_openwa_is_reported_without_breaking_local_pager(self):
+        overview = SystemOverview(SimpleNamespace())
+        runtime = self._runtime()
+        runtime["openwa_container"] = "unhealthy"
+        with patch.dict(
+            os.environ,
+            {"PAGER_SMS_GATEWAY_URL": "", "PAGER_WHATSAPP_ENABLED": "1"},
+            clear=False,
+        ):
+            result = overview.snapshot(runtime)
+
+        rows = {item["key"]: item for item in result["chain"]}
+        self.assertEqual(rows["openwa"]["state"], "failed")
+        self.assertTrue(result["local_ready"])
 
     def test_local_pager_can_be_ready_when_sms_gateway_is_not_configured(self):
         overview = SystemOverview(SimpleNamespace())
