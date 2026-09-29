@@ -130,6 +130,7 @@ class PushoverDestinationStore:
 
 def install_pushover_destinations(core: Any) -> PushoverDestinationStore:
     store = PushoverDestinationStore(core.DB_PATH)
+    core.pushover_destination_store = store
 
     # One-time migration from the original single global user/group key. Clear the
     # legacy secret only after it has been copied so deleting all managed
@@ -180,20 +181,49 @@ def install_pushover_destinations(core: Any) -> PushoverDestinationStore:
         core.storage.add_audit(core.g.user["id"], "pushover-destination-delete", f"destination_id={destination_id}")
         return core.jsonify({"ok": True})
 
-    def managed_notify(message_id: int, event: dict[str, Any]) -> None:
+    def managed_notify(message_id: int, event: dict[str, Any]) -> dict[str, Any]:
         if not event.get("delivery_eligible", True):
-            return
+            return {
+                "status": "suppressed",
+                "target_count": 0,
+                "sent_count": 0,
+                "failed_count": 0,
+                "errors": [],
+            }
         settings = core.storage.get_settings()
         if settings.get("pushover_enabled") != "1":
-            return
-        token = str(settings.get("pushover_app_token") or "").strip()
-        if not token:
-            return
+            return {
+                "status": "disabled",
+                "target_count": 0,
+                "sent_count": 0,
+                "failed_count": 0,
+                "errors": [],
+            }
+
         destinations = store.list_active_secret()
         if not destinations:
-            return
+            return {
+                "status": "no-target",
+                "target_count": 0,
+                "sent_count": 0,
+                "failed_count": 0,
+                "errors": [],
+            }
+
+        token = str(settings.get("pushover_app_token") or "").strip()
+        if not token:
+            error = "Pushover App token mangler."
+            return {
+                "status": "failed",
+                "target_count": len(destinations),
+                "sent_count": 0,
+                "failed_count": len(destinations),
+                "errors": [error],
+            }
 
         sent = 0
+        failed = 0
+        errors: list[str] = []
         for destination in destinations:
             try:
                 core.pushover.send(
@@ -204,12 +234,22 @@ def install_pushover_destinations(core: Any) -> PushoverDestinationStore:
                 )
                 sent += 1
             except Exception as exc:
+                failed += 1
+                errors.append(f"{destination['label']}: {exc}")
                 core.app.logger.warning(
                     "Pushover failed for destination %s (%s): %s",
                     destination["id"], destination["label"], exc,
                 )
         if sent:
             core.storage.mark_notification_sent(message_id)
+        status = "sent" if sent and not failed else "partial" if sent else "failed"
+        return {
+            "status": status,
+            "target_count": len(destinations),
+            "sent_count": sent,
+            "failed_count": failed,
+            "errors": errors,
+        }
 
     core.maybe_notify_pushover = managed_notify
 

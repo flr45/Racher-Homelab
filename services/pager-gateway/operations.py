@@ -223,13 +223,30 @@ def install_operations(core) -> OperationsStore:
             ops.record_delivery(message_id, "pushover", "disabled")
             return
         try:
-            original_pushover(message_id, event)
+            result = original_pushover(message_id, event)
         except Exception as exc:
             ops.record_delivery(
                 message_id, "pushover", "failed", target_count=1, failed_count=1,
                 latency_ms=ops.message_latency_ms(message_id), last_error=str(exc),
             )
             raise
+
+        if isinstance(result, dict):
+            errors = result.get("errors") if isinstance(result.get("errors"), list) else []
+            ops.record_delivery(
+                message_id,
+                "pushover",
+                str(result.get("status") or "unknown")[:30],
+                target_count=max(0, int(result.get("target_count") or 0)),
+                sent_count=max(0, int(result.get("sent_count") or 0)),
+                failed_count=max(0, int(result.get("failed_count") or 0)),
+                latency_ms=ops.message_latency_ms(message_id),
+                last_error=" | ".join(str(item) for item in errors[:3]),
+            )
+            return
+
+        # Compatibility fallback for a custom/older notification implementation
+        # that still follows the original void return contract.
         ops.record_delivery(
             message_id, "pushover", "sent", target_count=1, sent_count=1,
             latency_ms=ops.message_latency_ms(message_id),
@@ -340,15 +357,38 @@ def install_operations(core) -> OperationsStore:
 
         settings = core.storage.get_settings()
         if settings.get("pushover_enabled") == "1":
-            try:
-                core.pushover.send(
-                    settings.get("pushover_app_token", ""), settings.get("pushover_user_key", ""),
-                    "Racher Pager · SYSTEMTEST", "Systemtest: Pushover-kanalen virker.",
-                )
-                checks["pushover"] = {"status": "ok", "detail": "Test sendt"}
-            except Exception as exc:
-                checks["pushover"] = {"status": "failed", "detail": str(exc)[:200]}
+            token = str(settings.get("pushover_app_token") or "").strip()
+            destination_store = getattr(core, "pushover_destination_store", None)
+            destinations = destination_store.list_active_secret() if destination_store is not None else []
+            if not token:
+                checks["pushover"] = {"status": "failed", "detail": "Pushover App token mangler"}
                 overall = False
+            elif not destinations:
+                checks["pushover"] = {"status": "disabled", "detail": "Ingen aktive Pushover-modtagere"}
+            else:
+                sent = 0
+                errors: list[str] = []
+                for destination in destinations:
+                    try:
+                        core.pushover.send(
+                            token,
+                            destination["user_key"],
+                            "Racher Pager · SYSTEMTEST",
+                            "Systemtest: Pushover-kanalen virker.",
+                        )
+                        sent += 1
+                    except Exception as exc:
+                        errors.append(f"{destination['label']}: {exc}")
+                failed = len(destinations) - sent
+                checks["pushover"] = {
+                    "status": "ok" if sent and not failed else "partial" if sent else "failed",
+                    "detail": (
+                        f"{sent}/{len(destinations)} sendt"
+                        + (f" · {' | '.join(errors[:2])}" if errors else "")
+                    )[:200],
+                }
+                if failed:
+                    overall = False
         else:
             checks["pushover"] = {"status": "disabled", "detail": "Pushover er deaktiveret"}
 
