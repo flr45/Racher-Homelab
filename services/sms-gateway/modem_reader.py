@@ -41,6 +41,12 @@ log = logging.getLogger("sms-modem-reader")
 running = True
 
 
+class AmbiguousSmsSendError(RuntimeError):
+    """The modem may have accepted the SMS; automatic retry could duplicate it."""
+
+
+
+
 def utc_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -145,6 +151,15 @@ def claim_outgoing():
     )
 
 
+def start_outgoing(message_id):
+    return api_json(
+        f"{API_BASE_URL}/api/outgoing/{message_id}/start",
+        method="POST",
+        payload={},
+        timeout=10,
+    )
+
+
 def complete_outgoing(message_id, status, error=None, retry=False):
     return api_json(
         f"{API_BASE_URL}/api/outgoing/{message_id}/complete",
@@ -213,24 +228,33 @@ def send_outgoing_sms(port, recipient, body):
         deadline = time.monotonic() + SMS_SEND_TIMEOUT_SECONDS
         response = bytearray()
 
-        while time.monotonic() < deadline:
-            chunk = port.read(port.in_waiting or 1)
-            if chunk:
-                response.extend(chunk)
-                text = response.decode("ascii", errors="replace")
-                if "+CMGS:" in text and "\r\nOK\r\n" in text:
-                    return
-                if any(
-                    marker in text
-                    for marker in (
-                        "\r\nERROR\r\n",
-                        "+CME ERROR:",
-                        "+CMS ERROR:",
-                    )
-                ):
-                    raise RuntimeError(text.strip())
+        try:
+            while time.monotonic() < deadline:
+                chunk = port.read(port.in_waiting or 1)
+                if chunk:
+                    response.extend(chunk)
+                    text = response.decode("ascii", errors="replace")
+                    if "+CMGS:" in text and "\r\nOK\r\n" in text:
+                        return
+                    if any(
+                        marker in text
+                        for marker in (
+                            "\r\nERROR\r\n",
+                            "+CME ERROR:",
+                            "+CMS ERROR:",
+                        )
+                    ):
+                        # The modem explicitly rejected the submission, so it is
+                        # safe for the queue policy to retry within its attempt cap.
+                        raise RuntimeError(text.strip())
+        except (serial.SerialException, OSError) as exc:
+            raise AmbiguousSmsSendError(
+                f"Serieforbindelsen forsvandt efter SMS-data blev afleveret til modemmet: {exc}"
+            ) from exc
 
-        raise TimeoutError("SMS-afsendelse fik ikke kvittering fra modem")
+        raise AmbiguousSmsSendError(
+            "SMS-data blev afleveret til modemmet, men +CMGS/OK-kvitteringen udeblev"
+        )
     finally:
         try:
             command(port, "AT+CMGF=0", timeout=8)
@@ -248,6 +272,12 @@ def process_outbox(port):
         message_id = message["id"]
         recipient = message["recipient"]
         try:
+            started = start_outgoing(message_id)
+            if not started or started.get("status") != "sending":
+                raise RuntimeError(
+                    f"SMS-køen kunne ikke starte modemafsendelse for #{message_id}"
+                )
+
             send_outgoing_sms(port, recipient, message["body"])
             complete_outgoing(message_id, "sent")
             write_status(
@@ -257,6 +287,19 @@ def process_outbox(port):
                 last_error=None,
             )
             log.info("Udgående SMS %s sendt til %s", message_id, recipient)
+        except AmbiguousSmsSendError as exc:
+            complete_outgoing(
+                message_id,
+                "unknown",
+                error=str(exc),
+                retry=False,
+            )
+            log.exception(
+                "Udgående SMS %s har ukendt leveringsstatus; automatisk retry blokeret",
+                message_id,
+            )
+            write_status(state="degraded", last_error=str(exc))
+            return
         except (serial.SerialException, OSError, TimeoutError) as exc:
             result = complete_outgoing(
                 message_id,
