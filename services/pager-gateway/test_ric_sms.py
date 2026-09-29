@@ -6,7 +6,13 @@ import unittest
 from types import SimpleNamespace
 
 import ric_sms
-from ric_sms import RicSmsRouter, RicSmsStore, format_alarm_sms, normalize_phone
+from ric_sms import (
+    RicSmsRouter,
+    RicSmsStore,
+    format_alarm_sms,
+    format_ric_call_sms,
+    normalize_phone,
+)
 from storage import Storage
 
 
@@ -44,6 +50,14 @@ class RicSmsTests(unittest.TestCase):
         text = format_alarm_sms({"station": "Ringsted", "message": "X" * 400})
         self.assertLessEqual(len(text), 160)
         self.assertTrue(text.startswith("RACHER PAGER\nRingsted\n"))
+
+    def test_ric_call_sms_is_generic_and_single_part(self):
+        text = format_ric_call_sms(
+            {"station": "Slagelse", "ric": "0001133", "message": "12345"},
+            "0001133",
+        )
+        self.assertEqual(text, "RACHER PAGER\nSlagelse\nRIC 0001133 kaldt")
+        self.assertLessEqual(len(text), 160)
 
     def test_rules_are_persistent(self):
         store = RicSmsStore(self.db)
@@ -189,6 +203,82 @@ class RicSmsTests(unittest.TestCase):
         delivery = router.store.list_deliveries()[0]
         self.assertEqual(delivery["status"], "unknown")
         self.assertIn("undgå dublet", delivery["error"])
+
+    def test_ric_call_fallback_dedupes_and_blocks_later_alarm_for_same_ric(self):
+        core = SimpleNamespace(
+            DB_PATH=self.db,
+            storage=self.storage,
+            maybe_notify_pushover=lambda message_id, event: None,
+            app=SimpleNamespace(logger=_Logger()),
+        )
+        router = RicSmsRouter(core)
+        router.store.update_config(enabled=True, gateway_url="http://sms-gateway:8090")
+        router.store.add_rule("0006240", "+4512345678", "Vagttelefon")
+
+        call_event = {
+            "received_at": "2026-09-29T12:00:00+00:00",
+            "protocol": "POCSAG",
+            "baud": 1200,
+            "ric": "0006240",
+            "station": "Ringsted",
+            "message": "123456",
+            "raw_line": "numeric raw",
+            "source": "pdl-file",
+            "delivery_eligible": False,
+            "suppressed_reason": "decoder-non-alpha",
+        }
+        first_id = self.storage.add_message(call_event)
+        sent = []
+        router._post_outgoing = lambda gateway_url, recipient, body: sent.append(
+            (gateway_url, recipient, body)
+        ) or {"id": 101, "status": "pending"}
+
+        original_thread = ric_sms.threading.Thread
+        ric_sms.threading.Thread = _ImmediateThread
+        try:
+            self.assertEqual(router.queue_for_ric_call(first_id, call_event), 1)
+
+            second_id = self.storage.add_message({**call_event, "raw_line": "numeric raw 2"})
+            self.assertEqual(router.queue_for_ric_call(second_id, call_event), 0)
+
+            alarm_event = {
+                **call_event,
+                "message": "BRANDALARM Testvej 1",
+                "delivery_eligible": True,
+                "suppressed_reason": None,
+            }
+            alarm_id = self.storage.add_message(alarm_event)
+            self.assertEqual(router.queue_for_event(alarm_id, alarm_event), 0)
+        finally:
+            ric_sms.threading.Thread = original_thread
+
+        self.assertEqual(len(sent), 1)
+        self.assertIn("RIC 0006240 kaldt", sent[0][2])
+        delivery = router.store.list_deliveries()[0]
+        self.assertEqual(delivery["trigger_kind"], "ric-call")
+        self.assertEqual(delivery["status"], "queued")
+
+    def test_explicit_word_filter_still_blocks_ric_call_fallback(self):
+        core = SimpleNamespace(
+            DB_PATH=self.db,
+            storage=self.storage,
+            maybe_notify_pushover=lambda message_id, event: None,
+            app=SimpleNamespace(logger=_Logger()),
+        )
+        router = RicSmsRouter(core)
+        router.store.update_config(enabled=True, gateway_url="http://sms-gateway:8090")
+        router.store.add_rule("0006240", "+4512345678", "Vagttelefon")
+        event = {
+            "source": "pdl-file",
+            "ric": "0006240",
+            "station": "Ringsted",
+            "message": "TEST",
+            "delivery_eligible": False,
+            "suppressed_reason": "word-filter:TEST",
+        }
+        message_id = self.storage.add_message(event)
+        self.assertEqual(router.queue_for_ric_call(message_id, event), 0)
+        self.assertEqual(router.store.list_deliveries(), [])
 
     def test_simulator_never_sends_sms(self):
         core = SimpleNamespace(

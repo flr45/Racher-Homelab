@@ -125,6 +125,24 @@ class AuthenticatedRicSmsRouter(RicSmsRouter):
                 message_id,
                 exc,
             )
+
+        # The normal alarm notification hook is intentionally skipped for
+        # decoder-non-alpha/tone rows. An explicit RIC→SMS rule is different:
+        # the operator asked to be notified when that capcode itself is called.
+        try:
+            with self.core.storage.connect() as conn:
+                stored = conn.execute(
+                    "SELECT * FROM messages WHERE id=?",
+                    (int(message_id),),
+                ).fetchone()
+            if stored is not None:
+                self.queue_for_ric_call(message_id, dict(stored))
+        except Exception as exc:  # noqa: BLE001
+            self.core.app.logger.warning(
+                "RIC SMS capcode-call routing failed for message %s: %s",
+                message_id,
+                exc,
+            )
         return message_id
 
     def _post_outgoing(self, gateway_url: str, recipient: str, body: str) -> dict[str, Any]:
@@ -167,4 +185,8 @@ def install_ric_sms(core: Any, auth_required: Callable) -> AuthenticatedRicSmsRo
     router = AuthenticatedRicSmsRouter(core)
     register_ric_sms_routes(core, router, auth_required)
     core.ric_sms_router = router
+    # The production WSGI imports this installer, not ric_sms.install_ric_sms().
+    # Preserve the base router's restart recovery so a reservation created before
+    # a Pager restart is not left stuck forever.
+    router.recover_reserved()
     return router
