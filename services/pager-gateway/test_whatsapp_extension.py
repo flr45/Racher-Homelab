@@ -110,6 +110,16 @@ class WhatsAppExtensionTests(unittest.TestCase):
         self.assertNotIn("0006240", text)
         self.assertNotIn("RIC", text)
 
+
+    def test_whatsapp_utc_timestamp_is_rendered_in_copenhagen_time(self):
+        with patch.dict(os.environ, {"PAGER_LOCAL_TIMEZONE": "Europe/Copenhagen"}, clear=False):
+            text = WhatsAppDelivery.format_alarm({
+                "station": "Ringsted",
+                "message": "BRANDALARM Ringsted",
+                "received_at": "2026-09-29T06:00:00+00:00",
+            })
+        self.assertIn("29-09-2026 08:00:00", text)
+
     def _direct_delivery(self):
         user_id = self.storage.create_user(
             "tester", "Tester", "unused-test-hash", "user"
