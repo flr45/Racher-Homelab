@@ -17,6 +17,16 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn("systemctl reset-failed racher-pdl.service", script)
         self.assertIn("systemctl restart racher-pdl.service", script)
 
+    def test_system_agent_installs_bounded_persistent_journal(self):
+        script = (PDL / "install-system-agent.sh").read_text(encoding="utf-8")
+        self.assertIn("racher-pager-persistent.conf", script)
+        self.assertIn("Storage=persistent", script)
+        self.assertIn("Compress=yes", script)
+        self.assertIn("SystemMaxUse=128M", script)
+        self.assertIn("MaxRetentionSec=14day", script)
+        self.assertIn("systemd-tmpfiles --create --prefix /var/log/journal", script)
+        self.assertIn("systemctl restart systemd-journald.service", script)
+
     def test_shared_sqlite_state_is_group_writable_for_root_agents_and_web_runtime(self):
         script = (PDL / "install-system-agent.sh").read_text(encoding="utf-8")
         self.assertIn('chmod 2770 "$DATA_DIR"', script)

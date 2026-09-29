@@ -16,6 +16,7 @@ WATCHDOG_UNIT_PATH="/etc/systemd/system/racher-pager-gateway-watchdog.service"
 WATCHDOG_TIMER_PATH="/etc/systemd/system/racher-pager-gateway-watchdog.timer"
 PDL_LOGROTATE_PATH="/etc/logrotate.d/racher-pager-pdl"
 HARDWARE_WATCHDOG_CONF="/etc/systemd/system.conf.d/racher-pager-watchdog.conf"
+JOURNAL_CONF="/etc/systemd/journald.conf.d/racher-pager-persistent.conf"
 WATCHDOG_RUNTIME_DIR="/run/racher-pager"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
@@ -71,6 +72,22 @@ $DATA_DIR/pdl.log {
 }
 EOF
 sudo chmod 0644 "$PDL_LOGROTATE_PATH"
+
+# Keep enough history to diagnose failures that happen before a reboot. The
+# appliance previously lost exactly that evidence because journald was volatile.
+# Bound both age and disk use so persistence cannot grow without limit on an SD
+# card or small SSD.
+sudo mkdir -p /etc/systemd/journald.conf.d /var/log/journal
+sudo tee "$JOURNAL_CONF" >/dev/null <<'EOF'
+[Journal]
+Storage=persistent
+Compress=yes
+SystemMaxUse=128M
+MaxRetentionSec=14day
+EOF
+sudo chmod 0644 "$JOURNAL_CONF"
+sudo systemd-tmpfiles --create --prefix /var/log/journal
+sudo systemctl restart systemd-journald.service
 
 sudo tee "$UNIT_PATH" >/dev/null <<EOF
 [Unit]
@@ -261,6 +278,7 @@ echo "Helpers:         $INTEGRATION_DIR"
 echo "FSK probe:       racher-pager-fsk-status.timer (10 sek.)"
 echo "Gateway watchdog: racher-pager-gateway-watchdog.timer (20 sek., 3 fejl)"
 echo "PDL logrotation:  daglig/20 MB, 30 rotationer"
+echo "Journal:          persistent, maks. 128 MB / 14 dage"
 echo "Reception diag:  $INTEGRATION_DIR/diagnose-reception.sh"
 echo "Pi watchdog:     $HARDWARE_WATCHDOG_STATUS"
 echo "Status: sudo systemctl status racher-pager-system-agent --no-pager"
