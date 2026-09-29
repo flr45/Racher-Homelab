@@ -158,12 +158,16 @@ def send_sms(recipient: str, body: str):
 
     device = os.getenv("MODEM_DEVICE", "/dev/ttyUSB0")
     baudrate = int(os.getenv("MODEM_BAUDRATE", "115200"))
-    disable_dtr_toggle = os.getenv("MODEM_DISABLE_DTR_TOGGLE", "true").lower() == "true"
+    dsrdtr_flow_control = (
+        os.getenv("MODEM_DSRDTR_FLOW_CONTROL", "false").lower() == "true"
+    )
+    write_timeout = max(1, int(os.getenv("MODEM_WRITE_TIMEOUT_SECONDS", "10")))
     with modem_lock, serial.Serial(
         device,
         baudrate=baudrate,
         timeout=0.25,
-        dsrdtr=disable_dtr_toggle,
+        write_timeout=write_timeout,
+        dsrdtr=dsrdtr_flow_control,
     ) as port:
         modem_command(port, "AT")
         modem_command(port, 'AT+CSCS="GSM"')
