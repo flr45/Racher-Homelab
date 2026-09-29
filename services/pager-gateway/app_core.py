@@ -110,10 +110,18 @@ def load_identity_and_csrf():
         session["csrf_token"] = secrets.token_urlsafe(32)
     user_id = session.get("user_id")
     g.user = storage.get_user(int(user_id)) if user_id else None
-    if g.user and not g.user.get("active"):
-        session.clear()
-        session["csrf_token"] = secrets.token_urlsafe(32)
-        g.user = None
+    if g.user:
+        current_version = int(g.user.get("session_version") or 1)
+        session_version = session.get("session_version")
+        if session_version is None and current_version == 1:
+            # Preserve sessions created before this migration. Once credentials
+            # have ever changed, a versionless cookie is no longer trusted.
+            session["session_version"] = current_version
+            session_version = current_version
+        if not g.user.get("active") or int(session_version or 0) != current_version:
+            session.clear()
+            session["csrf_token"] = secrets.token_urlsafe(32)
+            g.user = None
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         supplied = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token", "")
         expected = session.get("csrf_token", "")
@@ -336,6 +344,7 @@ def setup():
             storage.add_audit(user_id, "first-admin", "Første administrator oprettet")
             session.clear()
             session["user_id"] = user_id
+            session["session_version"] = int(storage.get_user(user_id).get("session_version") or 1)
             session["csrf_token"] = secrets.token_urlsafe(32)
             session.permanent = True
             storage.touch_login(user_id)
@@ -358,6 +367,7 @@ def login():
         else:
             session.clear()
             session["user_id"] = user["id"]
+            session["session_version"] = int(user.get("session_version") or 1)
             session["csrf_token"] = secrets.token_urlsafe(32)
             session.permanent = True
             storage.touch_login(user["id"])
