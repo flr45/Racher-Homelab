@@ -21,7 +21,15 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from adaptive import AdaptiveFilter
 from adaptive_routes import register_adaptive_routes
-from gateway import FileTailSource, PagerEvent, PushoverClient, detect_station, parse_pdl_line, public_message
+from gateway import (
+    FileTailSource,
+    PagerEvent,
+    PushoverClient,
+    detect_station,
+    parse_pdl_line,
+    public_message,
+    public_notification_title,
+)
 from push_service import WebPushService
 from routing import RoutingStore
 from storage import Storage
@@ -144,7 +152,7 @@ def maybe_notify_pushover(message_id: int, event: dict[str, Any]) -> None:
     pushover.send(
         settings.get("pushover_app_token", ""),
         settings.get("pushover_user_key", ""),
-        event.get("station") or settings.get("gateway_name", "Pager"),
+        public_notification_title(event, settings.get("gateway_name", "Pager")),
         public_message(event.get("message", "")),
     )
     storage.mark_notification_sent(message_id)
@@ -154,7 +162,7 @@ def send_web_push_for_event(message_id: int, event: dict[str, Any]) -> None:
     if not event.get("delivery_eligible", True):
         return
     payload = {
-        "title": event.get("station") or "Pageralarm",
+        "title": public_notification_title(event, "Pageralarm"),
         "body": public_message(event.get("message", "")),
         "message_id": message_id,
         "url": "/",
