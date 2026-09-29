@@ -30,6 +30,7 @@ from pushover_destinations import install_pushover_destinations
 from ric_sms_remote import install_ric_sms
 from rss_updates import install_rss_updates
 from system_overview import install_system_overview
+from whatsapp_extension import install_whatsapp
 
 
 # Pushover destination management must wrap the core sender before alarm_rules
@@ -43,6 +44,8 @@ from system_overview import install_system_overview
 # Operations owns delivery/quality telemetry; system overview extends that status
 # with the actual end-to-end scanner -> SMS/GSM chain. RIC SMS is intentionally
 # installed afterwards so its trigger remains independent of Pushover state.
+# WhatsApp wraps that final notification hook last so both ordinary alarms and
+# burst-consensus alarms reach OpenWA without depending on Pushover being enabled.
 pushover_destinations = install_pushover_destinations(core)
 alarm_rules = install_alarm_rules(core)
 burst_consensus = install_burst_consensus(core, alarm_rules)
@@ -53,6 +56,9 @@ operations = install_operations(core)
 system_overview = install_system_overview(core)
 admin_user_stations = install_admin_user_stations(core)
 ric_sms = install_ric_sms(core, core.auth_required)
+whatsapp = install_whatsapp(
+    core.app, core.storage, core.routing, core.auth_required, core=core
+)
 rss_updates = install_rss_updates(core)
 install_pdl_multiline_tail(core.source)
 core.source.start()

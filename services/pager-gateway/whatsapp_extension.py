@@ -273,29 +273,29 @@ class WhatsAppDelivery:
         return [dict(row) for row in rows]
 
 
-def install_whatsapp(app, storage, routing, auth_required) -> WhatsAppDelivery:
+def install_whatsapp(app, storage, routing, auth_required, *, core=None) -> WhatsAppDelivery:
+    if core is None:
+        import app_core as core
+
     delivery = WhatsAppDelivery(app, storage, routing)
 
-    # Patch the shared app_core ingest symbol. on_pdl_line and the simulator route
-    # resolve that symbol in app_core's module globals, so both real and simulated
-    # alarms use exactly the same WhatsApp dispatch point after filtering/routing.
-    import app_core
+    # Use the final notification hook rather than wrapping ingest_event. Burst
+    # consensus stores candidate rows first and only emits the approved alarm later;
+    # an ingest wrapper would therefore miss those real 1200-baud alarms. The
+    # notification hook is invoked both by normal ingest and by the consensus flush.
+    # Install this after operations/RIC-SMS so WhatsApp stays independent of
+    # Pushover being enabled or succeeding.
+    original_notify = core.maybe_notify_pushover
 
-    original_ingest = app_core.ingest_event
+    def notify_and_whatsapp(message_id: int, event: dict[str, Any]) -> None:
+        if event.get("delivery_eligible", True):
+            try:
+                delivery.dispatch_async(message_id, event)
+            except Exception:
+                app.logger.exception("Unable to queue WhatsApp delivery for message %s", message_id)
+        return original_notify(message_id, event)
 
-    def ingest_with_whatsapp(event):
-        message_id = original_ingest(event)
-        try:
-            with storage.connect() as conn:
-                row = conn.execute("SELECT * FROM messages WHERE id=?", (int(message_id),)).fetchone()
-            event_row = dict(row) if row else None
-            if event_row and event_row.get("delivery_eligible"):
-                delivery.dispatch_async(message_id, event_row)
-        except Exception:
-            app.logger.exception("Unable to queue WhatsApp delivery for message %s", message_id)
-        return message_id
-
-    app_core.ingest_event = ingest_with_whatsapp
+    core.maybe_notify_pushover = notify_and_whatsapp
 
     @app.get("/api/whatsapp/me")
     @auth_required()
