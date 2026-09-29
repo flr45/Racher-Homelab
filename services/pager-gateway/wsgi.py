@@ -56,7 +56,9 @@ operations = install_operations(core)
 system_overview = install_system_overview(core)
 admin_user_stations = install_admin_user_stations(core)
 ric_sms = install_ric_sms(core, core.auth_required)
-whatsapp = install_whatsapp(core)
+whatsapp = install_whatsapp(
+    core.app, core.storage, core.routing, core.auth_required, core=core
+)
 rss_updates = install_rss_updates(core)
 install_pdl_multiline_tail(core.source)
 core.source.start()
