@@ -588,7 +588,13 @@ def maybe_manage_hotspot(status: dict[str, str], state: dict[str, float | None])
 def main() -> int:
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     storage = Storage(DB_PATH)
+    interrupted = storage.fail_interrupted_system_commands()
     print(f"Racher Pager system-agent bruger {DB_PATH}", flush=True)
+    if interrupted:
+        print(
+            f"Markerede {interrupted} afbrudt(e) systemhandling(er) som fejlet efter genstart.",
+            flush=True,
+        )
 
     next_status = 0.0
     network_state: dict[str, float | None] = {"offline_since": None}
