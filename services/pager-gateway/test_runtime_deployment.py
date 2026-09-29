@@ -31,9 +31,7 @@ class RuntimeDeploymentTests(unittest.TestCase):
     def test_update_validates_recovery_layers_and_restores_host_files(self):
         script = (PDL / "update-pager.sh").read_text(encoding="utf-8")
         self.assertIn("restore_host_runtime_from_checkout", script)
-        self.assertIn("gateway_watchdog.py", script)
-        self.assertIn("fsk_status_agent.py", script)
-        self.assertIn("external_monitor.py", script)
+        self.assertIn("install-system-agent.sh", script)
         self.assertIn("systemctl is-active --quiet racher-pager-system-agent.service", script)
         self.assertIn("systemctl is-active --quiet racher-pager-gateway-watchdog.timer", script)
         self.assertIn("systemctl is-active --quiet racher-pdl.service", script)
