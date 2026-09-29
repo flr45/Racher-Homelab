@@ -15,6 +15,8 @@ COPY queued_app.py queued_app.py
 COPY secure_app.py app.py
 COPY modem_reader.py gsm0338.py sms_pdu.py ./
 RUN python -m py_compile app.py queued_app.py base_app.py modem_reader.py gsm0338.py sms_pdu.py
+RUN python -c 'import modem_reader; assert modem_reader.MODEM_DSRDTR_FLOW_CONTROL is False; assert modem_reader.MODEM_WRITE_TIMEOUT_SECONDS == 10'
+RUN MODEM_DSRDTR_FLOW_CONTROL=true MODEM_WRITE_TIMEOUT_SECONDS=4 python -c 'import modem_reader; assert modem_reader.MODEM_DSRDTR_FLOW_CONTROL is True; assert modem_reader.MODEM_WRITE_TIMEOUT_SECONDS == 4'
 RUN python -c 'from gsm0338 import decode_modem_bytes, encode_gsm0338; text="p\u00e5 f\u00e6rdigt h\u00f8stet \u00c6\u00d8\u00c5"; assert decode_modem_bytes(encode_gsm0338(text)) == text'
 RUN python -c 'from gsm0338 import encode_gsm0338, prepare_gsm0338_sms; text=prepare_gsm0338_sms("Ringsted \u00b7 BRANDALARM \u2026 \u00c6\u00d8\u00c5 \u2603"); assert text == "Ringsted - BRANDALARM ... \u00c6\u00d8\u00c5 ?"; assert len(encode_gsm0338(prepare_gsm0338_sms("{"*160))) <= 160'
 RUN python -c 'from sms_pdu import decode_sms_deliver_pdu; p="06915404969912040A91542272306900006280107085538031A8600A442DCFE920F80364EEC8C9E9331D8466CCE9653AE8DD963FC86550BB4C0675400CD003C4012D400E"; m=decode_sms_deliver_pdu(4,p); assert m.sender == "+4522270396"; assert m.text == "(A) Test p\u00e5 f\u00e6rdigt h\u00f8stet omr\u00e5de med \u00e6 \u00f8 \u00e5 \u00c6 \u00d8 \u00c5"'

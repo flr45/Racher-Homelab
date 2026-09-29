@@ -17,8 +17,11 @@ from sms_pdu import parse_cmgl_response
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 MODEM_DEVICE = os.getenv("MODEM_DEVICE", "/dev/ttyUSB1")
 MODEM_BAUDRATE = int(os.getenv("MODEM_BAUDRATE", "115200"))
-MODEM_DISABLE_DTR_TOGGLE = (
-    os.getenv("MODEM_DISABLE_DTR_TOGGLE", "true").lower() == "true"
+MODEM_DSRDTR_FLOW_CONTROL = (
+    os.getenv("MODEM_DSRDTR_FLOW_CONTROL", "false").lower() == "true"
+)
+MODEM_WRITE_TIMEOUT_SECONDS = max(
+    1, int(os.getenv("MODEM_WRITE_TIMEOUT_SECONDS", "10"))
 )
 POLL_SECONDS = float(os.getenv("MODEM_POLL_SECONDS", "2"))
 API_BASE_URL = os.getenv("GATEWAY_API_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
@@ -299,7 +302,8 @@ def run():
                 MODEM_DEVICE,
                 MODEM_BAUDRATE,
                 timeout=0.3,
-                dsrdtr=MODEM_DISABLE_DTR_TOGGLE,
+                write_timeout=MODEM_WRITE_TIMEOUT_SECONDS,
+                dsrdtr=MODEM_DSRDTR_FLOW_CONTROL,
             ) as port:
                 initialize(port)
                 retry_seconds = 2

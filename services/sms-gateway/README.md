@@ -71,6 +71,8 @@ SMS_DRY_RUN=false
 
 Tjenesten sender i SMS-teksttilstand med `AT+CMGF=1` og `AT+CMGS`.
 
+Seriel DSR/DTR-flow-control er som standard **slået fra**. pySerial-parameteren `dsrdtr=True` betyder, at DSR/DTR-hardware-flow-control aktiveres; den skal derfor kun slås til med `SMS_MODEM_DSRDTR_FLOW_CONTROL=true`, hvis det konkrete modem/kabel kræver det. `SMS_MODEM_WRITE_TIMEOUT_SECONDS` begrænser desuden hvor længe et blokeret UART-write kan hænge.
+
 ## API
 
 - `GET /health`
