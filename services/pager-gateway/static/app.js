@@ -53,6 +53,75 @@ function shortSha(value) {
   return value ? String(value).slice(0, 12) : '—';
 }
 
+function notify(message, type = 'info', title = '') {
+  const region = $('#toast-region');
+  const text = String(message || '').trim();
+  if (!text) return;
+  if (!region) {
+    (type === 'error' ? console.error : console.log)(text);
+    return;
+  }
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  const heading = document.createElement('strong');
+  heading.textContent = title || (type === 'error' ? 'Fejl' : type === 'success' ? 'Udført' : 'Besked');
+  const body = document.createElement('span');
+  body.textContent = text;
+  toast.append(heading, body);
+  region.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('visible'));
+  const close = () => {
+    toast.classList.remove('visible');
+    window.setTimeout(() => toast.remove(), 180);
+  };
+  toast.addEventListener('click', close);
+  window.setTimeout(close, type === 'error' ? 6500 : 4200);
+}
+window.pagerNotify = notify;
+
+function requestPagerPassword() {
+  const dialog = $('#password-dialog');
+  const form = $('#password-dialog-form');
+  const input = $('#password-dialog-input');
+  const cancel = $('#password-dialog-cancel');
+  if (!dialog || !form || !input || !cancel || typeof dialog.showModal !== 'function') {
+    notify('Denne browser understøtter ikke den sikre adgangskodedialog.', 'error');
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      form.removeEventListener('submit', onSubmit);
+      cancel.removeEventListener('click', onCancel);
+      dialog.removeEventListener('cancel', onDialogCancel);
+      input.value = '';
+      if (dialog.open) dialog.close();
+      resolve(value);
+    };
+    const onSubmit = (event) => {
+      event.preventDefault();
+      if (!input.reportValidity()) return;
+      finish(input.value);
+    };
+    const onCancel = () => finish(null);
+    const onDialogCancel = (event) => {
+      event.preventDefault();
+      finish(null);
+    };
+
+    form.addEventListener('submit', onSubmit);
+    cancel.addEventListener('click', onCancel);
+    dialog.addEventListener('cancel', onDialogCancel);
+    input.value = '';
+    dialog.showModal();
+    window.setTimeout(() => input.focus(), 0);
+  });
+}
+window.requestPagerPassword = requestPagerPassword;
+
 async function api(url, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers || {});
@@ -99,16 +168,80 @@ async function refreshHistory() {
   $('#history-list').innerHTML = rows.length ? rows.map(messageRow).join('') : '<p class="muted">Ingen historik endnu.</p>';
 }
 
-$$('.tab').forEach((button) => button.addEventListener('click', async () => {
-  $$('.tab').forEach((item) => item.classList.remove('active'));
-  $$('.panel').forEach((item) => item.classList.remove('active'));
-  button.classList.add('active');
-  $('#' + button.dataset.tab)?.classList.add('active');
-  if (button.dataset.tab === 'history') await refreshHistory();
-  if (button.dataset.tab === 'system' && isAdmin) { await refreshAdminStatus(); await refreshAudit(); }
-  if (button.dataset.tab === 'users' && isAdmin) await refreshUsers();
-  if (button.dataset.tab === 'settings' && isAdmin) { await loadSettings(); await loadAlarmFilters(); }
-}));
+const tabs = $('.tab');
+
+function prepareTabs() {
+  tabs.forEach((button) => {
+    const name = button.dataset.tab;
+    const panel = name ? $('#' + name) : null;
+    button.setAttribute('role', 'tab');
+    button.id = button.id || `tab-${name}`;
+    button.setAttribute('aria-controls', name || '');
+    button.setAttribute('aria-selected', button.classList.contains('active') ? 'true' : 'false');
+    button.tabIndex = button.classList.contains('active') ? 0 : -1;
+    if (panel) {
+      panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-labelledby', button.id);
+      panel.hidden = !panel.classList.contains('active');
+    }
+  });
+}
+
+async function activateTab(button, {updateHash = true} = {}) {
+  const name = button?.dataset?.tab;
+  const panel = name ? $('#' + name) : null;
+  if (!name || !panel) return;
+
+  tabs.forEach((item) => {
+    const selected = item === button;
+    item.classList.toggle('active', selected);
+    item.setAttribute('aria-selected', selected ? 'true' : 'false');
+    item.tabIndex = selected ? 0 : -1;
+  });
+  $('.panel').forEach((item) => {
+    const selected = item === panel;
+    item.classList.toggle('active', selected);
+    item.hidden = !selected;
+  });
+  if (updateHash) history.replaceState(null, '', `#${name}`);
+  button.scrollIntoView({block: 'nearest', inline: 'nearest'});
+
+  try {
+    if (name === 'history') await refreshHistory();
+    if (name === 'system' && isAdmin) { await refreshAdminStatus(); await refreshAudit(); }
+    if (name === 'users' && isAdmin) await refreshUsers();
+    if (name === 'settings' && isAdmin) { await loadSettings(); await loadAlarmFilters(); }
+  } catch (error) {
+    notify(error.message, 'error');
+  }
+}
+
+prepareTabs();
+tabs.forEach((button, index) => {
+  button.addEventListener('click', () => activateTab(button));
+  button.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    let target = index;
+    if (event.key === 'ArrowLeft') target = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === 'ArrowRight') target = (index + 1) % tabs.length;
+    if (event.key === 'Home') target = 0;
+    if (event.key === 'End') target = tabs.length - 1;
+    tabs[target].focus();
+    tabs[target].click();
+  });
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  const requested = window.location.hash.slice(1);
+  const target = tabs.find((button) => button.dataset.tab === requested);
+  if (target && !target.classList.contains('active')) target.click();
+});
+window.addEventListener('hashchange', () => {
+  const requested = window.location.hash.slice(1);
+  const target = tabs.find((button) => button.dataset.tab === requested);
+  if (target && !target.classList.contains('active')) activateTab(target, {updateHash: false});
+});
 
 $('#refresh-alarms')?.addEventListener('click', refreshAlarms);
 $('#refresh-history')?.addEventListener('click', refreshHistory);
@@ -162,7 +295,7 @@ $('#push-enable')?.addEventListener('click', async () => {
     if (!subscription) subscription = await registration.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key.public_key)});
     await api('/api/push/subscribe', {method: 'POST', body: JSON.stringify(subscription.toJSON())});
     await refreshPushState();
-  } catch (error) { alert(error.message); } finally { button.disabled = false; }
+  } catch (error) { notify(error.message, 'error'); } finally { button.disabled = false; }
 });
 
 $('#push-disable')?.addEventListener('click', async () => {
@@ -174,12 +307,12 @@ $('#push-disable')?.addEventListener('click', async () => {
       await subscription.unsubscribe();
     }
     await refreshPushState();
-  } catch (error) { alert(error.message); }
+  } catch (error) { notify(error.message, 'error'); }
 });
 
 $('#push-test')?.addEventListener('click', async () => {
   try { const result = await api('/api/push/test', {method: 'POST', body: '{}'}); if (!result.ok) throw new Error('Testnotifikationen kunne ikke sendes.'); }
-  catch (error) { alert(error.message); }
+  catch (error) { notify(error.message, 'error'); }
 });
 
 // ---- Admin ---------------------------------------------------------------------
@@ -228,7 +361,7 @@ function renderNetwork(runtime) {
   $$('[data-wifi-remove]').forEach((button) => button.addEventListener('click', async () => {
     if (!confirm('Vil du fjerne denne gemte Wi-Fi-profil?')) return;
     try { await queueAction('wifi-remove', {profile: button.dataset.wifiRemove}); }
-    catch (error) { alert(error.message); }
+    catch (error) { notify(error.message, 'error'); }
   }));
 }
 
@@ -250,7 +383,7 @@ function renderBackups(runtime) {
     const filename = button.dataset.restoreBackup;
     if (!confirm(`Gendan ${filename}? Nuværende tilstand sikkerhedsbackes først, og gatewayen genstarter.`)) return;
     try { await queueAction('restore-backup', {filename}); }
-    catch (error) { alert(error.message); }
+    catch (error) { notify(error.message, 'error'); }
   }));
 }
 
@@ -290,7 +423,7 @@ $('#send-mock')?.addEventListener('click', async () => {
   try {
     await api('/api/mock', {method: 'POST', body: JSON.stringify({message: $('#mock-message').value})});
     await refreshAlarms(); await refreshAdminStatus();
-  } catch (error) { alert(error.message); } finally { button.disabled = false; }
+  } catch (error) { notify(error.message, 'error'); } finally { button.disabled = false; }
 });
 
 async function refreshCommands() {
@@ -316,8 +449,8 @@ $$('[data-system-action]').forEach((button) => button.addEventListener('click', 
   button.disabled = true;
   try {
     const ok = await queueAction(action, {}, `Vil du ${actionDescriptions[action] || action}`);
-    if (ok && ['update-gateway', 'rollback-gateway', 'reboot', 'restart-gateway'].includes(action)) alert('Handlingen er lagt i kø. Forbindelsen kan kortvarigt forsvinde.');
-  } catch (error) { alert(error.message); } finally { button.disabled = false; }
+    if (ok && ['update-gateway', 'rollback-gateway', 'reboot', 'restart-gateway'].includes(action)) notify('Handlingen er lagt i kø. Forbindelsen kan kortvarigt forsvinde.', 'success');
+  } catch (error) { notify(error.message, 'error'); } finally { button.disabled = false; }
 }));
 
 $('#wifi-form')?.addEventListener('submit', async (event) => {
@@ -328,8 +461,8 @@ $('#wifi-form')?.addEventListener('submit', async (event) => {
   try {
     await queueAction('wifi-add', {ssid: values.ssid, password: values.password});
     form.reset();
-    alert('Wi-Fi-profilen er lagt i kø. Pi’en forsøger at skifte forbindelse.');
-  } catch (error) { alert(error.message); }
+    notify('Wi-Fi-profilen er lagt i kø. Pi’en forsøger at skifte forbindelse.', 'success');
+  } catch (error) { notify(error.message, 'error'); }
 });
 
 $('#reveal-hotspot')?.addEventListener('click', () => {
@@ -340,7 +473,7 @@ $('#reveal-hotspot')?.addEventListener('click', () => {
   $('#reveal-hotspot').textContent = reveal ? 'Skjul Password/PIN' : 'Vis Password/PIN';
 });
 
-$('#refresh-audit')?.addEventListener('click', () => refreshAudit().catch((error) => alert(error.message)));
+$('#refresh-audit')?.addEventListener('click', () => refreshAudit().catch((error) => notify(error.message, 'error')));
 
 async function refreshUsers() {
   if (!isAdmin) return;
@@ -349,13 +482,13 @@ async function refreshUsers() {
   $$('[data-user-toggle]').forEach((button) => button.addEventListener('click', async () => {
     const active = button.dataset.active === '1';
     try { await api(`/api/users/${button.dataset.userToggle}`, {method: 'PATCH', body: JSON.stringify({active: !active})}); await refreshUsers(); }
-    catch (error) { alert(error.message); }
+    catch (error) { notify(error.message, 'error'); }
   }));
   $$('[data-user-password]').forEach((button) => button.addEventListener('click', async () => {
-    const password = prompt('Indtast ny adgangskode (mindst 10 tegn):');
+    const password = await requestPagerPassword();
     if (password === null) return;
-    try { await api(`/api/users/${button.dataset.userPassword}`, {method: 'PATCH', body: JSON.stringify({password})}); alert('Adgangskoden er ændret.'); }
-    catch (error) { alert(error.message); }
+    try { await api(`/api/users/${button.dataset.userPassword}`, {method: 'PATCH', body: JSON.stringify({password})}); notify('Adgangskoden er ændret.', 'success'); }
+    catch (error) { notify(error.message, 'error'); }
   }));
 }
 
@@ -363,7 +496,7 @@ $('#refresh-users')?.addEventListener('click', refreshUsers);
 $('#create-user-form')?.addEventListener('submit', async (event) => {
   event.preventDefault(); const form = event.currentTarget; const payload = Object.fromEntries(new FormData(form).entries());
   try { await api('/api/users', {method: 'POST', body: JSON.stringify(payload)}); form.reset(); await refreshUsers(); }
-  catch (error) { alert(error.message); }
+  catch (error) { notify(error.message, 'error'); }
 });
 
 function installAlarmFilterUi() {
@@ -445,8 +578,8 @@ $('#settings-form')?.addEventListener('submit', async (event) => {
 });
 
 $('#test-pushover')?.addEventListener('click', async () => {
-  try { await api('/api/pushover/test', {method: 'POST', body: '{}'}); alert('Pushover-test er sendt.'); }
-  catch (error) { alert(error.message); }
+  try { await api('/api/pushover/test', {method: 'POST', body: '{}'}); notify('Pushover-test er sendt.', 'success'); }
+  catch (error) { notify(error.message, 'error'); }
 });
 
 // ---- Startup -------------------------------------------------------------------

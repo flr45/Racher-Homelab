@@ -48,7 +48,7 @@
     legacyCard.parentNode.insertBefore(card, legacyCard);
 
     document.querySelector('#refresh-admin-user-stations')?.addEventListener('click', () => {
-      refreshOverview().catch((error) => alert(error.message));
+      refreshOverview().catch((error) => window.pagerNotify?.(error.message, 'error') || console.error(error));
     });
 
     document.querySelector('#admin-user-station-create-form')?.addEventListener('submit', async (event) => {
@@ -64,7 +64,7 @@
         form.reset();
         await refreshOverview();
       } catch (error) {
-        alert(error.message);
+        window.pagerNotify?.(error.message, 'error') || console.error(error);
       }
     });
 
@@ -142,7 +142,7 @@
         });
         await refreshOverview();
       } catch (error) {
-        alert(error.message);
+        window.pagerNotify?.(error.message, 'error') || console.error(error);
       }
     }));
 
@@ -155,21 +155,21 @@
         });
         await refreshOverview();
       } catch (error) {
-        alert(error.message);
+        window.pagerNotify?.(error.message, 'error') || console.error(error);
       }
     }));
 
     target.querySelectorAll('[data-admin-user-password]').forEach((button) => button.addEventListener('click', async () => {
-      const password = prompt('Indtast ny adgangskode (mindst 10 tegn):');
-      if (password === null) return;
+      const password = await window.requestPagerPassword?.();
+      if (password === null || password === undefined) return;
       try {
         await api(`/api/users/${button.dataset.adminUserPassword}`, {
           method: 'PATCH',
           body: JSON.stringify({password}),
         });
-        alert('Adgangskoden er ændret.');
+        window.pagerNotify?.('Adgangskoden er ændret.', 'success');
       } catch (error) {
-        alert(error.message);
+        window.pagerNotify?.(error.message, 'error') || console.error(error);
       }
     }));
   }
@@ -187,7 +187,7 @@
 
   installUi();
   document.querySelector('[data-tab="users"]')?.addEventListener('click', () => {
-    setTimeout(() => refreshOverview().catch((error) => alert(error.message)), 0);
+    setTimeout(() => refreshOverview().catch((error) => window.pagerNotify?.(error.message, 'error') || console.error(error)), 0);
   });
 
   if (document.querySelector('#users')?.classList.contains('active')) {

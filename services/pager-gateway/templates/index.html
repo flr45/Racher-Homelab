@@ -23,7 +23,7 @@
       </div>
     </header>
 
-    <nav class="tabs" aria-label="Navigation">
+    <nav class="tabs" aria-label="Navigation" role="tablist">
       <button class="tab active" data-tab="alarms">Alarmer</button>
       <button class="tab" data-tab="politi">Politi Update</button>
       <button class="tab" data-tab="history">Historik</button>
@@ -167,6 +167,23 @@
       {% endif %}
     </main>
   </div>
+  <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
+  {% if is_admin %}
+  <dialog id="password-dialog" class="pager-dialog" aria-labelledby="password-dialog-title">
+    <form id="password-dialog-form">
+      <span class="label">Brugersikkerhed</span>
+      <h2 id="password-dialog-title">Ny adgangskode</h2>
+      <p class="hint">Indtast mindst 10 tegn. Adgangskoden vises ikke på skærmen.</p>
+      <label class="dialog-field">Ny adgangskode
+        <input id="password-dialog-input" type="password" minlength="10" autocomplete="new-password" required>
+      </label>
+      <div class="actions dialog-actions">
+        <button id="password-dialog-cancel" type="button">Annullér</button>
+        <button class="primary" type="submit">Gem adgangskode</button>
+      </div>
+    </form>
+  </dialog>
+  {% endif %}
   <script src="/static/app.js" defer></script>
   <script src="/static/fsk-status.js" defer></script>
   <script src="/static/ric-admin.js" defer></script>
