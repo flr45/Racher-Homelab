@@ -65,6 +65,19 @@ def http_json(url: str, timeout: float = 2.5) -> dict[str, Any] | None:
         return None
 
 
+def _age_seconds(value: str) -> float | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        moment = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - moment.astimezone(timezone.utc)).total_seconds())
+
+
 def runtime_values() -> dict[str, str]:
     try:
         with sqlite3.connect(DB_PATH, timeout=5) as conn:
@@ -92,12 +105,15 @@ def check_once() -> dict[str, Any]:
     if not isinstance(modem, dict):
         modem = {}
 
+    fsk_age = _age_seconds(runtime.get("fsk_usb_last_seen", ""))
+    fsk_fresh = fsk_age is not None and fsk_age <= 30
     checks = {
         "gateway": bool(gateway and gateway.get("ok")),
         "pdl": service_active("racher-pdl.service"),
         "system_agent": service_active("racher-pager-system-agent.service"),
-        "fsk_connected": runtime.get("fsk_usb_connected") == "1",
-        "fsk_in_use": runtime.get("fsk_usb_pdl_in_use") == "1",
+        "fsk_status_fresh": fsk_fresh,
+        "fsk_connected": fsk_fresh and runtime.get("fsk_usb_connected") == "1",
+        "fsk_in_use": fsk_fresh and runtime.get("fsk_usb_pdl_in_use") == "1",
         "sms_gateway": bool(sms and str(sms.get("status") or "").lower() == "ok"),
         "gsm_modem": str(modem.get("state") or "").lower() == "online",
     }
@@ -108,7 +124,7 @@ def check_once() -> dict[str, Any]:
 
     local_ready = all(
         checks[key]
-        for key in ("gateway", "pdl", "system_agent", "fsk_connected", "fsk_in_use")
+        for key in ("gateway", "pdl", "system_agent", "fsk_status_fresh", "fsk_connected", "fsk_in_use")
     )
     remote_required = bool(SMS_GATEWAY_URL)
     remote_ready = (not remote_required) or (
