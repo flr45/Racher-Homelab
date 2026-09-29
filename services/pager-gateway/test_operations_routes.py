@@ -14,6 +14,8 @@ class OperationsRoutesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             script = textwrap.dedent(
                 """
+                from datetime import datetime, timedelta, timezone
+
                 import wsgi
                 import app_core as core
 
@@ -55,9 +57,30 @@ class OperationsRoutesTests(unittest.TestCase):
                 assert 'hour' in status_payload['quality']
                 assert 'day' in status_payload['quality']
 
+                # Delivery telemetry must decorate the existing rolling seven-day
+                # feed instead of replacing it with Operations' two-hour window.
+                six_days_ago = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
+                old_alarm_id = core.storage.add_message({
+                    'received_at': six_days_ago,
+                    'protocol': 'POCSAG',
+                    'baud': 1200,
+                    'station': 'Slagelse',
+                    'message': 'BRANDALARM seks dage gammel',
+                    'raw_line': 'BRANDALARM seks dage gammel',
+                    'source': 'test',
+                    'delivery_eligible': True,
+                })
+                wsgi.operations.record_delivery(
+                    old_alarm_id, 'pushover', 'sent',
+                    target_count=1, sent_count=1,
+                )
+
                 feed = client.get('/api/messages?scope=feed&limit=20')
                 assert feed.status_code == 200
-                assert feed.get_json() == []
+                rows = feed.get_json()
+                old_alarm = next((row for row in rows if row['id'] == old_alarm_id), None)
+                assert old_alarm is not None, rows
+                assert old_alarm['delivery']['pushover']['status'] == 'sent'
                 core.source.stop()
                 """
             )

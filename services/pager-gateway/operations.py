@@ -278,22 +278,29 @@ def install_operations(core) -> OperationsStore:
     core.maybe_notify_pushover = tracked_pushover
     core.send_web_push_for_event = tracked_web_push
 
-    def operations_messages():
-        try:
-            limit = max(1, min(int(request.args.get("limit", "100")), 500))
-        except ValueError:
-            limit = 100
-        scope = str(request.args.get("scope") or "feed").strip().lower()
-        if scope not in {"feed", "history"}:
-            return jsonify({"ok": False, "error": "scope skal være feed eller history"}), 400
-        if g.user["role"] == "admin":
-            rows = core.storage.list_messages(limit, delivery_eligible_only=(scope == "feed"))
-        else:
-            rows = core.routing.list_messages_for_user(g.user["id"], limit)
-        if scope == "feed":
-            current_ids = ops.current_message_ids()
-            rows = [row for row in rows if int(row.get("id") or 0) in current_ids]
-        return jsonify(ops.attach_delivery(rows, include_errors=g.user["role"] == "admin"))
+    # Preserve the message-selection policy already installed by earlier layers
+    # (notably the rolling seven-day alarm feed). Operations only decorates those
+    # rows with delivery telemetry. Re-querying here previously replaced the
+    # retention layer with the two-hour "current alarm" window, which made older
+    # valid alarms disappear from the normal feed.
+    original_messages = core.app.view_functions["api_messages"]
+
+    def operations_messages(*args, **kwargs):
+        original_result = original_messages(*args, **kwargs)
+        response = core.app.make_response(original_result)
+        if response.status_code >= 400:
+            return original_result
+
+        rows = response.get_json(silent=True)
+        if not isinstance(rows, list):
+            return original_result
+
+        return jsonify(
+            ops.attach_delivery(
+                rows,
+                include_errors=g.user["role"] == "admin",
+            )
+        )
 
     core.app.view_functions["api_messages"] = core.auth_required()(operations_messages)
 
