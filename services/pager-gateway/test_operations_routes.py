@@ -57,6 +57,56 @@ class OperationsRoutesTests(unittest.TestCase):
                 assert 'hour' in status_payload['quality']
                 assert 'day' in status_payload['quality']
 
+                # Pushover telemetry must reflect every managed destination. The
+                # old wrapper reported 1/1 sent even when one or all recipients
+                # failed internally inside pushover_destinations.
+                core.storage.update_settings({
+                    'pushover_enabled': '1',
+                    'pushover_app_token': 'app-token',
+                })
+                wsgi.pushover_destinations.add(
+                    'Primær', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+                )
+                wsgi.pushover_destinations.add(
+                    'Sekundær', 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
+                )
+
+                def fake_pushover_send(_token, user_key, _title, _message):
+                    if user_key.startswith('B'):
+                        raise RuntimeError('simuleret Pushover-fejl')
+
+                core.pushover.send = fake_pushover_send
+                telemetry_id = core.storage.add_message({
+                    'received_at': datetime.now(timezone.utc).isoformat(),
+                    'protocol': 'POCSAG',
+                    'baud': 1200,
+                    'station': 'Slagelse',
+                    'message': 'BRANDALARM telemetry-test',
+                    'raw_line': 'BRANDALARM telemetry-test',
+                    'source': 'test',
+                    'delivery_eligible': True,
+                })
+                core.maybe_notify_pushover(telemetry_id, {
+                    'received_at': datetime.now(timezone.utc).isoformat(),
+                    'protocol': 'POCSAG',
+                    'baud': 1200,
+                    'station': 'Slagelse',
+                    'message': 'BRANDALARM telemetry-test',
+                    'raw_line': 'BRANDALARM telemetry-test',
+                    'source': 'test',
+                    'delivery_eligible': True,
+                })
+                with wsgi.operations.connect() as conn:
+                    delivery = dict(conn.execute(
+                        "SELECT * FROM message_delivery WHERE message_id=? AND channel='pushover'",
+                        (telemetry_id,),
+                    ).fetchone())
+                assert delivery['status'] == 'partial', delivery
+                assert delivery['target_count'] == 2, delivery
+                assert delivery['sent_count'] == 1, delivery
+                assert delivery['failed_count'] == 1, delivery
+                assert 'Sekundær' in delivery['last_error'], delivery
+
                 # Delivery telemetry must decorate the existing rolling seven-day
                 # feed instead of replacing it with Operations' two-hour window.
                 six_days_ago = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
