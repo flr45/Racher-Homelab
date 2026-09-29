@@ -120,6 +120,19 @@ def parse_received_at(value):
     return parsed.astimezone(timezone.utc)
 
 
+def status_age_seconds(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        moment = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return max(0.0, (utcnow() - moment.astimezone(timezone.utc)).total_seconds())
+
+
 def read_status_file(path: Path):
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -418,7 +431,19 @@ def health():
     modem_status = read_status_file(MODEM_STATUS_FILE)
     gateway_status = read_status_file(GATEWAY_STATUS_FILE)
     gateway_last_received = gateway_status.get("last_received_sms_at") or latest_message_at
-    modem_state = str(modem_status.get("state") or "unknown").lower()
+
+    try:
+        modem_stale_seconds = max(
+            10,
+            int(os.getenv("MODEM_HEALTH_STALE_SECONDS", "20")),
+        )
+    except ValueError:
+        modem_stale_seconds = 20
+    modem_age = status_age_seconds(modem_status.get("updated_at"))
+    modem_fresh = modem_age is not None and modem_age <= modem_stale_seconds
+    raw_modem_state = str(modem_status.get("state") or "unknown").lower()
+    modem_state = raw_modem_state if modem_fresh else "stale"
+
     overall_status = (
         "ok"
         if database_status == "online" and modem_state == "online"
@@ -432,6 +457,8 @@ def health():
             "state": modem_state,
             "device": modem_status.get("device") or os.getenv("MODEM_DEVICE", "/dev/ttyUSB0"),
             "updated_at": modem_status.get("updated_at"),
+            "age_seconds": round(modem_age, 1) if modem_age is not None else None,
+            "fresh": modem_fresh,
             "last_message_at": modem_status.get("last_message_at"),
             "last_error": modem_status.get("last_error"),
             "network": modem_status.get("network"),
