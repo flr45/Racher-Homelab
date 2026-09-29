@@ -69,6 +69,9 @@ class SystemOverview:
                 "endpoint": "",
                 "status": "unset",
                 "modem_state": "unknown",
+                "auth_ok": False,
+                "pager_token_configured": bool(str(os.getenv("PAGER_SMS_GATEWAY_TOKEN", "") or "").strip()),
+                "remote_auth_configured": False,
             }
 
         now = time.monotonic()
@@ -84,6 +87,10 @@ class SystemOverview:
             "modem_state": "unknown",
             "modem_signal": "",
             "modem_network": "",
+            "auth_ok": False,
+            "pager_token_configured": bool(str(os.getenv("PAGER_SMS_GATEWAY_TOKEN", "") or "").strip()),
+            "remote_auth_configured": False,
+            "auth_error": "",
             "error": "",
         }
         request = urllib.request.Request(base_url + "/health", method="GET")
@@ -103,6 +110,33 @@ class SystemOverview:
                 "modem_network": str(modem.get("network") or ""),
                 "checked_at": str(payload.get("checked_at") or ""),
             })
+
+            token = str(os.getenv("PAGER_SMS_GATEWAY_TOKEN", "") or "").strip()
+            auth_headers = {"Authorization": f"Bearer {token}"} if token else {}
+            auth_request = urllib.request.Request(
+                base_url + "/api/auth-check",
+                headers=auth_headers,
+                method="GET",
+            )
+            try:
+                with urllib.request.urlopen(auth_request, timeout=2.5) as auth_response:
+                    auth_raw = auth_response.read().decode("utf-8")
+                    if auth_response.status != 200:
+                        raise RuntimeError(f"HTTP {auth_response.status}")
+                auth_payload = json.loads(auth_raw) if auth_raw else {}
+                result["auth_ok"] = bool(auth_payload.get("ok"))
+                result["remote_auth_configured"] = bool(
+                    auth_payload.get("auth_configured")
+                )
+            except urllib.error.HTTPError as exc:
+                result["auth_error"] = f"HTTP {exc.code}"
+            except (
+                urllib.error.URLError,
+                RuntimeError,
+                json.JSONDecodeError,
+                ValueError,
+            ) as exc:
+                result["auth_error"] = str(exc)[:200]
         except (urllib.error.URLError, urllib.error.HTTPError, RuntimeError, json.JSONDecodeError, ValueError) as exc:
             result["error"] = str(exc)[:200]
 
@@ -130,7 +164,11 @@ class SystemOverview:
         internet_ok = str(runtime.get("internet_online") or "") == "1"
 
         sms = self._probe_sms_gateway()
-        sms_ok = bool(sms.get("reachable")) and str(sms.get("status") or "").lower() == "ok"
+        sms_ok = (
+            bool(sms.get("reachable"))
+            and str(sms.get("status") or "").lower() == "ok"
+            and bool(sms.get("auth_ok"))
+        )
         modem_ok = str(sms.get("modem_state") or "").lower() == "online"
 
         chain: list[dict[str, str]] = []
@@ -200,10 +238,27 @@ class SystemOverview:
                 warning=bool(sms.get("configured")) and not sms.get("reachable"),
             ),
             self._item(
+                "sms-auth",
+                "SMS Gateway adgang",
+                bool(sms.get("auth_ok")),
+                "Delt SMS-token er godkendt"
+                if sms.get("auth_ok")
+                else "PAGER_SMS_GATEWAY_TOKEN mangler"
+                if not sms.get("pager_token_configured")
+                else "SMS Gateway afviste tokenet"
+                if sms.get("reachable")
+                else "Afventer forbindelse",
+                warning=bool(sms.get("configured")) and not sms.get("auth_ok"),
+            ),
+            self._item(
                 "sms-gateway",
                 "SMS Gateway",
                 sms_ok,
-                f"Status {sms.get('status')}" if sms.get("reachable") else "Afventer forbindelse",
+                f"Status {sms.get('status')} · auth ok"
+                if sms.get("reachable") and sms.get("auth_ok")
+                else f"Status {sms.get('status')} · auth fejler"
+                if sms.get("reachable")
+                else "Afventer forbindelse",
                 warning=bool(sms.get("reachable")) and not sms_ok,
             ),
             self._item(
