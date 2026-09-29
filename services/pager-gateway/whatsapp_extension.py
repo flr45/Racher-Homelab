@@ -192,12 +192,12 @@ class WhatsAppDelivery:
     def format_alarm(event: dict[str, Any]) -> str:
         station = str(event.get("station") or "Pageralarm")
         message = str(event.get("message") or "").strip()
-        ric = str(event.get("ric") or "").strip()
         received = str(event.get("received_at") or "").strip()
         lines = [f"🚨 ALARM – {station}", "", message]
         meta = []
-        if ric:
-            meta.append(f"RIC {ric}")
+        # RIC/capcode is admin-only decoder metadata elsewhere in Pager Gateway.
+        # Keep user-facing WhatsApp aligned with Web Push/Pushover and never leak
+        # that routing identifier into a recipient's chat history.
         if received:
             try:
                 dt = datetime.fromisoformat(received.replace("Z", "+00:00")).astimezone()
