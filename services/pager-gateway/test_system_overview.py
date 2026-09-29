@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import unittest
+import urllib.error
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
