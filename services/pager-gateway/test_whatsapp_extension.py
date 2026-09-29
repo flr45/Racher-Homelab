@@ -98,6 +98,18 @@ class WhatsAppExtensionTests(unittest.TestCase):
 
 
 
+
+    def test_user_whatsapp_alarm_never_contains_ric_metadata(self):
+        text = WhatsAppDelivery.format_alarm({
+            "station": "Ringsted",
+            "message": "BRANDALARM Ringsted",
+            "ric": "0006240",
+            "received_at": "2026-09-29T06:00:00+00:00",
+        })
+        self.assertIn("BRANDALARM Ringsted", text)
+        self.assertNotIn("0006240", text)
+        self.assertNotIn("RIC", text)
+
     def _direct_delivery(self):
         user_id = self.storage.create_user(
             "tester", "Tester", "unused-test-hash", "user"
