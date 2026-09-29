@@ -379,6 +379,36 @@ class RicSmsStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def recent_rule_matches(self, limit: Any = 20) -> list[dict[str, Any]]:
+        try:
+            clean_limit = int(limit)
+        except (TypeError, ValueError):
+            clean_limit = 20
+        clean_limit = max(1, min(clean_limit, 100))
+        with self._lock, self.connect() as conn:
+            rows = conn.execute(
+                """SELECT
+                       m.id AS message_id,
+                       m.received_at,
+                       m.ric,
+                       m.station,
+                       m.message,
+                       m.source,
+                       m.delivery_eligible,
+                       m.suppressed_reason,
+                       m.duplicate_of,
+                       GROUP_CONCAT(DISTINCT r.label) AS rule_labels
+                   FROM messages m
+                   JOIN ric_sms_rules r
+                     ON r.ric=m.ric AND r.active=1
+                   WHERE m.source LIKE 'pdl%'
+                   GROUP BY m.id
+                   ORDER BY m.id DESC
+                   LIMIT ?""",
+                (clean_limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_deliveries(self, limit: Any = 50) -> list[dict[str, Any]]:
         try:
             clean_limit = int(limit)
@@ -729,6 +759,11 @@ def register_ric_sms_routes(core: Any, router: RicSmsRouter, auth_required: Call
     @auth_required(admin=True)
     def api_ric_sms_deliveries():
         return jsonify(store.list_deliveries(limit=request.args.get("limit", 40)))
+
+    @app.get("/api/ric-sms/matches")
+    @auth_required(admin=True)
+    def api_ric_sms_matches():
+        return jsonify(store.recent_rule_matches(limit=request.args.get("limit", 20)))
 
     @app.post("/api/ric-sms/test")
     @auth_required(admin=True)
