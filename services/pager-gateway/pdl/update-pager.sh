@@ -39,7 +39,7 @@ if [[ -z "$RUNTIME_REPO_USER" || "$RUNTIME_REPO_UID" == "0" ]]; then
 fi
 
 git_runtime() {
-  runuser -u "$RUNTIME_REPO_USER" -- git_runtime "$@"
+  runuser -u "$RUNTIME_REPO_USER" -- git -C "$RUNTIME_REPO" "$@"
 }
 
 mkdir -p "$(dirname "$LOCK_FILE")"
