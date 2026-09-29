@@ -28,7 +28,11 @@ WorkingDirectory=$RUNTIME_REPO/services/pager-gateway
 Environment=PAGER_DB_PATH=$DATA_DIR/pager.db
 EnvironmentFile=-/etc/racher-pager/gateway.env
 ExecStart=/usr/bin/python3 $RUNTIME_SOURCE
-TimeoutStartSec=130s
+# The verifier intentionally retries transient gateway/SMS/Tailscale failures.
+# Its default 18 x 5s loop can exceed two minutes when remote HTTP probes also
+# consume their timeout, so systemd must not kill it before it can write the
+# final degraded/failed boot state.
+TimeoutStartSec=360s
 NoNewPrivileges=true
 ProtectHome=true
 PrivateTmp=true
