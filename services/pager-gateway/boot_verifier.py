@@ -65,6 +65,24 @@ def http_json(url: str, timeout: float = 2.5) -> dict[str, Any] | None:
         return None
 
 
+def configured_sms_gateway_url() -> str:
+    """Resolve the same SMS Gateway URL that the web app uses.
+
+    The admin UI stores ric_sms_gateway_url in SQLite. Appliances can also set
+    PAGER_SMS_GATEWAY_URL in the environment. The database value intentionally
+    wins, matching RicSmsStore.config().
+    """
+    try:
+        with sqlite3.connect(DB_PATH, timeout=5) as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key='ric_sms_gateway_url'"
+            ).fetchone()
+        stored = str(row[0] or "").strip() if row else ""
+    except sqlite3.Error:
+        stored = ""
+    return (stored or SMS_GATEWAY_URL).strip().rstrip("/")
+
+
 def runtime_values() -> dict[str, str]:
     try:
         with sqlite3.connect(DB_PATH, timeout=5) as conn:
@@ -87,7 +105,8 @@ def tailscale_status() -> dict[str, Any]:
 def check_once() -> dict[str, Any]:
     runtime = runtime_values()
     gateway = http_json(f"http://127.0.0.1:{GATEWAY_PORT}/healthz", timeout=2.0)
-    sms = http_json(SMS_GATEWAY_URL + "/health", timeout=2.5) if SMS_GATEWAY_URL else None
+    sms_gateway_url = configured_sms_gateway_url()
+    sms = http_json(sms_gateway_url + "/health", timeout=2.5) if sms_gateway_url else None
     modem = sms.get("modem", {}) if isinstance(sms, dict) else {}
     if not isinstance(modem, dict):
         modem = {}
@@ -110,7 +129,7 @@ def check_once() -> dict[str, Any]:
         checks[key]
         for key in ("gateway", "pdl", "system_agent", "fsk_connected", "fsk_in_use")
     )
-    remote_required = bool(SMS_GATEWAY_URL)
+    remote_required = bool(sms_gateway_url)
     remote_ready = (not remote_required) or (
         checks["tailscale"] and checks["sms_gateway"] and checks["gsm_modem"]
     )
