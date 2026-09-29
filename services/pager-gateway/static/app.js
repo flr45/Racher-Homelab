@@ -407,6 +407,7 @@ async function refreshAudit() {
 async function refreshAdminStatus() {
   if (!isAdmin) return;
   const data = await api('/api/status');
+  window.dispatchEvent(new CustomEvent('pager:status', {detail: data}));
   $('#message-count').textContent = data.message_count;
   $('#uptime').textContent = formatUptime(data.uptime_seconds);
   $('#hostname').textContent = data.hostname;
@@ -584,12 +585,40 @@ $('#test-pushover')?.addEventListener('click', async () => {
 
 // ---- Startup -------------------------------------------------------------------
 
+function panelIsActive(name) {
+  return document.visibilityState === 'visible' && $('#' + name)?.classList.contains('active');
+}
+
+async function refreshVisiblePanel() {
+  if (panelIsActive('alarms')) await refreshAlarms();
+  if (isAdmin && panelIsActive('system')) {
+    await refreshAdminStatus();
+    await refreshAudit();
+  }
+}
+
 (async function start() {
   try {
     if (isAdmin) installAlarmFilterUi();
-    await refreshAlarms(); await refreshPushState();
-    if (isAdmin) { await refreshAdminStatus(); await refreshAudit(); }
+    await refreshAlarms();
+    await refreshPushState();
+    if (isAdmin && panelIsActive('system')) {
+      await refreshAdminStatus();
+      await refreshAudit();
+    }
   } catch (error) { console.error(error); }
-  setInterval(() => refreshAlarms().catch(console.error), 3000);
-  if (isAdmin) setInterval(() => refreshAdminStatus().catch(console.error), 10000);
+
+  setInterval(() => {
+    if (panelIsActive('alarms')) refreshAlarms().catch(console.error);
+  }, 3000);
+
+  if (isAdmin) {
+    setInterval(() => {
+      if (panelIsActive('system')) refreshAdminStatus().catch(console.error);
+    }, 10000);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshVisiblePanel().catch(console.error);
+  });
 })();

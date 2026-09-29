@@ -90,26 +90,11 @@
     }
   }
 
-  async function refresh() {
-    try {
-      const response = await fetch('/api/status', {credentials: 'same-origin', cache: 'no-store'});
-      if (response.status === 401) return;
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      render(await response.json());
-    } catch (error) {
-      const card = ensureCard();
-      if (!card) return;
-      const badge = document.querySelector('#system-overview-state');
-      if (badge) {
-        badge.textContent = 'STATUSFEJL';
-        badge.className = 'status-badge inactive';
-      }
-      const summary = document.querySelector('#system-overview-summary');
-      if (summary) summary.textContent = `Kunne ikke hente systemoverblik: ${error.message}`;
-    }
+  function renderStatusEvent(event) {
+    if (!event?.detail || typeof event.detail !== 'object') return;
+    render(event.detail);
   }
 
   ensureCard();
-  refresh();
-  setInterval(refresh, 10000);
+  window.addEventListener('pager:status', renderStatusEvent);
 })();
