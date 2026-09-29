@@ -258,6 +258,29 @@ class RicSmsTests(unittest.TestCase):
         self.assertEqual(delivery["trigger_kind"], "ric-call")
         self.assertEqual(delivery["status"], "queued")
 
+    def test_recent_rule_matches_explain_live_selected_ric(self):
+        store = RicSmsStore(self.db)
+        store.add_rule("0001133", "+4512345678", "Jose")
+        self.storage.add_message({
+            "received_at": "2026-09-29T12:15:00+00:00",
+            "protocol": "POCSAG",
+            "baud": 1200,
+            "ric": "0001133",
+            "station": "Slagelse",
+            "message": "123456",
+            "raw_line": "numeric raw",
+            "source": "pdl-file",
+            "delivery_eligible": False,
+            "suppressed_reason": "decoder-non-alpha",
+        })
+
+        rows = store.recent_rule_matches()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["ric"], "0001133")
+        self.assertEqual(rows[0]["suppressed_reason"], "decoder-non-alpha")
+        self.assertEqual(rows[0]["rule_labels"], "Jose")
+
     def test_explicit_word_filter_still_blocks_ric_call_fallback(self):
         core = SimpleNamespace(
             DB_PATH=self.db,
