@@ -108,17 +108,31 @@ def _maintenance_in_progress(path: Path = MAINTENANCE_LOCK) -> bool:
         handle.close()
 
 
-def _gateway_container_state() -> str:
+def _container_state(name: str) -> str:
     docker = shutil.which("docker")
     if not docker:
         return "missing"
     result = _run(
-        [docker, "inspect", "--format", "{{.State.Status}}", "racher-pager-gateway"],
+        [
+            docker,
+            "inspect",
+            "--format",
+            "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
+            name,
+        ],
         timeout=4,
     )
     if result is None or result.returncode != 0:
         return "missing"
     return (result.stdout or "unknown").strip() or "unknown"
+
+
+def _gateway_container_state() -> str:
+    return _container_state("racher-pager-gateway")
+
+
+def _openwa_container_state() -> str:
+    return _container_state("racher-pager-openwa")
 
 
 def _audio_capture_status() -> tuple[int, str]:
@@ -343,6 +357,7 @@ def collect_runtime_status() -> dict[str, str]:
         "pdl_installed": "1" if PDL_BINARY.exists() else "0",
         "pdl_service": _service_state("racher-pdl.service"),
         "gateway_container": _gateway_container_state(),
+        "openwa_container": _openwa_container_state(),
         "audio_capture_devices": str(audio_count),
         "audio_capture_summary": audio_summary,
         "pdl_log_exists": pdl_log_exists,

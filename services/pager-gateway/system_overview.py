@@ -112,7 +112,13 @@ class SystemOverview:
         fsk_connected = str(runtime.get("fsk_usb_connected") or "") == "1"
         fsk_in_use = str(runtime.get("fsk_usb_pdl_in_use") or "") == "1"
         pdl_ok = str(runtime.get("pdl_service") or "") == "active"
-        gateway_ok = str(runtime.get("gateway_container") or "") == "running"
+        gateway_state = str(runtime.get("gateway_container") or "")
+        gateway_ok = gateway_state in {"running", "healthy"}
+        openwa_state = str(runtime.get("openwa_container") or "")
+        whatsapp_enabled = str(os.getenv("PAGER_WHATSAPP_ENABLED", "0")).strip().lower() in {
+            "1", "true", "yes", "ja", "on",
+        }
+        openwa_ok = openwa_state in {"running", "healthy"}
         internet_ok = str(runtime.get("internet_online") or "") == "1"
 
         sms = self._probe_sms_gateway()
@@ -177,6 +183,20 @@ class SystemOverview:
                 "Online" if internet_ok else "Ingen bekræftet internetforbindelse",
                 warning=not internet_ok,
             ),
+        ])
+        if whatsapp_enabled:
+            chain.append(
+                self._item(
+                    "openwa",
+                    "WhatsApp / OpenWA",
+                    openwa_ok,
+                    "Container healthy" if openwa_state == "healthy"
+                    else "Container kører" if openwa_state == "running"
+                    else f"Container: {openwa_state or 'ukendt'}",
+                    warning=openwa_state == "starting",
+                )
+            )
+        chain.extend([
             self._item(
                 "sms-link",
                 "Tailscale / SMS-link",

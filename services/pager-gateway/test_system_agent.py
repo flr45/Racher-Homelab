@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from storage import Storage, validate_system_command
 from system_agent import (
     COMMANDS,
+    _container_state,
     _internet_online,
     _maintenance_in_progress,
     _wifi_profile_name,
@@ -137,6 +138,15 @@ class SystemAgentTests(unittest.TestCase):
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
                 handle.close()
             self.assertFalse(_maintenance_in_progress(path))
+
+    def test_container_state_prefers_docker_health_when_available(self):
+        result = MagicMock(returncode=0, stdout="healthy\n")
+        with patch("system_agent.shutil.which", return_value="/usr/bin/docker"), \
+             patch("system_agent._run", return_value=result) as run:
+            state = _container_state("racher-pager-openwa")
+        self.assertEqual(state, "healthy")
+        self.assertIn("State.Health", " ".join(run.call_args.args[0]))
+        self.assertEqual(run.call_args.args[0][-1], "racher-pager-openwa")
 
     def test_internet_probe_falls_back_when_one_endpoint_is_filtered(self):
         usable = MagicMock()
