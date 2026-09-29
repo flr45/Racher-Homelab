@@ -288,6 +288,7 @@ class RicSmsStore:
             recent_calls = conn.execute(
                 """SELECT id, matched_rics FROM ric_sms_deliveries
                    WHERE recipient=? AND trigger_kind='ric-call' AND created_at>=?
+                     AND status NOT IN ('failed','expired','cancelled')
                    ORDER BY id DESC LIMIT 20""",
                 (recipient, cutoff),
             ).fetchall()
