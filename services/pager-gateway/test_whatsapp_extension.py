@@ -40,7 +40,9 @@ class WhatsAppExtensionTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_final_notification_hook_queues_whatsapp_and_preserves_existing_channels(self):
-        delivery = install_whatsapp(self.core)
+        delivery = install_whatsapp(
+            self.app, self.storage, self.routing, self.core.auth_required, core=self.core
+        )
         queued = []
         delivery.dispatch_async = lambda message_id, event: queued.append((message_id, dict(event)))
 
@@ -51,7 +53,9 @@ class WhatsAppExtensionTests(unittest.TestCase):
         self.assertEqual([42], [message_id for message_id, _ in self.original_notifications])
 
     def test_suppressed_alarm_is_not_queued_for_whatsapp(self):
-        delivery = install_whatsapp(self.core)
+        delivery = install_whatsapp(
+            self.app, self.storage, self.routing, self.core.auth_required, core=self.core
+        )
         queued = []
         delivery.dispatch_async = lambda message_id, event: queued.append((message_id, dict(event)))
 
