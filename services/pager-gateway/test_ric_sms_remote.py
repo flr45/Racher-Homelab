@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import ric_sms
-from ric_sms_remote import AuthenticatedRicSmsRouter
+from ric_sms_remote import AuthenticatedRicSmsRouter, install_ric_sms
 from storage import Storage
 
 
@@ -64,6 +64,20 @@ class RicSmsRemoteTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    @patch("ric_sms_remote.register_ric_sms_routes")
+    @patch("ric_sms_remote.AuthenticatedRicSmsRouter")
+    def test_production_installer_recovers_reserved_sms(self, router_class, register_routes):
+        router = router_class.return_value
+        core = SimpleNamespace()
+        auth_required = object()
+
+        result = install_ric_sms(core, auth_required)
+
+        self.assertIs(result, router)
+        self.assertIs(core.ric_sms_router, router)
+        register_routes.assert_called_once_with(core, router, auth_required)
+        router.recover_reserved.assert_called_once_with()
 
     def test_remote_transport_sends_bearer_token(self):
         router = AuthenticatedRicSmsRouter(self.core)
