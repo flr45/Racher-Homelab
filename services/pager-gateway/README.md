@@ -100,6 +100,19 @@ VAPID private key genereres lokalt i dataområdet og returneres aldrig via API'e
 
 Web Push kræver secure context: HTTPS i normal drift. `localhost` kan bruges til udvikling. Når Pi'en sættes i rigtig drift bag HTTPS sættes `PAGER_COOKIE_SECURE=1`.
 
+## RIC → SMS og delt gateway-token
+
+Når Pager Gateway sender en RIC-baseret SMS via en separat SMS Gateway, bruges to lokale indstillinger:
+
+```text
+PAGER_SMS_GATEWAY_URL=http://<sms-gateway-tailscale-ip>:8090
+PAGER_SMS_GATEWAY_TOKEN=<lang-tilfældig-hemmelighed>
+```
+
+Den samme hemmelighed skal stå som `SMS_GATEWAY_API_TOKEN` på SMS Gateway-maskinen. Systemoverblik og boot-verifikationen tester `/api/auth-check`, så en forkert eller manglende token vises som en særskilt fejl i stedet for at SMS-kæden blot ser "online" ud.
+
+En fjern SMS Gateway uden `SMS_GATEWAY_API_TOKEN` afviser bevidst eksterne enqueue-kald. Loopback-adgang inde i SMS Gateway-containeren bruges fortsat af modem-workerens interne kø.
+
 ## Sikker admin-systemstyring
 
 Webcontaineren får ikke root- eller Docker-socket-adgang. Admin-handlinger lægges i en SQLite-kø, som en separat root-ejet host-agent behandler.
