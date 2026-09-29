@@ -8,7 +8,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -54,13 +54,30 @@ def normalize_gateway_url(value: Any) -> str:
     return raw
 
 
+def _single_part(text: str) -> str:
+    value = str(text or "").strip()
+    if len(value) <= MAX_SMS_CHARS:
+        return value
+    return value[: MAX_SMS_CHARS - 1].rstrip() + "…"
+
+
 def format_alarm_sms(event: dict[str, Any]) -> str:
     station = " ".join(str(event.get("station") or "Pageralarm").split())
     message = " ".join(str(event.get("message") or "").split())
-    text = f"RACHER PAGER\n{station}\n{message}".strip()
-    if len(text) <= MAX_SMS_CHARS:
-        return text
-    return text[: MAX_SMS_CHARS - 1].rstrip() + "…"
+    return _single_part(f"RACHER PAGER\n{station}\n{message}")
+
+
+def format_ric_call_sms(event: dict[str, Any], ric: str | None = None) -> str:
+    """Short fallback when the selected capcode was called without an alpha alarm.
+
+    PDL can emit NUMERIC/TONE-only rows that the normal alarm cleaner correctly
+    suppresses. An explicit RIC→SMS rule is a capcode-call subscription, so those
+    live pages still need a useful SMS without leaking decoder garbage.
+    """
+    station = " ".join(str(event.get("station") or "Pageralarm").split())
+    selected_ric = str(ric or event.get("ric") or "").strip()
+    detail = f"RIC {selected_ric} kaldt" if selected_ric else "Valgt RIC kaldt"
+    return _single_part(f"RACHER PAGER\n{station}\n{detail}")
 
 
 class RicSmsStore:
@@ -104,6 +121,7 @@ class RicSmsStore:
                     error TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
+                    trigger_kind TEXT NOT NULL DEFAULT 'alarm',
                     UNIQUE(message_id, recipient)
                 );
                 CREATE INDEX IF NOT EXISTS idx_ric_sms_delivery_created
@@ -112,6 +130,19 @@ class RicSmsStore:
                 INSERT OR IGNORE INTO settings(key, value) VALUES ('ric_sms_enabled', '0');
                 INSERT OR IGNORE INTO settings(key, value) VALUES ('ric_sms_gateway_url', '');
                 """
+            )
+            columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(ric_sms_deliveries)").fetchall()
+            }
+            if "trigger_kind" not in columns:
+                conn.execute(
+                    "ALTER TABLE ric_sms_deliveries "
+                    "ADD COLUMN trigger_kind TEXT NOT NULL DEFAULT 'alarm'"
+                )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ric_sms_delivery_recipient_created "
+                "ON ric_sms_deliveries(recipient, created_at DESC)"
             )
             conn.commit()
 
@@ -223,14 +254,67 @@ class RicSmsStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def reserve_delivery(self, message_id: int, recipient: str, matched_rics: set[str]) -> bool:
-        now = _now()
+    @staticmethod
+    def _ric_set(value: Any) -> set[str]:
+        return {
+            item.strip()
+            for item in str(value or "").split(",")
+            if item.strip()
+        }
+
+    @staticmethod
+    def _call_dedupe_seconds() -> int:
+        try:
+            value = int(os.getenv("PAGER_RIC_SMS_CALL_DEDUPE_SECONDS", "15"))
+        except ValueError:
+            value = 15
+        return max(3, min(value, 120))
+
+    def reserve_delivery(
+        self,
+        message_id: int,
+        recipient: str,
+        matched_rics: set[str],
+        *,
+        trigger_kind: str = "alarm",
+    ) -> bool:
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        clean_rics = {str(value).strip() for value in matched_rics if str(value).strip()}
+        kind = "ric-call" if str(trigger_kind) == "ric-call" else "alarm"
+        cutoff = (now_dt - timedelta(seconds=self._call_dedupe_seconds())).isoformat()
+
         with self._lock, self.connect() as conn:
+            recent_calls = conn.execute(
+                """SELECT id, matched_rics FROM ric_sms_deliveries
+                   WHERE recipient=? AND trigger_kind='ric-call' AND created_at>=?
+                   ORDER BY id DESC LIMIT 20""",
+                (recipient, cutoff),
+            ).fetchall()
+
+            # NUMERIC/TONE + ALPHA representations of the same page must not
+            # create two SMS messages. A call fallback dedupes all selected RIC
+            # calls to the same phone for a very short window. A later normal
+            # alarm is suppressed only when it overlaps a RIC already covered by
+            # the fallback SMS.
+            for row in recent_calls:
+                previous_rics = self._ric_set(row["matched_rics"])
+                same_call = kind == "ric-call"
+                same_ric = bool(previous_rics & clean_rics)
+                if same_call or same_ric:
+                    merged = ",".join(sorted(previous_rics | clean_rics))
+                    conn.execute(
+                        "UPDATE ric_sms_deliveries SET matched_rics=?, updated_at=? WHERE id=?",
+                        (merged, now, int(row["id"])),
+                    )
+                    conn.commit()
+                    return False
+
             cur = conn.execute(
                 """INSERT OR IGNORE INTO ric_sms_deliveries(
-                       message_id, recipient, matched_rics, status, created_at, updated_at
-                   ) VALUES (?, ?, ?, 'reserved', ?, ?)""",
-                (int(message_id), recipient, ",".join(sorted(matched_rics)), now, now),
+                       message_id, recipient, matched_rics, status, created_at, updated_at, trigger_kind
+                   ) VALUES (?, ?, ?, 'reserved', ?, ?, ?)""",
+                (int(message_id), recipient, ",".join(sorted(clean_rics)), now, now, kind),
             )
             conn.commit()
         return cur.rowcount > 0
@@ -285,7 +369,8 @@ class RicSmsStore:
         with self._lock, self.connect() as conn:
             rows = conn.execute(
                 """SELECT d.*, m.received_at, m.protocol, m.baud, m.ric, m.function,
-                          m.station, m.message, m.raw_line, m.source, m.delivery_eligible
+                          m.station, m.message, m.raw_line, m.source, m.delivery_eligible,
+                          m.suppressed_reason
                    FROM ric_sms_deliveries d
                    JOIN messages m ON m.id=d.message_id
                    WHERE d.status='reserved'
@@ -416,7 +501,13 @@ class RicSmsRouter:
                     error="SMS-routing er deaktiveret eller gateway-URL mangler efter genstart.",
                 )
                 continue
-            if not bool(row.get("delivery_eligible")) or age < 0 or age > max_age_seconds:
+            is_ric_call = str(row.get("trigger_kind") or "") == "ric-call"
+            live_pdl_call = is_ric_call and str(row.get("source") or "").lower().startswith("pdl")
+            if (
+                (not bool(row.get("delivery_eligible")) and not live_pdl_call)
+                or age < 0
+                or age > max_age_seconds
+            ):
                 self.store.finish_delivery(
                     int(row["message_id"]), str(row["recipient"]),
                     status="expired",
@@ -424,13 +515,19 @@ class RicSmsRouter:
                 )
                 continue
 
+            matched = sorted(self.store._ric_set(row.get("matched_rics")))
+            body = (
+                format_ric_call_sms(row, matched[0] if matched else None)
+                if is_ric_call
+                else format_alarm_sms(row)
+            )
             threading.Thread(
                 target=self._send_reserved,
                 args=(
                     int(row["message_id"]),
                     str(row["recipient"]),
                     str(config["gateway_url"]),
-                    format_alarm_sms(row),
+                    body,
                 ),
                 name=f"ric-sms-recover-{row['message_id']}",
                 daemon=True,
@@ -441,6 +538,66 @@ class RicSmsRouter:
                 "Recovered %s SMS delivery reservation(s) after gateway restart", recovered
             )
         return recovered
+
+    def queue_for_ric_call(self, message_id: int, event: dict[str, Any]) -> int:
+        """Send a fallback SMS when an explicitly selected live RIC is called.
+
+        This is intentionally narrower than "send every suppressed alarm": it
+        respects explicit word/RIC filters and burst/duplicate handling, but it
+        does not require ALPHA payload eligibility. That makes tone/numeric pages
+        useful for RIC-call subscriptions.
+        """
+        if not str(event.get("source") or "").lower().startswith("pdl"):
+            return 0
+        if bool(event.get("delivery_eligible")):
+            return 0
+
+        reason = str(event.get("suppressed_reason") or "").strip()
+        if reason in {"duplicate", "burst-candidate", "ric-filter"} or reason.startswith("word-filter:"):
+            return 0
+
+        ric = str(event.get("ric") or "").strip()
+        if not ric:
+            return 0
+
+        ric_filter = getattr(self.core, "ric_noise_filter", None)
+        if ric_filter is not None:
+            try:
+                if ric_filter.contains(ric):
+                    return 0
+            except Exception:
+                return 0
+
+        config = self.store.config()
+        if not config["enabled"] or not config["gateway_url"]:
+            return 0
+
+        rules = self.store.rules_for_rics({ric})
+        if not rules:
+            return 0
+
+        recipients: dict[str, set[str]] = {}
+        for rule in rules:
+            recipients.setdefault(str(rule["phone"]), set()).add(str(rule["ric"]))
+
+        body = format_ric_call_sms(event, ric)
+        queued = 0
+        for recipient, matched_rics in recipients.items():
+            if not self.store.reserve_delivery(
+                message_id,
+                recipient,
+                matched_rics,
+                trigger_kind="ric-call",
+            ):
+                continue
+            threading.Thread(
+                target=self._send_reserved,
+                args=(message_id, recipient, config["gateway_url"], body),
+                name=f"ric-call-sms-{message_id}",
+                daemon=True,
+            ).start()
+            queued += 1
+        return queued
 
     def queue_for_event(self, message_id: int, event: dict[str, Any]) -> int:
         if not event.get("delivery_eligible", True):
