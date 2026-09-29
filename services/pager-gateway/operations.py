@@ -10,6 +10,32 @@ from flask import g, jsonify, request
 from pywebpush import WebPushException
 
 
+def summarize_delivery_result(result: Any) -> dict[str, Any] | None:
+    if not isinstance(result, dict) or not {
+        "target_count", "sent_count", "failed_count"
+    }.issubset(result):
+        return None
+    target_count = max(0, int(result.get("target_count") or 0))
+    sent_count = max(0, int(result.get("sent_count") or 0))
+    failed_count = max(0, int(result.get("failed_count") or 0))
+    errors = result.get("errors") if isinstance(result.get("errors"), list) else []
+    if target_count == 0:
+        status = "no-target"
+    elif sent_count and not failed_count:
+        status = "sent"
+    elif sent_count:
+        status = "partial"
+    else:
+        status = "failed"
+    return {
+        "status": status,
+        "target_count": target_count,
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "last_error": " | ".join(str(error) for error in errors[:3]),
+    }
+
+
 class OperationsStore:
     """Operational telemetry kept separate from immutable pager raw history.
 
@@ -223,13 +249,30 @@ def install_operations(core) -> OperationsStore:
             ops.record_delivery(message_id, "pushover", "disabled")
             return
         try:
-            original_pushover(message_id, event)
+            result = original_pushover(message_id, event)
         except Exception as exc:
             ops.record_delivery(
                 message_id, "pushover", "failed", target_count=1, failed_count=1,
                 latency_ms=ops.message_latency_ms(message_id), last_error=str(exc),
             )
             raise
+
+        summary = summarize_delivery_result(result)
+        if summary is not None:
+            ops.record_delivery(
+                message_id,
+                "pushover",
+                summary["status"],
+                target_count=summary["target_count"],
+                sent_count=summary["sent_count"],
+                failed_count=summary["failed_count"],
+                latency_ms=ops.message_latency_ms(message_id),
+                last_error=summary["last_error"],
+            )
+            return
+
+        # Compatibility path for an older/custom Pushover sender that does not
+        # report destination-level counts.
         ops.record_delivery(
             message_id, "pushover", "sent", target_count=1, sent_count=1,
             latency_ms=ops.message_latency_ms(message_id),

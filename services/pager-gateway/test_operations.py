@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from operations import OperationsStore
+from operations import OperationsStore, summarize_delivery_result
 from storage import Storage
 
 
@@ -55,6 +55,30 @@ class OperationsStoreTests(unittest.TestCase):
         self.assertEqual(admin_rows[0]["delivery"]["pushover"]["latency_ms"], 812)
         self.assertIn("last_error", admin_rows[0]["delivery"]["pushover"])
         self.assertNotIn("last_error", public_rows[0]["delivery"]["pushover"])
+
+    def test_multi_destination_delivery_summary_reports_partial_failure(self):
+        summary = summarize_delivery_result({
+            "target_count": 3,
+            "sent_count": 2,
+            "failed_count": 1,
+            "errors": ["Vagtleder: timeout"],
+        })
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["status"], "partial")
+        self.assertEqual(summary["target_count"], 3)
+        self.assertEqual(summary["sent_count"], 2)
+        self.assertEqual(summary["failed_count"], 1)
+        self.assertIn("timeout", summary["last_error"])
+
+    def test_delivery_summary_does_not_claim_success_with_no_targets(self):
+        summary = summarize_delivery_result({
+            "target_count": 0,
+            "sent_count": 0,
+            "failed_count": 0,
+            "errors": [],
+        })
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["status"], "no-target")
 
     def test_quality_counts_noise_duplicates_fragments_and_question_marks(self):
         ops = OperationsStore(self.db)

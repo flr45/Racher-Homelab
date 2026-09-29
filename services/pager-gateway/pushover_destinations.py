@@ -180,20 +180,30 @@ def install_pushover_destinations(core: Any) -> PushoverDestinationStore:
         core.storage.add_audit(core.g.user["id"], "pushover-destination-delete", f"destination_id={destination_id}")
         return core.jsonify({"ok": True})
 
-    def managed_notify(message_id: int, event: dict[str, Any]) -> None:
+    def managed_notify(message_id: int, event: dict[str, Any]) -> dict[str, Any]:
         if not event.get("delivery_eligible", True):
-            return
+            return {"target_count": 0, "sent_count": 0, "failed_count": 0, "errors": []}
+
         settings = core.storage.get_settings()
         if settings.get("pushover_enabled") != "1":
-            return
-        token = str(settings.get("pushover_app_token") or "").strip()
-        if not token:
-            return
+            return {"target_count": 0, "sent_count": 0, "failed_count": 0, "errors": []}
+
         destinations = store.list_active_secret()
         if not destinations:
-            return
+            return {"target_count": 0, "sent_count": 0, "failed_count": 0, "errors": []}
+
+        token = str(settings.get("pushover_app_token") or "").strip()
+        if not token:
+            error = "Pushover App token mangler"
+            return {
+                "target_count": len(destinations),
+                "sent_count": 0,
+                "failed_count": len(destinations),
+                "errors": [error],
+            }
 
         sent = 0
+        errors: list[str] = []
         for destination in destinations:
             try:
                 core.pushover.send(
@@ -204,12 +214,19 @@ def install_pushover_destinations(core: Any) -> PushoverDestinationStore:
                 )
                 sent += 1
             except Exception as exc:
+                errors.append(f"{destination['label']}: {exc}")
                 core.app.logger.warning(
                     "Pushover failed for destination %s (%s): %s",
                     destination["id"], destination["label"], exc,
                 )
         if sent:
             core.storage.mark_notification_sent(message_id)
+        return {
+            "target_count": len(destinations),
+            "sent_count": sent,
+            "failed_count": len(destinations) - sent,
+            "errors": errors,
+        }
 
     core.maybe_notify_pushover = managed_notify
 
