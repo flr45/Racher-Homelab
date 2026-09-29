@@ -23,6 +23,7 @@ class BootVerifierTests(unittest.TestCase):
                 [
                     ("fsk_usb_connected", "1"),
                     ("fsk_usb_pdl_in_use", "1"),
+                    ("fsk_usb_boot_id", "test-boot"),
                 ],
             )
 
@@ -58,6 +59,7 @@ class BootVerifierTests(unittest.TestCase):
         with patch.object(boot_verifier, "DB_PATH", self.db), \
              patch.object(boot_verifier, "SMS_GATEWAY_URL", "http://100.111.28.12:8090"), \
              patch.object(boot_verifier, "service_active", return_value=True), \
+             patch.object(boot_verifier, "current_boot_id", return_value="test-boot"), \
              patch.object(boot_verifier, "http_json", side_effect=fake_http), \
              patch.object(boot_verifier, "tailscale_status", return_value={"installed": True, "service": "active", "ip": "100.81.169.71"}):
             result = boot_verifier.check_once()
@@ -67,6 +69,27 @@ class BootVerifierTests(unittest.TestCase):
         self.assertTrue(result["end_to_end_ready"])
         self.assertTrue(result["checks"]["tailscale"])
         self.assertTrue(result["checks"]["gsm_modem"])
+
+    def test_stale_previous_boot_fsk_state_cannot_mark_local_ready(self):
+        def fake_http(url, timeout=0):
+            del timeout
+            if url.endswith("/healthz"):
+                return {"ok": True}
+            return None
+
+        with patch.object(boot_verifier, "DB_PATH", self.db), \
+             patch.object(boot_verifier, "SMS_GATEWAY_URL", ""), \
+             patch.object(boot_verifier, "service_active", return_value=True), \
+             patch.object(boot_verifier, "current_boot_id", return_value="new-boot"), \
+             patch.object(boot_verifier, "http_json", side_effect=fake_http), \
+             patch.object(boot_verifier, "tailscale_status", return_value={"installed": False, "service": "missing", "ip": ""}):
+            result = boot_verifier.check_once()
+
+        self.assertFalse(result["checks"]["fsk_current_boot"])
+        self.assertTrue(result["checks"]["fsk_connected"])
+        self.assertTrue(result["checks"]["fsk_in_use"])
+        self.assertFalse(result["local_ready"])
+        self.assertFalse(result["end_to_end_ready"])
 
     def test_transient_sms_timeout_does_not_crash_check(self):
         def fake_http(url, timeout=0):
