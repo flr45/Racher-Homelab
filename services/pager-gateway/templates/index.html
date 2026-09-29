@@ -23,7 +23,7 @@
       </div>
     </header>
 
-    <nav class="tabs" aria-label="Navigation">
+    <nav class="tabs" aria-label="Navigation" role="tablist">
       <button class="tab active" data-tab="alarms">Alarmer</button>
       <button class="tab" data-tab="politi">Politi Update</button>
       <button class="tab" data-tab="history">Historik</button>
@@ -167,6 +167,7 @@
       {% endif %}
     </main>
   </div>
+  <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
   <script src="/static/app.js" defer></script>
   <script src="/static/fsk-status.js" defer></script>
   <script src="/static/ric-admin.js" defer></script>
