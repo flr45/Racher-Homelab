@@ -55,6 +55,7 @@ admin_user_stations = install_admin_user_stations(core)
 ric_sms = install_ric_sms(core, core.auth_required)
 rss_updates = install_rss_updates(core)
 install_pdl_multiline_tail(core.source)
+burst_consensus.recover_pending()
 core.source.start()
 rss_updates.start()
 app = app_module.app
