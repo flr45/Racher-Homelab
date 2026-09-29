@@ -1,6 +1,30 @@
 (() => {
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
   const $ = (selector) => document.querySelector(selector);
+  const isAdmin = document.body.dataset.admin === '1';
+
+  function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value ?? '';
+    return div.innerHTML;
+  }
+
+  function maskPhone(phone) {
+    const value = String(phone || '');
+    if (value.length <= 6) return value;
+    return `${value.slice(0, 4)}••••${value.slice(-2)}`;
+  }
+
+  function statusLabel(value) {
+    const labels = {
+      queued: 'Afventer',
+      sending: 'Sender',
+      sent: 'Sendt',
+      failed: 'Fejlet',
+      uncertain: 'Ukendt efter genstart',
+    };
+    return labels[value] || value || '—';
+  }
 
   async function waApi(url, options = {}) {
     const method = (options.method || 'GET').toUpperCase();
@@ -31,10 +55,31 @@
         <label class="wide">WhatsApp-nummer<input id="wa-phone" type="tel" autocomplete="tel" placeholder="+4512345678"></label>
         <label class="checkbox wide"><input id="wa-enabled" type="checkbox"> <strong>Send mine pageralarmer på WhatsApp</strong></label>
       </div>
-      <div class="actions wrap"><button id="wa-save" class="primary" type="button">Gem WhatsApp</button><button id="wa-test" type="button">Send test</button><span id="wa-status" class="muted"></span></div>`;
+      <div class="actions wrap"><button id="wa-save" class="primary" type="button">Gem WhatsApp</button><button id="wa-test" type="button">Send test</button><span id="wa-status" class="muted"></span></div>
+      ${isAdmin ? '<div class="split-section"><div><h3>Seneste WhatsApp-leveringer</h3><p class="hint">Viser også afbrudte eller usikre leveringer efter en genstart.</p><div id="wa-deliveries" class="command-list"><p class="muted">Henter leveringsstatus…</p></div></div></div>' : ''}`;
     notificationCard.insertAdjacentElement('afterend', card);
     $('#wa-save')?.addEventListener('click', save);
     $('#wa-test')?.addEventListener('click', test);
+  }
+
+
+  async function loadAdminDeliveries() {
+    if (!isAdmin || !$('#wa-deliveries')) return;
+    try {
+      const rows = await waApi('/api/whatsapp/deliveries');
+      const target = $('#wa-deliveries');
+      const visible = Array.isArray(rows) ? rows.slice(0, 20) : [];
+      target.innerHTML = visible.length ? visible.map((row) => `
+        <div class="command-row">
+          <div>
+            <strong>${escapeHtml(statusLabel(row.status))} · ${escapeHtml(row.display_name || 'Bruger')}</strong>
+            <small>${escapeHtml(maskPhone(row.phone_e164))} · melding #${Number(row.message_id || 0)} · ${escapeHtml(row.station || 'Ukendt område')}</small>
+            ${row.error ? `<p>${escapeHtml(row.error)}</p>` : ''}
+          </div>
+        </div>`).join('') : '<p class="muted">Ingen WhatsApp-leveringer endnu.</p>';
+    } catch (error) {
+      $('#wa-deliveries').textContent = `Kunne ikke hente leveringsstatus: ${error.message}`;
+    }
   }
 
   async function load() {
@@ -52,6 +97,7 @@
       gateway.className = `status-badge ${ready ? 'active' : 'inactive'}`;
       $('#wa-test').disabled = !data.gateway_configured;
       if (!ready) $('#wa-status').textContent = data.gateway_configured ? 'Gatewayen er konfigureret, men global WhatsApp-afsendelse er slået fra.' : 'OpenWA mangler serveropsætning.';
+      await loadAdminDeliveries();
     } catch (error) {
       title.textContent = 'WhatsApp-status kunne ikke hentes';
       $('#wa-status').textContent = error.message;

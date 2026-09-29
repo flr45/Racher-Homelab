@@ -98,4 +98,6 @@ WhatsApp følger samme bruger-routing som Web Push:
 
 Tabellen `whatsapp_deliveries` gemmer én række pr. alarm og bruger. `UNIQUE(message_id, user_id)` forhindrer samme alarm i at blive sendt to gange til samme bruger, selv hvis dispatch-hooket skulle blive kaldt igen.
 
-Status er `queued`, `sent` eller `failed`; OpenWA message-id og en kort fejltekst gemmes, når de findes.
+Status er `queued`, `sending`, `sent`, `failed` eller `uncertain`; OpenWA message-id og en kort fejltekst gemmes, når de findes.
+
+Gatewayen reserverer leveringen i SQLite **før** baggrundstråden startes. Hvis processen genstarter, kan en nylig `queued` levering derfor genoptages. En levering, der stod som `sending`, bliver derimod markeret `uncertain` og gensendes ikke automatisk, fordi OpenWA kan have accepteret beskeden lige før processen stoppede. Det undgår blind dubletafsendelse.
