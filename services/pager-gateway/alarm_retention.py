@@ -92,7 +92,7 @@ def _recent_rows(core: Any, *, user_id: int | None = None) -> list[dict[str, Any
     query = (
         f"SELECT {columns} FROM messages "
         "WHERE delivery_eligible=1 "
-        "AND datetime(received_at) >= datetime(?)"
+        "AND received_at >= ?"
         f"{routing_clause} ORDER BY id DESC LIMIT ?"
     )
     parameters.append(max_feed_rows())
