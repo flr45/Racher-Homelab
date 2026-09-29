@@ -130,6 +130,7 @@ class PushoverDestinationStore:
 
 def install_pushover_destinations(core: Any) -> PushoverDestinationStore:
     store = PushoverDestinationStore(core.DB_PATH)
+    core.pushover_destination_store = store
 
     # One-time migration from the original single global user/group key. Clear the
     # legacy secret only after it has been copied so deleting all managed
