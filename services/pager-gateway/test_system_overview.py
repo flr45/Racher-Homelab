@@ -61,6 +61,21 @@ class SystemOverviewTests(unittest.TestCase):
         self.assertEqual(states["sms-link"], "ok")
         self.assertEqual(states["gsm"], "ok")
 
+    def test_database_sms_gateway_setting_is_used_when_env_is_empty(self):
+        storage = SimpleNamespace(
+            get_setting=lambda key, default="": (
+                "http://100.90.80.70:8090" if key == "ric_sms_gateway_url" else default
+            )
+        )
+        overview = SystemOverview(SimpleNamespace(storage=storage))
+        with patch.dict(os.environ, {"PAGER_SMS_GATEWAY_URL": ""}, clear=False):
+            with patch("system_overview.urllib.request.urlopen", return_value=_Response()):
+                result = overview.snapshot(self._runtime())
+
+        self.assertTrue(result["sms"]["configured"])
+        self.assertEqual(result["sms"]["endpoint"], "100.90.80.70:8090")
+        self.assertTrue(result["end_to_end_ready"])
+
     def test_local_pager_can_be_ready_when_sms_gateway_is_not_configured(self):
         overview = SystemOverview(SimpleNamespace())
         with patch.dict(os.environ, {"PAGER_SMS_GATEWAY_URL": ""}, clear=False):
