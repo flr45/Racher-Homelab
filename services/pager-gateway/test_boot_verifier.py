@@ -5,6 +5,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import boot_verifier
@@ -23,6 +24,7 @@ class BootVerifierTests(unittest.TestCase):
                 [
                     ("fsk_usb_connected", "1"),
                     ("fsk_usb_pdl_in_use", "1"),
+                    ("fsk_usb_last_seen", datetime.now(timezone.utc).isoformat()),
                 ],
             )
 
@@ -67,6 +69,26 @@ class BootVerifierTests(unittest.TestCase):
         self.assertTrue(result["end_to_end_ready"])
         self.assertTrue(result["checks"]["tailscale"])
         self.assertTrue(result["checks"]["gsm_modem"])
+
+    def test_stale_fsk_status_cannot_make_boot_ready(self):
+        stale = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        with sqlite3.connect(self.db) as conn:
+            conn.execute(
+                "UPDATE runtime_status SET value=? WHERE key='fsk_usb_last_seen'",
+                (stale,),
+            )
+
+        with patch.object(boot_verifier, "DB_PATH", self.db), \
+             patch.object(boot_verifier, "SMS_GATEWAY_URL", ""), \
+             patch.object(boot_verifier, "service_active", return_value=True), \
+             patch.object(boot_verifier, "http_json", return_value={"ok": True}), \
+             patch.object(boot_verifier, "tailscale_status", return_value={"installed": False, "service": "missing", "ip": ""}):
+            result = boot_verifier.check_once()
+
+        self.assertFalse(result["checks"]["fsk_status_fresh"])
+        self.assertFalse(result["checks"]["fsk_connected"])
+        self.assertFalse(result["checks"]["fsk_in_use"])
+        self.assertFalse(result["local_ready"])
 
     def test_transient_sms_timeout_does_not_crash_check(self):
         def fake_http(url, timeout=0):
