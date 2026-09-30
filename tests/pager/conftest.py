@@ -34,6 +34,7 @@ def p(monkeypatch):
         pager.db.drop_all()
         pager.db.create_all()
         monkeypatch.setattr(pager.base, "openwa_status", lambda: {"state": "ready", "detail": "SBR-PAGER"})
+        monkeypatch.setattr(pager.diagnostics, "internet_status", lambda: {"state": "online", "detail": "Testnetværk", "checked_at": pager.base.utcnow()})
         monkeypatch.setattr(pager, "gateway_status", lambda: {"modem": {"state": "online", "transport": "usb"}, "gateway": {}})
         yield pager
         pager.db.session.remove()

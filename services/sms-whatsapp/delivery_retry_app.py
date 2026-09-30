@@ -248,7 +248,7 @@ def _enqueue_inbound(inbound: base.InboundMessage) -> tuple[int, int]:
     Repeated ingest resumes an interrupted enqueue without resending sent rows.
     """
 
-    if InboundDecision.query.filter_by(inbound_id=inbound.id, decision="deliver").first() is not None:
+    if InboundDecision.query.filter(InboundDecision.inbound_id == inbound.id, InboundDecision.decision.in_(("deliver", "no_recipients"))).first() is not None:
         sent = base.WhatsAppDelivery.query.filter_by(inbound_id=inbound.id, status="sent").count()
         queued = base.WhatsAppDelivery.query.filter(
             base.WhatsAppDelivery.inbound_id == inbound.id,
@@ -313,6 +313,9 @@ def _enqueue_inbound(inbound: base.InboundMessage) -> tuple[int, int]:
         ))
         queued_or_failed += 1
 
+    if not sent and not queued_or_failed:
+        reason = "Ingen aktive modtagere har valgt Test" if station == stations.TEST_STATION else "Ingen aktive modtagere har valgt denne station" if station else "Ingen aktive modtagere med Alle stationer"
+        _record_decision(inbound, "no_recipients", reason)
     db.session.commit()
     if ASYNC_DELIVERY:
         _wake_event.set()
@@ -457,9 +460,10 @@ def quality_snapshot() -> dict:
 
 
 def queue_snapshot() -> dict:
-    retrying = base.WhatsAppDelivery.query.filter_by(status="retrying").count()
-    pending = base.WhatsAppDelivery.query.filter_by(status="pending").count()
-    failed = base.WhatsAppDelivery.query.filter_by(status="failed").count()
+    alarms = base.WhatsAppDelivery.query.filter(base.WhatsAppDelivery.inbound_id.is_not(None))
+    retrying = alarms.filter_by(status="retrying").count()
+    pending = alarms.filter_by(status="pending").count()
+    failed = alarms.filter_by(status="failed").count()
     active = WhatsAppRetryState.query.filter(WhatsAppRetryState.completed_at.is_(None)).count()
 
     oldest = (
@@ -501,6 +505,9 @@ def _retry_worker() -> None:
         try:
             with app.app_context():
                 retry_due_once()
+                runner = globals().get("manual_test_runner")
+                if runner:
+                    runner()
         except Exception:  # noqa: BLE001
             log.exception("WhatsApp retry-worker fejlede")
         _wake_event.wait(RETRY_POLL_SECONDS)
@@ -645,3 +652,11 @@ with app.app_context():
     db.create_all()
 
 start_retry_worker()
+
+
+def record_sender_rejection(inbound):
+    _record_decision(inbound, "sender_rejected", "Afsendernummeret var ikke godkendt ved modtagelsen")
+    db.session.commit()
+
+
+base.record_sender_rejection = record_sender_rejection

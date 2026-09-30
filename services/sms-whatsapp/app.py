@@ -251,6 +251,10 @@ def sms_sender_allowed(sender: str) -> bool:
     return AllowedSender.query.filter_by(phone=sender, active=True).first() is not None
 
 
+def record_sender_rejection(inbound):
+    """Extension hook for persistent diagnostics of rejected senders."""
+
+
 def deliver_inbound(inbound: InboundMessage) -> tuple[int, int]:
     recipients = Recipient.query.filter_by(active=True).order_by(Recipient.name).all()
     sent = 0
@@ -571,6 +575,7 @@ def _incoming_locked():
         return jsonify(id=existing.id, duplicate=True, accepted=existing.accepted), 200
 
     if not allowed:
+        record_sender_rejection(inbound)
         return jsonify(id=inbound.id, accepted=False, sent=0, failed=0), 202
 
     sent, _ = deliver_inbound(inbound)

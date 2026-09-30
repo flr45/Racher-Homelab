@@ -74,6 +74,46 @@ og delte SMS'er, WhatsApp-levering og genstartstest. Med ét SIM kræver skift
 mellem router og USB, at SIM-kortet flyttes. Automatisk failover ville kræve
 separate SIM-kort/numre og en særskilt plan for alarmleveringen.
 
+## Forbindelsesstatus, enkeltpersonstest og fejloversigt
+
+Overblik og Forbindelser viser **Internet**, **SMS-modem** og **WhatsApp**
+separat. Internet afprøves med DNS og HTTPS fra Pager-containeren; kontrollen
+har to sekunders timeout pr. kontrolserver, bruger højst to servere og caches
+i 30 sekunder. Standardkontrollen bruger Google gstatic og Cloudflare med
+HEAD-forespørgsler. Adresser kan ændres i Compose-miljøet med
+`SMS_WHATSAPP_INTERNET_CHECK_URLS` (højst to kommaseparerede HTTPS-adresser).
+En fungerende kontrol beviser forbindelse til kontrolserveren; den beviser
+ikke i sig selv, at WhatsApp virker eller at en besked når telefonen.
+
+**Test ét valgt nummer** åbner en side med aktive brugere. Vælg én bruger og
+tryk Send. Dette er en udtrykkelig manuel test til det valgte nummer, også
+hvis brugeren ikke har valgt Test i stationsfilteret. Den eksisterende knap
+**Test til Test-gruppen** er stadig separat og bruger gruppens Test-opt-in.
+
+Enkeltpersonstesten gemmes før HTTP-kvitteringen og køres af den eksisterende
+leveringsworker efter almindelige alarmjobs. Et dobbeltklik/genforsøg af
+samme formular skaber ikke en ny afsendelse. Testen udløber efter fem minutter
+i køen, og en pauset, slettet eller ændret modtager får den ikke. Der er ingen
+automatisk genudsendelse af fejlede eller usikre testforsøg.
+
+Siden opdaterer resultatet hvert femte sekund med OpenWA-besked-id og svartid
+fra afsendelsesforsøget til OpenWA svarer. **Det er en OpenWA-kvittering,
+ikke en leverings- eller læsekvittering fra telefonen.** Hvis processen
+stoppede under afsendelsen, vises Uafklaret, og telefonen skal kontrolleres
+før en ny manuel test. Ingen fysisk SMS fra LT300 afsendes med denne knap.
+Prøv indgående SMS fra en telefon til routerens SIM som beskrevet nedenfor.
+
+**Fejloversigt** viser de seneste 50 indgående SMS med gemte beslutninger og
+de seneste 50 leveringer med problemer. Afsenderafvisning, modemstøj og
+manglende stationsvalg gemmes ved behandlingen og ændres ikke, hvis
+indstillingerne senere ændres. En SMS uden valgte modtagere bliver ikke
+pludselig sendt ved en gentagen import efter tilføjelse af nye modtagere.
+Ældre beskeder uden en gemt årsag beskrives som ukendte. Åbning af siden
+udfører ingen afsendelser eller internetkontrol.
+
+Databasen får en ekstra `single_whatsapp_test`-tabel; eksisterende tabeller
+ændres ikke. Den gamle image-rollback kan fortsat bruge de samme volumener.
+
 ## Videresend fra alle telefonnumre
 
 Under **Indstillinger → Afsenderfilter** findes afkrydsningsboksen

@@ -61,3 +61,12 @@ telefonnumre. Valget gemmes i den eksisterende runtime-indstillingstabel og
 bevares efter genstart. Slå den fra for at bruge listen med godkendte numre
 igen. Stationsvalg, Test-opt-in og modemstøjsfilter gælder fortsat; tidligere
 afviste SMS genudsendes ikke. API-token og administratorlogin kræves stadig.
+
+### Drift og test
+
+Overblik viser separat DNS/HTTPS-kontrol, SMS-status og OpenWA-status.
+`/enkelt-test` køer en manuel test til én aktiv bruger og viser OpenWA-id og
+svartid; resultatet er ikke telefonens leverings-/læsekvittering. Testen
+genudsendes ikke automatisk efter fejl eller afbrudt afsendelse.
+`/diagnostik` viser gemte afvisningsårsager og leveringsfejl uden netværkskald
+eller afsendelse. Alle sider og status-API'er kræver administratorlogin.

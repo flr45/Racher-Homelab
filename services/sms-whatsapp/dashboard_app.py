@@ -9,13 +9,14 @@ import time
 import urllib.request
 from datetime import timedelta
 
-from flask import flash, jsonify, redirect, render_template, request, url_for
+from flask import abort, flash, jsonify, redirect, render_template, request, session, url_for
 
 import delivery_retry_app as deliveries
 import admin_station_app as users
 import history_app as history
 import station_filter_app as stations
 import station_names_app as names
+import diagnostics
 
 app = deliveries.app
 base = deliveries.base
@@ -58,10 +59,11 @@ def snapshot():
     gateway = gateway_status()
     queue = deliveries.queue_snapshot()
     wa = base.openwa_status()
+    internet = diagnostics.internet_status()
     modem = gateway.get("modem") or {}
-    good = modem.get("state") == "online" and wa.get("state") == "ready" and not queue["failed"]
+    good = internet.get("state") == "online" and modem.get("state") == "online" and wa.get("state") == "ready" and not queue["failed"]
     return {"gateway": gateway, "modem": modem, "queue": queue, "wa": wa,
-            "good": good, "quality": deliveries.quality_snapshot(), "stats": events.stats_snapshot()}
+            "internet": internet, "good": good, "quality": deliveries.quality_snapshot(), "stats": events.stats_snapshot()}
 
 
 @base.login_required
@@ -109,7 +111,55 @@ def cudy_connection_test():
 @base.login_required
 def dashboard_status():
     data = snapshot()
-    return jsonify(modem=data["modem"], openwa=data["wa"], queue=data["queue"], good=data["good"])
+    return jsonify(internet=data["internet"], modem=data["modem"], openwa=data["wa"], queue=data["queue"], good=data["good"])
+
+
+@app.get("/diagnostik")
+@base.login_required
+def diagnostic_page():
+    messages = base.InboundMessage.query.order_by(base.InboundMessage.id.desc()).limit(50).all()
+    issues = base.WhatsAppDelivery.query.filter(base.WhatsAppDelivery.status.in_(("failed", "retrying", "cancelled", "uncertain"))).order_by(base.WhatsAppDelivery.id.desc()).limit(50).all()
+    return render_template("diagnostics.html", title="Fejloversigt", messages=[(row, diagnostics.explain_inbound(row)) for row in messages], issues=issues)
+
+
+@app.get("/enkelt-test")
+@base.login_required
+def single_test_page():
+    token = session.setdefault("single_test_token", diagnostics.secrets.token_urlsafe(24))
+    tests = diagnostics.SingleWhatsAppTest.query.order_by(diagnostics.SingleWhatsAppTest.id.desc()).limit(20).all()
+    return render_template("single_test.html", title="Test ét nummer", token=token,
+        recipients=base.Recipient.query.filter_by(active=True).order_by(base.Recipient.name).all(),
+        tests=[diagnostics.test_details(test) for test in tests])
+
+
+@app.post("/enkelt-test")
+@base.login_required
+def send_single_test():
+    base.check_csrf()
+    token = request.form.get("test_token", "")
+    old = diagnostics.SingleWhatsAppTest.query.filter_by(token=token).first() if token else None
+    if old:
+        return redirect(url_for("single_test_page"))
+    if not token or token != session.get("single_test_token"):
+        abort(400, "Testformularen er udløbet; genindlæs siden")
+    try:
+        recipient_id = int(request.form.get("recipient_id", ""))
+    except ValueError:
+        abort(400, "Vælg én modtager")
+    recipient = db.get_or_404(base.Recipient, recipient_id)
+    if not recipient.active:
+        abort(400, "Modtageren er pauset")
+    test = diagnostics.enqueue_single_test(recipient, token)
+    session.pop("single_test_token", None)
+    flash(f"Test #{test.id} er sat i kø til {recipient.name} ({recipient.phone}).")
+    return redirect(url_for("single_test_page"))
+
+
+@app.get("/api/enkelt-test/status")
+@base.login_required
+def single_test_status():
+    tests = diagnostics.SingleWhatsAppTest.query.order_by(diagnostics.SingleWhatsAppTest.id.desc()).limit(20).all()
+    return jsonify(tests=[diagnostics.test_details(test) for test in tests])
 
 
 @app.after_request
