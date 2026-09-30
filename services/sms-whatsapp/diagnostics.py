@@ -105,6 +105,9 @@ def recover_inflight_tests():
 
 @deliveries.serialized
 def run_single_test():
+    paused = getattr(deliveries, "operations_paused", None)
+    if paused and paused():
+        return
     test = SingleWhatsAppTest.query.filter_by(status="pending").order_by(SingleWhatsAppTest.id).first()
     if not test:
         return
@@ -153,7 +156,7 @@ def explain_inbound(inbound):
     if not rows:
         return "Ingen leveringsjobs registreret; ældre beskeder kan mangle en registreret årsag"
     counts = {key: sum(row.status == key for row in rows) for key in {row.status for row in rows}}
-    labels = {"sent": "kvitteret af OpenWA", "pending": "venter i kø", "retrying": "venter på nyt forsøg", "failed": "fejlet", "cancelled": "annulleret"}
+    labels = {"sent": "kvitteret af OpenWA", "pending": "venter i kø", "retrying": "venter på nyt forsøg", "failed": "fejlet", "cancelled": "annulleret", "held": "afventer godkendelse af gammel alarm"}
     return ", ".join(f"{count} {labels.get(key, key)}" for key, count in sorted(counts.items()))
 
 

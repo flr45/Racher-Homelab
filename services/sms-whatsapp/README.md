@@ -70,3 +70,5 @@ svartid; resultatet er ikke telefonens leverings-/læsekvittering. Testen
 genudsendes ikke automatisk efter fejl eller afbrudt afsendelse.
 `/diagnostik` viser gemte afvisningsårsager og leveringsfejl uden netværkskald
 eller afsendelse. Alle sider og status-API'er kræver administratorlogin.
+
+Operational administration now includes daily consistent SQLite backups with configuration restore, bounded maintenance/pilot modes, explicit approval of stale or interrupted deliveries, searchable message history, per-recipient timelines, configuration audit, routing preview, startup checks, sanitized diagnostic export and a private status-only screen. Test SMS are explicitly marked; potential duplicate text is flagged without suppressing legitimate alarms. Subscription lookups are batched and existing databases receive time/status indexes. The worker starts only after safety controls and crash recovery are initialized. Optional retention defaults to disabled. See `docs/SBR-PAGER-UPDATE.md` for all controls, backup limits and offline database recovery.

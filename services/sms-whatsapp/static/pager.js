@@ -34,6 +34,14 @@
         const node=document.getElementById(id); node.textContent=labels[state] || state; node.className='badge '+(state === ready ? 'green':'amber');
       }
       document.getElementById('internet-detail').textContent=data.internet.detail;
+      const timeLabel=value=>value ? new Date(value).toLocaleString('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
+      if(data.ops){
+        document.getElementById('last-sms').textContent=timeLabel(data.ops.last_sms);
+        document.getElementById('last-sent').textContent=timeLabel(data.ops.last_sent);
+        document.getElementById('active-transport').textContent=data.modem.transport==='cudy'?'LT300 · LAN':data.modem.transport==='usb'?'USB · backup under indkøring':'Ukendt';
+        const held=document.getElementById('held-warning');held.hidden=!data.ops.held;held.querySelector('span').textContent=data.ops.held+' gamle leveringer afventer vurdering.';
+        const traffic=document.getElementById('traffic-warning');traffic.hidden=!(data.ops.traffic_warning||data.ops.failure_warning);traffic.querySelector('span').textContent='Usædvanlig aktivitet: '+data.ops.traffic_count+' SMS’er på fem minutter.'+(data.ops.failure_warning?' Gentagne leveringsfejl.':'');
+      }
       document.getElementById('queue-count').textContent=data.queue.active;
       document.getElementById('queue-note').textContent=data.queue.active ? 'nyt forsøg afventer':'ingen ventende leveringer';
       const banner=document.querySelector('.system-banner'); banner.classList.toggle('healthy',data.good); banner.classList.toggle('attention',!data.good);
@@ -48,3 +56,10 @@
   }
   setInterval(refresh, 30000);
 })();
+
+const fullscreenButton = document.querySelector('[data-fullscreen]');
+if (fullscreenButton) fullscreenButton.addEventListener('click', async () => {
+  try { if (!document.fullscreenElement) await document.documentElement.requestFullscreen(); else await document.exitFullscreen(); }
+  catch { fullscreenButton.textContent = 'Fuld skærm er ikke tilgængelig'; }
+});
+if (document.querySelector('[data-display-refresh]')) setTimeout(() => window.location.reload(), 30000);

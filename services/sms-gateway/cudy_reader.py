@@ -71,7 +71,7 @@ def run():
                         network = client.command("AT+CREG?")
                     strength = client.command("AT+CSQ")
                     next_check = time.monotonic() + 30
-                reader.write_status(state="online" if registered(network) else "degraded", network=network.strip(), signal=strength.strip(), transport="cudy", capability="receive-only", last_error=None if registered(network) else "Routeren er ikke registreret på mobilnettet")
+                reader.write_status(state="online" if registered(network) else "degraded", network=network.strip(), signal=strength.strip(), sim=probe["sim"].strip(), transport="cudy", capability="receive-only", last_error=None if registered(network) else "Routeren er ikke registreret på mobilnettet")
                 for message in read_inbox(client):
                     try:
                         import_message(client, message)

@@ -209,8 +209,12 @@ def attempt_delivery(
     inbound: base.InboundMessage,
 ) -> bool:
     state = _state_for(delivery.id)
+    delivery.status = "sending"
+    delivery.attempted_at = base.utcnow()
+    db.session.commit()
     try:
-        message_id = base.send_whatsapp(delivery.recipient_phone, inbound.body)
+        formatter = globals().get("operations_body", lambda row: row.body)
+        message_id = base.send_whatsapp(delivery.recipient_phone, formatter(inbound))
     except Exception as exc:  # noqa: BLE001
         _queue_failure(delivery, exc)
         db.session.commit()
@@ -248,7 +252,7 @@ def _enqueue_inbound(inbound: base.InboundMessage) -> tuple[int, int]:
     Repeated ingest resumes an interrupted enqueue without resending sent rows.
     """
 
-    if InboundDecision.query.filter(InboundDecision.inbound_id == inbound.id, InboundDecision.decision.in_(("deliver", "no_recipients"))).first() is not None:
+    if InboundDecision.query.filter_by(inbound_id=inbound.id).first() is not None:
         sent = base.WhatsAppDelivery.query.filter_by(inbound_id=inbound.id, status="sent").count()
         queued = base.WhatsAppDelivery.query.filter(
             base.WhatsAppDelivery.inbound_id == inbound.id,
@@ -269,15 +273,20 @@ def _enqueue_inbound(inbound: base.InboundMessage) -> tuple[int, int]:
         )
         return 0, 0
 
+    guard = globals().get("operations_before_enqueue")
+    if guard and guard(inbound):
+        return 0, 0
+
     _record_decision(inbound, "deliver", None)
 
     station = stations.station_for_inbound(inbound)
     recipients = base.Recipient.query.filter_by(active=True).order_by(base.Recipient.name).all()
+    selections = stations.subscription_map()
     sent = 0
     queued_or_failed = 0
 
     for recipient in recipients:
-        if not stations.recipient_accepts(recipient.id, station):
+        if not stations.accepts_selection(selections.get(recipient.id, {stations.ALL_STATIONS}), station):
             continue
 
         existing = (
@@ -317,7 +326,7 @@ def _enqueue_inbound(inbound: base.InboundMessage) -> tuple[int, int]:
         reason = "Ingen aktive modtagere har valgt Test" if station == stations.TEST_STATION else "Ingen aktive modtagere har valgt denne station" if station else "Ingen aktive modtagere med Alle stationer"
         _record_decision(inbound, "no_recipients", reason)
     db.session.commit()
-    if ASYNC_DELIVERY:
+    if ASYNC_DELIVERY or (globals().get("operations_paused") and operations_paused()):
         _wake_event.set()
     else:
         # Compatibility mode and embedded build checks.
@@ -373,6 +382,10 @@ def retry_due_once(limit: int = 20) -> dict:
     if not RETRY_ENABLED and not ASYNC_DELIVERY:
         return {"checked": 0, "sent": 0, "remaining": 0}
 
+    paused = globals().get("operations_paused")
+    if paused and paused():
+        return {"checked": 0, "sent": 0, "remaining": queue_snapshot()["active"]}
+
     _seed_recent_legacy_failures()
     # Recover rows committed by older code before a crash, without reviving
     # terminal failures or rows whose retry state was deliberately completed.
@@ -414,6 +427,9 @@ def retry_due_once(limit: int = 20) -> dict:
             state.next_attempt_at = None
             state.completed_at = now
             db.session.commit()
+            continue
+        hold = globals().get("operations_hold_stale")
+        if hold and hold(state, delivery, now):
             continue
         recipient = base.Recipient.query.filter_by(phone=delivery.recipient_phone, active=True).first()
         if recipient is None or not stations.recipient_accepts(recipient.id, stations.station_for_inbound(inbound)):
@@ -504,10 +520,16 @@ def _retry_worker() -> None:
     while not _stop_event.is_set():
         try:
             with app.app_context():
+                recover = globals().get("operations_recover")
+                if recover:
+                    recover()
                 retry_due_once()
                 runner = globals().get("manual_test_runner")
                 if runner:
                     runner()
+                housekeeper = globals().get("operations_housekeeping")
+                if housekeeper:
+                    housekeeper()
         except Exception:  # noqa: BLE001
             log.exception("WhatsApp retry-worker fejlede")
         _wake_event.wait(RETRY_POLL_SECONDS)
@@ -629,19 +651,18 @@ def retry_whatsapp_deliveries_now():
             state = WhatsAppRetryState(
                 delivery_id=delivery.id,
                 attempts=0,
-                first_failed_at=now,
+                first_failed_at=delivery.attempted_at or now,
                 updated_at=now,
             )
             db.session.add(state)
         state.attempts = 0
-        state.first_failed_at = now
         state.next_attempt_at = now
         state.completed_at = None
         state.updated_at = now
         delivery.status = "retrying"
     db.session.commit()
 
-    WhatsAppRetryState.query.filter(WhatsAppRetryState.completed_at.is_(None)).update({"next_attempt_at": now})
+    WhatsAppRetryState.query.filter(WhatsAppRetryState.completed_at.is_(None), WhatsAppRetryState.next_attempt_at.is_not(None)).update({"next_attempt_at": now})
     db.session.commit()
     _wake_event.set()
     flash("Leveringskøen er klar til et nyt forsøg.")
@@ -651,7 +672,7 @@ def retry_whatsapp_deliveries_now():
 with app.app_context():
     db.create_all()
 
-start_retry_worker()
+# dashboard_app starts the worker after all safety callbacks and recovery hooks.
 
 
 def record_sender_rejection(inbound):

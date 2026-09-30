@@ -79,7 +79,7 @@ def test_duplicate_recovers_crash_before_enqueue(authorized, monkeypatch):
     monkeypatch.setattr(p.base, "send_whatsapp", lambda *args: "recovered")
     p.db.session.add(p.base.InboundMessage(source_id="alarm-1", sender="+4512345678", body="(S)M+V · Brand", received_at=p.base.utcnow(), accepted=True))
     p.db.session.commit()
-    assert ingest(p).json["duplicate"] is True
+    assert ingest(p, body="(S)M+V · Brand").json["duplicate"] is True
     assert p.deliveries.retry_due_once()["sent"] == 1
 
 

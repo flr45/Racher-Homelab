@@ -3,6 +3,7 @@
 <body><main class="pager-main" id="main-content">
 <header class="page-head"><div><div class="eyebrow">SLAGELSE BRAND OG REDNING</div><h1>{{ title }}</h1><p>{% block subtitle %}{% endblock %}</p></div><div class="header-meta"><span class="live-dot"></span><span id="refresh-label">Opdateret <time id="page-clock"></time></span></div></header>
 {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ category }}" role="status">{{ message }}</div>{% endfor %}{% endwith %}
+{% if operation_mode.name != 'normal' %}<div class="flash error" role="status"><strong>{{ 'Prøvetilstand · ingen udsendelse' if operation_mode.name == 'pilot' else 'Vedligeholdelse · afsendelse pauset' }}</strong><p>{{ operation_mode.reason }} · Udløb: {{ dk_time(operation_mode.until) }}. <a href="{{ url_for('operations_page') }}">Se drift</a></p></div>{% endif %}
 {% block content %}{% endblock %}
-<footer class="page-footer">SBR Pager <span>Alle tider vises i dansk lokal tid.</span></footer>
+<footer class="page-footer">SBR Pager · {{ pager_version }}{% if pager_built_at %} · Bygget {{ dk_time(pager_built_at) }}{% endif %} <span>Alle tider vises i dansk lokal tid.</span></footer>
 </main></body></html>

@@ -244,3 +244,54 @@ og afsendelse på den rigtige WhatsApp-konto udføres på installationen.
 Designpreview bruger udelukkende eksempeldata:
 
 ![SBR Pager designpreview](images/sms-pager-overview.png)
+
+## Drift, backup og den samlede forbedringsliste
+
+Den nye menu **Drift & backup** indeholder tidsbegrænset vedligeholdelse og prøvetilstand. Begge udløber efter 5–120 minutter, også efter genstart. Vælg normal drift, når opsætningen er kontrolleret.
+
+- **Vedligeholdelse:** nye SMS’er gemmes med deres leveringsjobs, men alarm- og testafsendelse pauses. Køen genoptages efter udløb; gamle jobs tilbageholdes til vurdering.
+- **Prøvetilstand:** nye, godkendte SMS’er behandles med støjfilter, stationsvalg og Test-opt-in. Beregnede modtagere gemmes på beskedens detaljeside. Ingen afsendelsesjobs oprettes, rigtige alarmhændelser/statistik ændres ikke, og disse beskeder genafsendes ikke ved skift til normal drift. Eksisterende kø pauser under prøven.
+- **Gamle alarmer:** efter 15 minutter i køen som standard sættes et job til `held`. Grænsen kan ændres til 5–1440 minutter. Godkend eller fravælg den konkrete besked under Drift; alle allerede kvitterede jobs bevares. Den almindelige genforsøgsknap bypasser ikke denne kontrol. Jobs over den eksisterende maksimale levetid på 24 timer afsluttes som fejlede.
+- **Genstart under afsendelse:** et almindeligt alarmjob registreres som `sending` før netværkskaldet. Ved genstart tilbageholdes sådanne jobs med uafklaret resultat. Kontrollér telefon/WhatsApp før godkendelse. Netværksfejl kan fortsat medføre gentagne forsøg; uden en idempotent OpenWA-afsendelsesgrænseflade kan præcis én levering ikke garanteres.
+
+### Daglig backup og gendannelse
+
+Leveringsarbejderen opretter en konsistent SQLite-backup og en konfigurationsfil én gang pr. dansk kalenderdag. Første backup tages efter opstart, næste ved første arbejdscyklus efter midnat. Der er ingen ekstern tjeneste eller automatisk overførsel. Backups ligger i datavolumenens `backups/` (kan ændres med `SMS_WHATSAPP_BACKUP_DIR`) med private filrettigheder. De seneste 14 komplette backup-par bevares. En backupfejl vises i Drift og på overblikket; fejl genforsøges højst én gang i timen. En backup har en tidsgrænse på 30 sekunder.
+
+Download også kopier til et andet drev/computer. Backup på samme disk beskytter ikke mod diskfejl. SQLite-filen omfatter historik, modtagere, stationsvalg, afsenderfilter og ændringslog. Konfigurationsfilen indeholder ikke adgangskoder eller `.env`; behold serverens `.env` og opdateringsscriptets separate sikkerhedsbackup.
+
+**Gendan opsætning** kræver teksten `GENDAN` i den konkrete backupformular. Funktionen validerer filen og tager en ny sikkerhedsbackup før ændringer. Modtagere, administrative stationer, stationsvalg, godkendte afsendere og understøttede driftsindstillinger erstattes atomisk. Historik bevares, ventende alarm- og testjobs annulleres, og afsendelse pauses i 30 minutter. Tidligere tilstand/udløbstid genindlæses ikke. Kontrollér opsætningen, og vælg normal drift. Der er ingen automatisk genafsendelse.
+
+**Fuld databasegendannelse** udføres på serveren med en backup fra samme databaseskema:
+
+```bash
+cd /opt/SBR-Pager-Gateway
+sudo bash scripts/restore-sbr-pager.sh /sti/til/pager-backup.sqlite GENDAN
+```
+
+Scriptet pauser Pager-watchdog og stopper Pager før filskift. OpenWA og SMS Gateway fortsætter; Gateway kan beholde indgående SMS’er til Pager er tilbage. Databasen og fremmednøgler kontrolleres, og den nuværende database kopieres til `pre-restore-*.sqlite` først. Gendannede ikke-afsluttede/fejlede jobs annulleres for at undgå genafsendelse af historiske alarmer. Pager startes igen med 30 minutters vedligeholdelse, og en tidligere aktiv watchdog-timer genaktiveres. Ved valideringsfejl beholdes den nuværende database. Scriptet må ikke bruges samtidig med opdatering eller anden manuelt startet Pager-proces.
+
+### Historik, kontrol og visninger
+
+| Funktion | Placering / adfærd |
+| --- | --- |
+| Sidste SMS og WhatsApp | Overblik: registreringstid og seneste OpenWA-kvittering, løbende opdateret |
+| Aktivt modem | Overblik/Forbindelser: LT300 via LAN eller USB under indkøring |
+| Alarmdetaljer og beskedens vej | Beskedhistorik: SMS-tid, Pager-registrering, behandlingsbeslutning og leveringer pr. modtager; alarmtidslinjen linker videre |
+| Søgning | Beskedhistorik: tekst, afsender, station, status og datoer i dansk tid; 50 resultater pr. side |
+| Testmarkering | Indgående SMS’er klassificeret som Test får `🧪 TEST · ØVELSE` i WhatsApp; stationsfiltre er uændrede |
+| Trafikadvarsel | Overblik: standard 20 SMS’er på fem minutter, samt mindst fem nyere leveringsfejl; ingen automatisk spærring af legitime alarmer |
+| Gentagelser | Ens afsender/tekst på fem minutter vises som mulig gentagelse; forskellige kilde-id’er sendes normalt. Samme kilde-id med anden afsender/tekst afvises |
+| Beskedsløjfer | Kun egne præcise Pager-test- og PI/MINI-statusfingeraftryk samt det reserverede prefix `[SBR-SYSTEM]` stoppes; almindelig status/alarmtekst tillades |
+| Forhåndsvisning | Test af selvstændig tekst og afsender med aktuelle filtre uden lagring eller udsendelse. Brug prøvetilstand til rigtige opfølgninger |
+| Flere stationsvalg | Brugere & stationer: allerede understøttet; optimeret til samlet indlæsning af stationsvalg |
+| Ændringslog | Ændringer i modtagere, stationer, afsenderfilter og drift med før/efter og administratorens konfigurerede login-navn. Ét fælles login identificerer ikke individuelle personer |
+| Opstartskontrol | Databaseintegritet, internet, SMS, WhatsApp, kø, backup og manglende modtagere; sender ingen besked |
+| Mistet WhatsApp-login | Forbindelser: hjælp til eksisterende OpenWA-session og QR-login; test bagefter til ét nummer |
+| Version og byggetid | Sidefod viser programversion og image-byggetid. Opstartskontrol viser processtart |
+| Fejlrapport | Download af eksplicit udvalgte tilstande og antal; ingen rå fejl, beskedtekst, telefonnumre, adresser, URL’er eller nøgler |
+| Driftsvisning | Store statusfelter, seneste aktivitet og kø uden beskedtekst/telefonnumre; login kræves; fuldskærmsknap og opdatering hvert 30. sekund |
+| Historikoprydning | Som standard deaktiveret. Valgfrit 30–3650 dage, begrænsede portioner efter en vellykket dagsbackup. Ventende/tilbageholdte alarmer bevares; også afsluttede testlogs og gammel ændringslog ryddes |
+| LT300-status | SIM, signal og registreret mobilnet vises, når Gateway faktisk leverer dem. Firmware og fysisk modtagelse skal stadig verificeres |
+
+Udgående SMS via LT300 er fortsat en hardwareafhængig opgave. Den eksisterende adapter er modtagelse alene, og der er ikke tilføjet en uverificeret afsendelseskommando. USB-afsendelse og statusresponder bevares under indkøringen.

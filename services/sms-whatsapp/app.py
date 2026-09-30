@@ -18,7 +18,7 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import event, text
 from sqlalchemy.exc import IntegrityError
 
-PHONE_PATTERN = re.compile(r"^\+?[1-9]\d{6,14}$")
+PHONE_PATTERN = re.compile(r"^\+?[1-9]\d{6,14}$", re.ASCII)
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:////data/sms-whatsapp.db")
@@ -548,6 +548,8 @@ def _incoming_locked():
 
     existing = InboundMessage.query.filter_by(source_id=source_id).first()
     if existing:
+        if existing.sender != sender or existing.body != body:
+            return jsonify(error="Kilde-id bruges allerede til en anden besked"), 409
         # A crash may have happened after recording the SMS and before creating
         # its outbox. The delivery implementation is idempotent.
         if existing.accepted:

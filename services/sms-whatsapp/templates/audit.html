@@ -1,0 +1,2 @@
+{% extends 'layout.html' %}{% block subtitle %}De seneste 100 ændringer. Adgangskoder og API-nøgler registreres ikke.{% endblock %}
+{% block content %}<section class="card">{% for row in rows %}<details class="backup-row"><summary>{{ dk_time(row.at) }} · {{ row.actor }} · {{ row.action }}</summary><pre class="audit-json">{{ row.changes }}</pre></details>{% else %}<p class="help">Ingen ændringer registreret siden denne funktion blev installeret.</p>{% endfor %}</section>{% endblock %}

@@ -62,7 +62,9 @@ def snapshot():
     internet = diagnostics.internet_status()
     modem = gateway.get("modem") or {}
     good = internet.get("state") == "online" and modem.get("state") == "online" and wa.get("state") == "ready" and not queue["failed"]
-    return {"gateway": gateway, "modem": modem, "queue": queue, "wa": wa,
+    ops = operations.operation_snapshot()
+    good = good and ops["mode"]["name"] == "normal" and not ops["held"] and not ops["failure_warning"]
+    return {"ops": ops, "gateway": gateway, "modem": modem, "queue": queue, "wa": wa,
             "internet": internet, "good": good, "quality": deliveries.quality_snapshot(), "stats": events.stats_snapshot()}
 
 
@@ -111,7 +113,7 @@ def cudy_connection_test():
 @base.login_required
 def dashboard_status():
     data = snapshot()
-    return jsonify(internet=data["internet"], modem=data["modem"], openwa=data["wa"], queue=data["queue"], good=data["good"])
+    return jsonify(ops=data["ops"], internet=data["internet"], modem=data["modem"], openwa=data["wa"], queue=data["queue"], good=data["good"])
 
 
 @app.get("/diagnostik")
@@ -136,6 +138,8 @@ def single_test_page():
 @base.login_required
 def send_single_test():
     base.check_csrf()
+    if operations.sending_paused():
+        abort(409, "Vælg normal drift før en afsendelsestest")
     token = request.form.get("test_token", "")
     old = diagnostics.SingleWhatsAppTest.query.filter_by(token=token).first() if token else None
     if old:
@@ -185,3 +189,26 @@ def unified_ui(response):
 
 # Serialize deletion with delivery attempts; FK cascades remove retry states.
 app.view_functions["delete_alarm_event"] = deliveries.serialized(app.view_functions["delete_alarm_event"])
+
+
+# Import after the existing routes so extension callbacks cannot form a cycle.
+import operations
+app.config["PAGER_OPERATION_ENDPOINTS"] = ["message_detail"]
+STATUS_LABELS.update(sending="Afsender", held="Afventer godkendelse", uncertain="Ukendt udfald", pilot="Prøvetilstand")
+# Configuration writes must not change recipients halfway through a send.
+for _endpoint in operations.AUDIT_ENDPOINTS:
+    if _endpoint in app.view_functions:
+        app.view_functions[_endpoint] = operations.audited(app.view_functions[_endpoint])
+_original_group_test = app.view_functions["test_message"]
+@base.login_required
+@deliveries.serialized
+def guarded_group_test():
+    if operations.sending_paused():
+        abort(409, "Vælg normal drift før en afsendelsestest")
+    return _original_group_test()
+app.view_functions["test_message"] = guarded_group_test
+
+# No pending job may run before operational controls and crash recovery.
+with app.app_context():
+    operations.recover_interrupted_alarms()
+deliveries.start_retry_worker()

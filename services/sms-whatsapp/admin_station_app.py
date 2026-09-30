@@ -65,11 +65,8 @@ def station_overview() -> tuple[list[dict], list[base.Recipient]]:
 
 
 def alarm_filter_map() -> dict[int, set[str]]:
-    recipients = base.Recipient.query.order_by(base.Recipient.name.collate("NOCASE")).all()
-    return {
-        recipient.id: previous.configured_stations(recipient.id)
-        for recipient in recipients
-    }
+    selections = previous.subscription_map()
+    return {r.id: selections.get(r.id, {previous.ALL_STATIONS}) for r in base.Recipient.query.all()}
 
 
 def _remove_section(html: str, marker: str) -> str:

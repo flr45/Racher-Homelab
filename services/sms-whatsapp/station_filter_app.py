@@ -144,17 +144,22 @@ def configured_stations(recipient_id: int) -> set[str]:
     return values or {ALL_STATIONS}
 
 
-def recipient_accepts(recipient_id: int, station: str | None) -> bool:
-    selected = configured_stations(recipient_id)
-    normalized = station.upper() if station else None
+def subscription_map():
+    result = {}
+    for row in RecipientStationFilter.query.all():
+        result.setdefault(row.recipient_id, set()).add(row.station.upper())
+    return result
 
-    # TEST er opt-in. "*" dækker kun de almindelige stationer.
+
+def accepts_selection(selected, station):
+    normalized = station.upper() if station else None
     if normalized == TEST_STATION:
         return TEST_STATION in selected
+    return ALL_STATIONS in selected or (normalized is not None and normalized in selected)
 
-    if ALL_STATIONS in selected:
-        return True
-    return normalized is not None and normalized in selected
+
+def recipient_accepts(recipient_id: int, station: str | None) -> bool:
+    return accepts_selection(configured_stations(recipient_id), station)
 
 
 def station_for_inbound(inbound: base.InboundMessage) -> str | None:
