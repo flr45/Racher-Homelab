@@ -31,5 +31,5 @@ trap restart_pager EXIT
 STAGED="/data/restore-input-$$.sqlite"
 docker cp "$BACKUP_FILE" "sbr-sms-whatsapp:$STAGED"
 "${WA[@]}" run --rm --no-deps --user 0 --entrypoint python sms-whatsapp /app/restore_db.py "$STAGED" /data/sms-whatsapp.db
-"${WA[@]}" run --rm --no-deps --user 0 --entrypoint sh sms-whatsapp -c 'chown 10001:10001 /data/sms-whatsapp.db /data/pre-restore-*.sqlite; rm -f "$1"' sh "$STAGED"
+"${WA[@]}" run --rm --no-deps --user 0 --entrypoint python sms-whatsapp -c 'import os,sys; os.unlink(sys.argv[1])' "$STAGED"
 echo 'Database gendannet. Kontrollér Drift & backup; afsendelse er pauset i 30 minutter.'

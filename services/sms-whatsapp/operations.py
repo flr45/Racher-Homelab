@@ -431,7 +431,7 @@ def prune_history(days):
 def housekeeping():
     global _housekeeping_at, _backup_retry_at, _housekeeping_error
     now = time.monotonic()
-    if now - _housekeeping_at < 60:
+    if _housekeeping_at and now - _housekeeping_at < 60:
         return
     _housekeeping_at = now
     try:

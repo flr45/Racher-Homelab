@@ -371,3 +371,14 @@ def test_existing_usb_status_reply_fingerprint_cannot_loop(authorized):
     ingest(p,body='PI OK - temp 40C - disk 35% - RAM 21% - load 0.5 - Docker 3/3 - up 2d5t')
     assert p.deliveries.InboundDecision.query.one().decision=='loop_blocked'
     assert p.base.WhatsAppDelivery.query.count()==0
+
+
+def test_daily_backup_runs_on_first_cycle_with_short_machine_uptime(authorized,tmp_path,monkeypatch):
+    p=authorized
+    monkeypatch.setenv('SMS_WHATSAPP_BACKUP_DIR',str(tmp_path))
+    monkeypatch.setattr(ops,'_housekeeping_at',0)
+    monkeypatch.setattr(ops,'_backup_retry_at',0)
+    monkeypatch.setattr(ops.time,'monotonic',lambda:10.0)
+    ops.housekeeping()
+    assert len(list(tmp_path.glob('*.sqlite')))==1
+    assert ops.setting('last_daily_backup')
