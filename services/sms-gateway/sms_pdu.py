@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -49,8 +50,12 @@ def parse_cmgl_parts(response: str) -> list[DecodedSmsPart]:
             cursor += 1
 
         if pdu_line:
-            parts.append(decode_sms_deliver_pdu(int(match.group("index")), pdu_line))
-        index = max(cursor + 1, index + 1)
+            try:
+                parts.append(decode_sms_deliver_pdu(int(match.group("index")), pdu_line))
+            except (ValueError, IndexError):
+                # A damaged/operator PDU must not block later valid alarms.
+                logging.getLogger("sms-pdu").warning("Ugyldig PDU på SMS-indeks %s; læser de øvrige SMS'er", match.group("index"))
+        index = cursor if cursor < len(lines) and _CMGL_HEADER.match(lines[cursor]) else max(cursor + 1, index + 1)
 
     return parts
 

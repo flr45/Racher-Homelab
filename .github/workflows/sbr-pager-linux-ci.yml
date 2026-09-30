@@ -9,6 +9,10 @@ on:
       - 'compose/sms-gateway/**'
       - 'scripts/sbr-pager-watchdog.py'
       - 'systemd/sbr-pager-watchdog.*'
+      - 'scripts/sbr-pager-boot.sh'
+      - 'scripts/sbr-modem-watchdog.sh'
+      - 'scripts/update-sbr-pager.sh'
+      - 'tests/pager/**'
       - '.github/workflows/sbr-pager-linux-ci.yml'
   push:
     branches:
@@ -20,6 +24,10 @@ on:
       - 'compose/sms-gateway/**'
       - 'scripts/sbr-pager-watchdog.py'
       - 'systemd/sbr-pager-watchdog.*'
+      - 'scripts/sbr-pager-boot.sh'
+      - 'scripts/sbr-modem-watchdog.sh'
+      - 'scripts/update-sbr-pager.sh'
+      - 'tests/pager/**'
       - '.github/workflows/sbr-pager-linux-ci.yml'
   workflow_dispatch:
 
@@ -37,6 +45,16 @@ jobs:
         run: |
           python -m compileall -q services/sms-whatsapp services/sms-gateway
           python -m py_compile scripts/sbr-pager-watchdog.py
+          bash -n scripts/sbr-pager-boot.sh scripts/sbr-modem-watchdog.sh scripts/update-sbr-pager.sh
+          sh -n services/sms-gateway/entrypoint.sh
+
+      - name: Install regression test dependencies
+        run: |
+          python -m pip install -r services/sms-whatsapp/requirements.txt \
+            pyserial==3.5 -r tests/pager/requirements.txt
+
+      - name: Test delivery recovery, UI, USB and Cudy transport
+        run: python -m pytest -q tests/pager
 
       - name: Validate watchdog systemd units
         run: |
@@ -102,6 +120,7 @@ jobs:
           SMS_WHATSAPP_OPENWA_API_KEY: ci-openwa-key
           SMS_WHATSAPP_OPENWA_SESSION_ID: ci-openwa-session
           SMS_GATEWAY_API_TOKEN: ci-sms-gateway-token
+          CUDY_PASSWORD: ci-cudy-password
         run: |
           docker network create backend || true
           docker network create proxy || true
@@ -110,4 +129,7 @@ jobs:
             config --quiet
           docker compose \
             -f compose/sms-gateway/docker-compose.yml \
+            config --quiet
+          docker compose \
+            -f compose/sms-gateway/cudy.yml \
             config --quiet

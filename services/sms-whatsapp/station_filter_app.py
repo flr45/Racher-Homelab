@@ -10,6 +10,7 @@ the same station routing.
 from __future__ import annotations
 
 import os
+import math
 import re
 from datetime import timedelta
 
@@ -129,6 +130,12 @@ def station_for_inbound(inbound: base.InboundMessage) -> str | None:
     station = detect_station(inbound.body)
     if station:
         return station
+
+    linked = events.AlarmEventMessage.query.filter_by(inbound_id=inbound.id).first()
+    if linked:
+        parent = db.session.get(events.AlarmEvent, linked.event_id)
+        if parent and parent.station:
+            return parent.station.upper()
 
     # The modem gateway supplies the exact parent event key for Sending 2.
     # Use it before the time-based fallback so recipient routing matches the
@@ -361,7 +368,7 @@ def update_prealert_delay():
         flash("Delay-tiden skal være et tal.", "error")
         return redirect(request.referrer or url_for("dashboard"))
 
-    if value < 0 or value > 120:
+    if not math.isfinite(value) or value < 0 or value > 120:
         flash("Delay-tiden skal være mellem 0 og 120 sekunder.", "error")
         return redirect(request.referrer or url_for("dashboard"))
 

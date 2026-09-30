@@ -8,6 +8,11 @@ GW_COMPOSE="$APP/compose/sms-gateway/docker-compose.yml"
 
 cd "$APP"
 
+MODEM_DRIVER="$(sed -n 's/^SMS_MODEM_DRIVER=//p' "$ENV" | tail -1 | tr -d '\r\"\047')"
+if [[ "${MODEM_DRIVER:-usb}" == "cudy" ]]; then
+    GW_COMPOSE="$APP/compose/sms-gateway/cudy.yml"
+fi
+
 BIND_IP="$(
     grep '^SMS_WHATSAPP_BIND_IP=' "$ENV"     | tail -1     | cut -d= -f2-
 )"

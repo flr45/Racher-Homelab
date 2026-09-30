@@ -1,3 +1,6 @@
+# Cudy uses LAN; this stack deliberately has no USB device mapping.
+# Reuses the existing project name and persistent sms_gateway_data volume.
+name: sms-gateway
 services:
   sms-gateway:
     build:
@@ -6,12 +9,13 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: sqlite:////data/sms-gateway.db
-      SMS_MODEM_DRIVER: usb
+      SMS_MODEM_DRIVER: cudy
       CUDY_BASE_URL: ${CUDY_BASE_URL:-http://192.168.10.1}
       CUDY_USERNAME: ${CUDY_USERNAME:-admin}
-      CUDY_PASSWORD: ${CUDY_PASSWORD:-}
+      CUDY_PASSWORD: ${CUDY_PASSWORD:?CUDY_PASSWORD must be set for Cudy mode}
+      CUDY_POLL_SECONDS: ${CUDY_POLL_SECONDS:-5}
       CUDY_HTTP_TIMEOUT_SECONDS: ${CUDY_HTTP_TIMEOUT_SECONDS:-15}
-      MODEM_DEVICE: /dev/sbr-sms-modem
+      MODEM_DEVICE: ${CUDY_BASE_URL:-http://192.168.10.1}
       MODEM_BAUDRATE: ${SMS_MODEM_BAUDRATE:-115200}
       MODEM_POLL_SECONDS: ${SMS_MODEM_POLL_SECONDS:-0.5}
       MODEM_STATUS_FILE: /data/modem-status.json
@@ -35,10 +39,6 @@ services:
       RACHER_MONITOR_SMS_TO: ${RACHER_MONITOR_SMS_TO:-}
       SMS_COMMAND_ALLOWED_NUMBERS: ${SMS_COMMAND_ALLOWED_NUMBERS:-}
       SMS_GATEWAY_API_TOKEN: ${SMS_GATEWAY_API_TOKEN:?SMS_GATEWAY_API_TOKEN must be set}
-    devices:
-      - ${SMS_MODEM_HOST_DEVICE:-/dev/serial/by-id/usb-HUAWEI_Technology_HUAWEI_Mobile-if00-port0}:/dev/sbr-sms-modem
-    group_add:
-      - "${DIALOUT_GID:-20}"
     volumes:
       - sms_gateway_data:/data
     # Default remains localhost-only. Set SMS_GATEWAY_BIND_IP to the host's

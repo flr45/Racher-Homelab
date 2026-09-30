@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="da"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#10161f"><title>{{ title }} · SBR Pager</title></head>
+<body><main class="pager-main" id="main-content">
+<header class="page-head"><div><div class="eyebrow">SLAGELSE BRAND OG REDNING</div><h1>{{ title }}</h1><p>{% block subtitle %}{% endblock %}</p></div><div class="header-meta"><span class="live-dot"></span><span id="refresh-label">Opdateret <time id="page-clock"></time></span></div></header>
+{% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ category }}" role="status">{{ message }}</div>{% endfor %}{% endwith %}
+{% block content %}{% endblock %}
+<footer class="page-footer">SBR Pager <span>Alle tider vises i dansk lokal tid.</span></footer>
+</main></body></html>

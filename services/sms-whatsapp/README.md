@@ -1,42 +1,55 @@
-# SMS → WhatsApp Gateway
+# SBR Pager · SMS → WhatsApp
 
-Selvstændigt Racher-Homelab-modul som læser nye indgående SMS'er fra den eksisterende `sms-gateway`, godkender afsenderen mod en administrerbar allowlist og videresender teksten til aktive WhatsApp-modtagere via OpenWA.
+SMS fra godkendte afsendere samles som alarmhændelser og videresendes til
+aktive WhatsApp-modtagere via OpenWA. Stationsvalg og Test opt-in bevares.
 
-## Funktioner
+## Drift
 
-- Flere godkendte SMS-afsendere, administreret i web-UI.
-- Flere WhatsApp-modtagere med aktiv/pause og sletning.
-- Første start springer eksisterende SMS-historik over, så gamle alarmer ikke udsendes.
-- Deduplikering via SMS-gatewayens message-id.
-- Standard-kommandoerne `status`, `server status` og `serverstatus` videresendes ikke.
-- Log over accepterede/afviste SMS'er og WhatsApp-leveringer.
-- Testbesked fra admin-siden.
-- OpenWA-status på dashboardet.
-- Fejl i OpenWA påvirker ikke SMS-modemmet, Vagtbytte eller den eksisterende SMS-kø.
+`SIM800C / Huawei USB → SMS Gateway → vedvarende WhatsApp-kø → OpenWA`
 
-## Dataflow
+Alternativt: `Cudy LT300 LAN → AT-webformular → samme SMS Gateway og kø`.
+Cudy-adapteren er forberedt ud fra den officielle LT300-demo. Den skal
+idriftsættes på den konkrete router/firmware, før USB erstattes. Den modtager
+SMS; udgående SMS er fortsat en USB-funktion.
 
-`Huawei E180 → sms-gateway → sms-whatsapp poller → allowlist → OpenWA → WhatsApp-modtagere`
+## Brugerflade
 
-Polleren bruger den eksisterende `GET /api/messages` med `SMS_GATEWAY_API_TOKEN`. Modemporten åbnes derfor fortsat kun af den eksisterende modem-reader.
+- Overblik med modem, WhatsApp, alarmhændelser, modtagere og leveringskø.
+- Brugere & stationer med almindelige stationsvalg og separat Test opt-in.
+- Alarmhistorik, statistik, kort og hændelsernes Sending 2-tidslinjer.
+- Forbindelser med USB/Cudy-status og en Cudy-test uden netværksændringer.
+- Indstillinger med godkendte SMS-afsendere og pre-alarm ventetid.
+- Tekniske logs er foldet sammen; status opdateres uden at genindlæse formularer.
 
-## OpenWA
+## Leveringssikkerhed
 
-OpenWA skal være netværksmæssigt tilgængelig fra `sbr-sms-whatsapp`. Standard er `http://openwa:2785/api`. API-key sendes i `X-API-Key`, og `SMS_WHATSAPP_OPENWA_SESSION_ID` skal være OpenWA-sessionens id/UUID.
+Alle modtagerjobs gemmes, før modemmet får kvittering. WhatsApp-kald kører i
+baggrunden. Fejl forsøges igen med stigende ventetid; pending jobs genoptages
+efter genstart. Gamle alarmer, pauserede/slettede modtagere og fravalgte
+stationer kontrolleres før et nyt forsøg. OpenWA skal kvittere med besked-id,
+før en levering mærkes sendt. Et netværksbrud efter faktisk afsendelse men før
+kvittering kan stadig give en gentagelse; OpenWA-grænsefladen garanterer ikke
+præcis én levering.
 
-Hvis din eksisterende OpenWA-container (`racher-pager-openwa`) kører i en anden Compose-stack, kan den uden at eksponere API'et offentligt kobles på det fælles backend-netværk:
+Kør én Gunicorn worker, som i Dockerfile. Ingest og køarbejder har separate
+låse, så langsom netværksafsendelse ikke spærrer for modtagelsen.
+`SMS_WHATSAPP_RETRY_WORKER=false` stopper baggrundsarbejderen og bruges kun i
+test/vedligehold. I normal drift skal den være `true`.
+
+## Installation
+
+Se [opdaterings- og Cudy-guide](../../docs/SBR-PAGER-UPDATE.md).
+Programmet bruger eksisterende SQLite- og OpenWA-volumener.
+Admin bindes fortsat til konfigureret localhost/Tailscale-IP; Pagerens
+opstart efter Tailscale styres fortsat af `sbr-pager-boot.service`.
+
+## Test
 
 ```bash
-docker network connect backend racher-pager-openwa
+python -m pip install -r services/sms-whatsapp/requirements.txt pyserial==3.5 -r tests/pager/requirements.txt
+python -m pytest -q tests/pager
 ```
 
-Derefter skal containeren kunne nås på et navn på det netværk. Hvis DNS-navnet `openwa` ikke findes dér, kan `SMS_WHATSAPP_OPENWA_URL` sættes til containerens navn, fx `http://racher-pager-openwa:2785/api`.
-
-## Start
-
-```bash
-cd ~/Racher-Homelab
-docker compose --env-file .env -f compose/sms-whatsapp/compose.yml up -d --build
-```
-
-Admin-UI bindes som standard kun på hostens `127.0.0.1:8091`. Eksponér den via din eksisterende reverse proxy/Tailscale, hvis den skal åbnes fra andre enheder.
+Regressionstests dækker kø/genstart, langsom WhatsApp, deduplikering,
+stationsvalg, sletning, ugyldigt input, dansk tegnsæt og Cudys login/AT-formular.
+Dockerfile indeholder desuden de eksisterende alarm-, modem- og PDU-kontroller.

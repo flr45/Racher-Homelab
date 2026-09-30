@@ -153,7 +153,7 @@ ADMIN_USERS_PAGE = base.BASE_HTML.replace(
       <section class="editor-box danger-zone">
         <div class="danger-layout">
           <div><h3>Slet bruger</h3><div class="danger-text">Brugeren fjernes som modtager samt fra station og alarmfilter. Historiske leveringslogs bevares.</div></div>
-          <form method="post" action="{{ url_for('delete_admin_user', recipient_id=recipient.id) }}" onsubmit="return confirm('Er du sikker på, at {{ recipient.name }} skal slettes?')">
+          <form method="post" action="{{ url_for('delete_admin_user', recipient_id=recipient.id) }}" onsubmit="return confirm('Er du sikker på, at denne bruger skal slettes?')">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn danger small" type="submit">Slet bruger</button>
           </form>

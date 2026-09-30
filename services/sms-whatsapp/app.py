@@ -6,6 +6,8 @@ import json
 import os
 import re
 import secrets
+import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -13,18 +15,25 @@ from functools import wraps
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template_string, request, session, url_for
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.exc import IntegrityError
 
 PHONE_PATTERN = re.compile(r"^\+?[1-9]\d{6,14}$")
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:////data/sms-whatsapp.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite:"):
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"connect_args": {"timeout": 30}}
 app.config["SECRET_KEY"] = os.getenv("SMS_WHATSAPP_SESSION_SECRET", "") or secrets.token_hex(32)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.getenv("SMS_WHATSAPP_COOKIE_SECURE", "false").lower() == "true"
 db = SQLAlchemy(app)
+ingest_lock = threading.RLock()
+_status_lock = threading.Lock()
+_status_cache = (0.0, {})
 
 
 class AllowedSender(db.Model):
@@ -69,6 +78,8 @@ def utcnow() -> datetime:
 
 
 def normalize_phone(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Ugyldigt telefonnummer")
     phone = re.sub(r"[\s().-]", "", value or "")
     if phone.startswith("00"):
         phone = "+" + phone[2:]
@@ -108,7 +119,7 @@ def admin_username() -> str:
 
 def password_matches(candidate: str) -> bool:
     expected = os.getenv("SMS_WHATSAPP_ADMIN_PASSWORD", "")
-    return bool(expected) and hmac.compare_digest(candidate, expected)
+    return bool(expected) and hmac.compare_digest(candidate.encode("utf-8"), expected.encode("utf-8"))
 
 
 def logged_in() -> bool:
@@ -136,7 +147,7 @@ def csrf_token() -> str:
 def check_csrf() -> None:
     supplied = request.form.get("csrf_token", "")
     expected = session.get("csrf_token", "")
-    if not supplied or not expected or not hmac.compare_digest(supplied, expected):
+    if not supplied or not expected or not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
         abort(400, "Ugyldig CSRF-token")
 
 
@@ -196,13 +207,25 @@ def send_whatsapp(phone: str, message: str) -> str | None:
         method="POST",
         payload={"chatId": phone_to_chat_id(phone), "text": body[:4096]},
     )
-    return (result or {}).get("messageId")
+    if not isinstance(result, dict) or not result.get("messageId"):
+        raise RuntimeError("OpenWA kvitterede ikke med et besked-id")
+    return str(result["messageId"])
 
 
 def openwa_status() -> dict:
+    global _status_cache
+    with _status_lock:
+        if time.monotonic() - _status_cache[0] < 10:
+            return dict(_status_cache[1])
+        result = _openwa_status_uncached()
+        _status_cache = (time.monotonic(), result)
+        return dict(result)
+
+
+def _openwa_status_uncached() -> dict:
     try:
         session_id = openwa_session_id()
-        sessions = openwa_request("sessions")
+        sessions = openwa_request("sessions", timeout=3)
         if not isinstance(sessions, list):
             return {"state": "unknown", "detail": "Uventet svar fra OpenWA"}
         match = next((item for item in sessions if str(item.get("id")) == session_id), None)
@@ -332,7 +355,7 @@ def health():
         db.session.rollback()
         db_state = "offline"
     wa = openwa_status()
-    return jsonify(status="ok" if db_state == "online" else "degraded", database=db_state, openwa=wa)
+    return jsonify(status="ok" if db_state == "online" else "degraded", database=db_state, openwa=wa), (200 if db_state == "online" else 503)
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -341,7 +364,7 @@ def login():
         check_csrf()
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        if hmac.compare_digest(username, admin_username()) and password_matches(password):
+        if hmac.compare_digest(username.encode("utf-8"), admin_username().encode("utf-8")) and password_matches(password):
             session.clear()
             session["admin_authenticated"] = True
             session["csrf_token"] = secrets.token_urlsafe(32)
@@ -493,11 +516,21 @@ def test_message():
 
 @app.post("/api/incoming")
 def incoming():
+    with ingest_lock:
+        return _incoming_locked()
+
+
+def _incoming_locked():
     require_ingest_token()
     payload = request.get_json(force=True, silent=False) or {}
+    if not isinstance(payload, dict):
+        return jsonify(error="Der forventes et JSON-objekt"), 400
     try:
         sender = normalize_phone(payload.get("sender", ""))
-        body = str(payload.get("body", "")).strip()
+        body = payload.get("body", "")
+        if not isinstance(body, str):
+            raise ValueError("SMS-teksten skal være tekst")
+        body = body.strip()
         if not body:
             raise ValueError("SMS-teksten er tom")
         received_at = parse_received_at(payload.get("receivedAt"))
@@ -507,6 +540,10 @@ def incoming():
 
     existing = InboundMessage.query.filter_by(source_id=source_id).first()
     if existing:
+        # A crash may have happened after recording the SMS and before creating
+        # its outbox. The delivery implementation is idempotent.
+        if existing.accepted:
+            deliver_inbound(existing)
         return jsonify(id=existing.id, duplicate=True, accepted=existing.accepted), 200
 
     allowed = AllowedSender.query.filter_by(phone=sender, active=True).first() is not None
@@ -518,14 +555,29 @@ def incoming():
         accepted=allowed,
     )
     db.session.add(inbound)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        existing = InboundMessage.query.filter_by(source_id=source_id).first()
+        if existing is None:
+            raise
+        if existing.accepted:
+            deliver_inbound(existing)
+        return jsonify(id=existing.id, duplicate=True, accepted=existing.accepted), 200
 
     if not allowed:
         return jsonify(id=inbound.id, accepted=False, sent=0, failed=0), 202
 
-    sent, failed = deliver_inbound(inbound)
-    return jsonify(id=inbound.id, accepted=bool(inbound.accepted), sent=sent, failed=failed), 201
+    sent, _ = deliver_inbound(inbound)
+    queued = WhatsAppDelivery.query.filter(WhatsAppDelivery.inbound_id == inbound.id, WhatsAppDelivery.status.in_(("pending", "retrying", "sending"))).count()
+    failed = WhatsAppDelivery.query.filter_by(inbound_id=inbound.id, status="failed").count()
+    return jsonify(id=inbound.id, accepted=bool(inbound.accepted), sent=sent, queued=queued, failed=failed), 201
 
 
 with app.app_context():
+    if db.engine.dialect.name == "sqlite":
+        @event.listens_for(db.engine, "connect")
+        def configure_sqlite(connection, _record):
+            connection.execute("PRAGMA foreign_keys=ON")
     db.create_all()

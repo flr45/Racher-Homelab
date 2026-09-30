@@ -100,14 +100,16 @@ fi
 
 HOST_DEVICE="$(host_modem_device || true)"
 
-if [[ -z "$HOST_DEVICE" ]]; then
-    log "⚠️ Kunne ikke fastslå host-enheden for /dev/sbr-sms-modem. Genstarter ikke Gateway."
-    exit 0
-fi
-
-if [[ ! -e "$HOST_DEVICE" ]]; then
-    log "⚠️ SMS-modem-enheden mangler på hosten: $HOST_DEVICE. Genstarter ikke Gateway."
-    exit 0
+MODEM_DRIVER="$(env_value SMS_MODEM_DRIVER | tr -d '\r\"\047')"
+if [[ "${MODEM_DRIVER:-usb}" != "cudy" ]]; then
+    if [[ -z "$HOST_DEVICE" ]]; then
+        log "Kunne ikke fastslå USB-enheden. Genstarter ikke Gateway."
+        exit 0
+    fi
+    if [[ ! -e "$HOST_DEVICE" ]]; then
+        log "SMS-modem-enheden mangler på hosten: $HOST_DEVICE. Genstarter ikke Gateway."
+        exit 0
+    fi
 fi
 
 COOLDOWN="$(env_value SBR_MODEM_WATCHDOG_RECOVERY_COOLDOWN_SECONDS)"
@@ -138,7 +140,7 @@ fi
 
 printf '%s\n' "$NOW" > "$LAST_RECOVERY_FILE"
 
-log "⚠️ Modem-enheden findes, men health er stadig nede. Genstarter SMS Gateway én gang."
+log "Modem-health er stadig nede. Genstarter SMS Gateway én gang (driver=${MODEM_DRIVER:-usb})."
 
 if ! docker restart "$CONTAINER" >/dev/null; then
     log "❌ Kunne ikke genstarte $CONTAINER"

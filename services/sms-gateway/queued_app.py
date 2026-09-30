@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import time
+import threading
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,14 @@ log = logging.getLogger("sms-gateway-outbox")
 # Re-export the public helpers used by build checks and maintenance commands.
 detect_station_code = base.detect_station_code
 normalize_phone = base.normalize_phone
+_ingest_lock = threading.RLock()
+
+
+class SourceReceipt(db.Model):
+    """Remember modem IDs without changing the existing inbound table."""
+    id = db.Column(db.Integer, primary_key=True)
+    source_id = db.Column(db.String(128), nullable=False, unique=True, index=True)
+    inbound_id = db.Column(db.Integer, db.ForeignKey("inbound_message.id"), nullable=False)
 
 
 class OutboundMessage(db.Model):
@@ -77,6 +86,8 @@ def utcnow():
 
 def enqueue_sms(recipient: str, body: str, delivery_id: int | None = None):
     recipient = base.normalize_phone(recipient)
+    if not isinstance(body, str):
+        raise ValueError("SMS-teksten skal være tekst")
     body = (body or "").strip()
     if not body:
         raise ValueError("SMS-teksten er tom")
@@ -348,6 +359,39 @@ _original_process_incoming = base.process_incoming
 
 
 def process_incoming(*args, **kwargs):
+    with _ingest_lock:
+        return _process_incoming_locked(*args, **kwargs)
+
+
+def _process_incoming_locked(*args, **kwargs):
+    body = kwargs.get("body", args[1] if len(args) >= 2 else "")
+    if not isinstance(body, str):
+        raise ValueError("SMS-teksten skal være tekst")
+    source_id = kwargs.get("source_message_id", args[3] if len(args) >= 4 else None)
+    source_id = str(source_id).strip()[:128] if source_id else None
+    if source_id:
+        receipt = SourceReceipt.query.filter_by(source_id=source_id).first()
+        if receipt:
+            return db.session.get(base.InboundMessage, receipt.inbound_id), 0, {"created": False, "duplicate": True, "disabled": os.getenv("VAGTBYTTE_FORWARD_ENABLED", "true").lower() not in {"1", "true", "yes", "on"}}
+        # Recover the gap between the legacy application's commit and saving
+        # the receipt. Only modem messages with an explicit timestamp qualify.
+        received = kwargs.get("received_at", args[2] if len(args) >= 3 else None)
+        if received:
+            sender = base.normalize_phone(kwargs.get("sender", args[0] if args else ""))
+            body = kwargs.get("body", args[1] if len(args) >= 2 else "").strip()
+            old = base.InboundMessage.query.filter_by(sender=sender, body=body, received_at=base.parse_received_at(received)).first()
+            if old:
+                db.session.add(SourceReceipt(source_id=source_id, inbound_id=old.id))
+                db.session.commit()
+                return old, 0, {"created": False, "duplicate": True, "disabled": os.getenv("VAGTBYTTE_FORWARD_ENABLED", "true").lower() not in {"1", "true", "yes", "on"}}
+    result = _process_incoming_original(*args, **kwargs)
+    if source_id:
+        db.session.add(SourceReceipt(source_id=source_id, inbound_id=result[0].id))
+        db.session.commit()
+    return result
+
+
+def _process_incoming_original(*args, **kwargs):
     sender = kwargs.get("sender", args[0] if len(args) >= 1 else "")
     body = kwargs.get("body", args[1] if len(args) >= 2 else "")
     received_at = kwargs.get("received_at", args[2] if len(args) >= 3 else None)
@@ -428,7 +472,11 @@ base.process_incoming = process_incoming
 
 @app.post("/api/outgoing")
 def outgoing():
+    if os.getenv("SMS_MODEM_DRIVER", "usb") == "cudy":
+        return jsonify(error="Cudy-adapteren understøtter SMS-modtagelse; vælg USB til udgående SMS"), 409
     payload = request.get_json(force=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Der forventes et JSON-objekt"), 400
     try:
         message = enqueue_sms(
             payload.get("recipient", ""),
@@ -441,6 +489,8 @@ def outgoing():
 
 @app.post("/api/outgoing/claim")
 def claim_outgoing():
+    if os.getenv("SMS_MODEM_DRIVER", "usb") == "cudy":
+        return "", 204
     message = claim_outbound_message()
     if message is None:
         return "", 204
@@ -473,6 +523,8 @@ def outgoing_status(message_id):
 def outgoing_complete(message_id):
     message = db.get_or_404(OutboundMessage, message_id)
     payload = request.get_json(force=True)
+    if not isinstance(payload, dict) or (payload.get("error") is not None and not isinstance(payload["error"], str)) or not isinstance(payload.get("retry", False), bool):
+        return jsonify(error="Ugyldigt JSON-objekt, fejltekst eller retry-værdi"), 400
     status = str(payload.get("status", "")).lower()
     if status not in {"sent", "failed"}:
         return jsonify(error="Status skal være sent eller failed"), 400
@@ -509,6 +561,8 @@ def claim_command():
 def command_complete(command_id):
     command = db.get_or_404(CommandRequest, command_id)
     payload = request.get_json(force=True)
+    if not isinstance(payload, dict) or (payload.get("error") is not None and not isinstance(payload["error"], str)) or not isinstance(payload.get("retry", False), bool):
+        return jsonify(error="Ugyldigt JSON-objekt, fejltekst eller retry-værdi"), 400
     status = str(payload.get("status", "")).lower()
     if status not in {"done", "failed"}:
         return jsonify(error="Status skal være done eller failed"), 400
@@ -554,6 +608,17 @@ def health_with_outbox():
 
 
 app.view_functions["health"] = health_with_outbox
+
+
+@app.post("/api/cudy/probe")
+def cudy_probe():
+    from cudy_client import CudyClient, CudyError
+    if not os.getenv("CUDY_PASSWORD", ""):
+        return jsonify(error="CUDY_PASSWORD mangler"), 400
+    try:
+        return jsonify(CudyClient(timeout=4).probe())
+    except CudyError as exc:
+        return jsonify(error=str(exc)), 502
 
 
 with app.app_context():

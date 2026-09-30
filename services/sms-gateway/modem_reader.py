@@ -84,6 +84,7 @@ def write_status(**values):
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
     current.update(values, updated_at=utc_iso(), device=MODEM_DEVICE)
+    current.setdefault("transport", os.getenv("SMS_MODEM_DRIVER", "usb"))
     STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
     temporary = STATUS_FILE.with_suffix(".tmp")
     temporary.write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
