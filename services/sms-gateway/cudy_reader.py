@@ -78,8 +78,8 @@ def run():
                     except Exception:
                         log.exception("SMS fra Cudy beholdes til et nyt importforsøg")
                         reader.write_status(state="degraded", last_error="SMS kunne ikke importeres; den beholdes på routeren")
-                # Stock AT form cannot perform interactive CMGS sending. Keep
-                # outgoing jobs pending, instead of claiming or falsely sending.
+                # CMGS sending through the stock AT form is not yet verified.
+                # Keep outgoing jobs pending instead of claiming success.
                 time.sleep(POLL_SECONDS)
         except Exception as exc:
             log.error("Cudy-forbindelsen fejlede: %s", exc)
