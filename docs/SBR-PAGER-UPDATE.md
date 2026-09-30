@@ -38,6 +38,71 @@ Efter opdateringen vises modem, WhatsApp og kø på Overblik. En almindelig
 testalarm skal behandles gennem det eksisterende Test opt-in; scriptet sender
 ingen beskeder. `Send testbesked` i UI er en brugerhandling.
 
+## Den planlagte drift: LT300 til internet og SMS
+
+LT300 skal være primær forbindelse for **både internet og SMS**. Serverens
+Ethernet-kabel tilsluttes routerens LAN-port. Serverens LAN-forbindelse sættes
+til DHCP, så IP-adresse, standardgateway og DNS kommer fra LT300. Docker,
+OpenWA og Tailscale bruger derefter serverens normale internetforbindelse;
+programmet skal ikke selv konfigurere eller genstarte routerens netværk.
+
+Cudys officielle emulator viser LAN-adressen `192.168.10.1` og DHCP med samme
+standardgateway/DNS. Brug den faktiske adresse på din router. Opret gerne en
+DHCP-reservation til serveren, så dens LAN-adresse er stabil. To netkort eller
+Wi-Fi samtidigt kan give en anden foretrukken standardrute; kontrollér ruten,
+før den gamle forbindelse frakobles.
+
+Kør disse læsekontroller på serveren efter tilslutning:
+
+```bash
+ip -br addr
+ip route
+ip route get 1.1.1.1
+resolvectl status
+tailscale status
+```
+
+Kontrollér desuden, at serveren og OpenWA kan nå internettet, at Tailscale er
+forbundet, og at en reel WhatsApp-test leveres. SMS-forbindelsestesten viser
+SIM og mobilregistrering; den beviser ikke i sig selv, at internet virker.
+Routerens AT-adapter sender ingen CFUN-, radio-reset- eller APN-kommandoer,
+så SMS-recovery ikke bevidst afbryder internetforbindelsen.
+
+USB er **midlertidig, manuel backup under indkøringen**, ikke den permanente
+primære løsning. Behold USB-konfigurationen, indtil LT300 har bestået korte
+og delte SMS'er, WhatsApp-levering og genstartstest. Med ét SIM kræver skift
+mellem router og USB, at SIM-kortet flyttes. Automatisk failover ville kræve
+separate SIM-kort/numre og en særskilt plan for alarmleveringen.
+
+## Videresend fra alle telefonnumre
+
+Under **Indstillinger → Afsenderfilter** findes afkrydsningsboksen
+**Videresend SMS fra alle telefonnumre**. Ændringen gemmes automatisk og
+bevares efter genstart. Listen med godkendte numre bruges igen, når feltet
+slås fra. Den eksisterende liste slettes ikke.
+
+Indstillingen åbner kun afsendergodkendelsen. Stationsvalg, Test-opt-in,
+modemstøjsfilter og de særskilte SMS-statuskommandoer gælder fortsat.
+Almindelig SMS uden stationskode sendes til aktive modtagere med
+**Alle stationer**. Tidligere afviste beskeder bliver ikke genudsendt.
+Både USB og LT300 bruger denne samme indstilling.
+
+## Udgående SMS via LT300: afventer firmwaretest
+
+Målet er, at LT300 også sender udgående SMS og status-svar. Det er endnu ikke
+implementeret eller bekræftet via routerens firmware. Cudys guide beskriver
+SMS-funktioner, men den offentlige LT300-emulator dokumenterer ikke en
+anvendelig grænseflade til afsendelse fra vores program. En AT-webformular
+beviser heller ikke, at en interaktiv CMGS-afsendelse kan gennemføres.
+
+Når routeren er tilgængelig, skal model/firmware registreres, og en eventuel
+indbygget SMS-afsendelse prøves manuelt. Derefter kan den faktiske
+HTTP-/AT-afsendelsesmetode implementeres og prøves med dansk tegnsæt,
+korte/lange beskeder, en reel modemkvittering og afsendelse uden internet.
+Programmet må først markere en SMS som sendt ved bekræftet modemkvittering.
+Indtil da afviser Cudy-driveren nye udgående SMS tydeligt og beholder de gamle
+USB-jobs. USB kan vælges manuelt til afsendelse under indkøringen.
+
 ## Forbered Cudy uden at skifte fra USB
 
 Cudy dokumenterer SMS og AT-kommandoer i

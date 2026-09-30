@@ -31,6 +31,7 @@ _STATION_RE = re.compile(r"\(([ASLKRB])\)", re.IGNORECASE)
 _TEST_RE = re.compile(r"(?<!\w)test(?!\w)", re.IGNORECASE)
 _SENDING_2_RE = re.compile(r"\bsending\s*2\b", re.IGNORECASE)
 PREALERT_DELAY_KEY = "prealert_delay_seconds"
+ACCEPT_ALL_SENDERS_KEY = "accept_all_sms_senders"
 
 
 class RecipientStationFilter(db.Model):
@@ -60,6 +61,36 @@ class PagerRuntimeSetting(db.Model):
         default=base.utcnow,
         onupdate=base.utcnow,
     )
+
+
+def accept_all_sms_senders() -> bool:
+    row = PagerRuntimeSetting.query.filter_by(key=ACCEPT_ALL_SENDERS_KEY).first()
+    return row is not None and row.value == "true"
+
+
+def sms_sender_allowed(sender: str) -> bool:
+    return accept_all_sms_senders() or base.AllowedSender.query.filter_by(phone=sender, active=True).first() is not None
+
+
+# The base view resolves this helper at request time. The default remains the
+# existing allowlist until the administrator explicitly enables the checkbox.
+base.sms_sender_allowed = sms_sender_allowed
+
+
+@app.post("/indstillinger/afsenderfilter")
+@base.login_required
+def update_sender_filter():
+    base.check_csrf()
+    enabled = request.form.get("accept_all", "") == "1"
+    with base.ingest_lock:
+        row = PagerRuntimeSetting.query.filter_by(key=ACCEPT_ALL_SENDERS_KEY).first()
+        if row is None:
+            row = PagerRuntimeSetting(key=ACCEPT_ALL_SENDERS_KEY, value="false")
+            db.session.add(row)
+        row.value = "true" if enabled else "false"
+        db.session.commit()
+    flash("SMS fra alle telefonnumre videresendes nu." if enabled else "Kun godkendte SMS-afsendere videresendes nu.")
+    return redirect(url_for("settings_page"))
 
 
 def _default_prealert_delay_seconds() -> float:

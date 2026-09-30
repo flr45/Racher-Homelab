@@ -247,6 +247,10 @@ def require_ingest_token() -> None:
         abort(401)
 
 
+def sms_sender_allowed(sender: str) -> bool:
+    return AllowedSender.query.filter_by(phone=sender, active=True).first() is not None
+
+
 def deliver_inbound(inbound: InboundMessage) -> tuple[int, int]:
     recipients = Recipient.query.filter_by(active=True).order_by(Recipient.name).all()
     sent = 0
@@ -546,7 +550,7 @@ def _incoming_locked():
             deliver_inbound(existing)
         return jsonify(id=existing.id, duplicate=True, accepted=existing.accepted), 200
 
-    allowed = AllowedSender.query.filter_by(phone=sender, active=True).first() is not None
+    allowed = sms_sender_allowed(sender)
     inbound = InboundMessage(
         source_id=source_id,
         sender=sender,

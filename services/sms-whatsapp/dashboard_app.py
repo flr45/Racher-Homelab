@@ -83,6 +83,7 @@ app.view_functions["dashboard"] = dashboard
 @base.login_required
 def settings_page():
     return render_template("settings.html", title="Indstillinger", delay=stations.prealert_delay_seconds(),
+                           accept_all=stations.accept_all_sms_senders(),
                            senders=base.AllowedSender.query.order_by(base.AllowedSender.name).all())
 
 

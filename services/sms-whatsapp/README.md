@@ -53,3 +53,11 @@ python -m pytest -q tests/pager
 Regressionstests dækker kø/genstart, langsom WhatsApp, deduplikering,
 stationsvalg, sletning, ugyldigt input, dansk tegnsæt og Cudys login/AT-formular.
 Dockerfile indeholder desuden de eksisterende alarm-, modem- og PDU-kontroller.
+
+### Afsenderfilter
+
+Indstillinger har en afkrydsningsboks til at videresende SMS fra alle
+telefonnumre. Valget gemmes i den eksisterende runtime-indstillingstabel og
+bevares efter genstart. Slå den fra for at bruge listen med godkendte numre
+igen. Stationsvalg, Test-opt-in og modemstøjsfilter gælder fortsat; tidligere
+afviste SMS genudsendes ikke. API-token og administratorlogin kræves stadig.
