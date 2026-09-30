@@ -12,8 +12,10 @@ Kør på **racherserver**, ikke racher-pi2:
 ```bash
 cd /opt/SBR-Pager-Gateway
 git status --short
+git remote set-branches --add origin codex/sms-whatsapp-review-cudy
 git fetch origin codex/sms-whatsapp-review-cudy
 git switch codex/sms-whatsapp-review-cudy
+git merge --ff-only origin/codex/sms-whatsapp-review-cudy
 bash scripts/update-sbr-pager.sh
 ```
 

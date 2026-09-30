@@ -95,7 +95,7 @@ check_health() {
   docker exec racher-sms-gateway python -c 'import json,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=6)); assert d["gateway"]["database"] == "online" and d["modem"]["state"] == "online"' >/dev/null 2>&1
 }
 READY=false
-for attempt in $(seq 1 18); do
+for ((attempt = 0; attempt < 18; attempt++)); do
   if check_health; then READY=true; break; fi
   sleep 5
 done

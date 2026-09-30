@@ -25,14 +25,14 @@ env_value() {
 }
 
 check_modem() {
-    python3 - <<'PY'
+    python3 - "$HEALTH_URL" <<'PY'
 import json
 import sys
 import urllib.request
 
 try:
     with urllib.request.urlopen(
-        "http://127.0.0.1:8090/health",
+        sys.argv[1],
         timeout=6,
     ) as response:
         data = json.load(response)
