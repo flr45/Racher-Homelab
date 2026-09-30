@@ -20,6 +20,7 @@ os.environ.update(DATABASE_URL="sqlite:///" + TEMP.name + "/gateway.db",
                   SMS_GATEWAY_API_TOKEN="test-gateway", VAGTBYTTE_FORWARD_ENABLED="false",
                   GATEWAY_STATUS_FILE=TEMP.name + "/gateway-status.json",
                   MODEM_STATUS_FILE=TEMP.name + "/modem-status.json", RACHER_MONITOR_SMS_TO="+4512345678")
+os.environ["SMS_MULTIPART_STATUS_FILE"] = TEMP.name + "/multipart-status.json"
 sys.path.insert(0, str(ROOT / "services/sms-gateway"))
 spec = importlib.util.spec_from_file_location("base_app", ROOT / "services/sms-gateway/app.py")
 gateway_base = importlib.util.module_from_spec(spec)

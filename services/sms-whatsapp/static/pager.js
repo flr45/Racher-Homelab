@@ -63,3 +63,8 @@ if (fullscreenButton) fullscreenButton.addEventListener('click', async () => {
   catch { fullscreenButton.textContent = 'Fuld skærm er ikke tilgængelig'; }
 });
 if (document.querySelector('[data-display-refresh]')) setTimeout(() => window.location.reload(), 30000);
+
+const menuToggle=document.getElementById('menu-toggle');
+if(menuToggle)menuToggle.addEventListener('click',()=>{
+ const sidebar=document.querySelector('.pager-sidebar');const open=sidebar.classList.toggle('menu-open');menuToggle.setAttribute('aria-expanded',String(open));menuToggle.textContent=open?'Luk menu ×':'Menu ☰';
+});

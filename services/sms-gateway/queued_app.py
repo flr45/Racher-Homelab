@@ -623,3 +623,9 @@ def cudy_probe():
 
 with app.app_context():
     db.create_all()
+
+
+@app.get("/api/multipart")
+def multipart_status():
+    from multipart_monitor import read_status
+    return jsonify(read_status())

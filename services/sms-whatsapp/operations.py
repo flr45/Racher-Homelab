@@ -22,7 +22,7 @@ import diagnostics
 
 app, base, db = delivery.app, delivery.base, delivery.db
 log = logging.getLogger("sbr-pager-operations")
-VERSION = "2026.10-operations.1"
+VERSION = "2026.10-operations.2"
 BOOTED_AT = base.utcnow()
 try:
     BUILD_AT = base.parse_received_at(json.loads(Path(__file__).with_name("build_info.json").read_text())["built_at"])

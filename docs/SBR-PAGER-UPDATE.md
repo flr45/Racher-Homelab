@@ -295,3 +295,20 @@ Scriptet pauser Pager-watchdog og stopper Pager før filskift. OpenWA og SMS Gat
 | LT300-status | SIM, signal og registreret mobilnet vises, når Gateway faktisk leverer dem. Firmware og fysisk modtagelse skal stadig verificeres |
 
 Udgående SMS via LT300 er fortsat en hardwareafhængig opgave. Den eksisterende adapter er modtagelse alene, og der er ikke tilføjet en uverificeret afsendelseskommando. USB-afsendelse og statusresponder bevares under indkøringen.
+
+### Modtagere, delte SMS’er og daglig rapport
+
+- **Modtageroversigt:** matrix over stationsvalg og aktiv-status. Markér op til 100 modtagere, vælg stationer og bekræft samlet erstatning af deres stationsvalg. Alle almindelige stationer inkluderer fortsat ikke Test. Ændringen logges; telefonnumre og aktiv-status bevares.
+- **Modtagerspecifik fejlhistorik:** fejl og målte forsøg de seneste syv dage samt aktuelle tilbageholdte, fejlede og genforsøgte jobs pr. nummer. Åbn det enkelte nummer for de seneste 100 leveringer og beskedernes detaljer. Historiske forsøg uden den nye måling tælles ikke som målte forsøg.
+- **Delte SMS’er:** faktisk PDU-kontrol fra den aktive USB- eller LT300-reader viser sete og manglende delnumre, ventetid og afslutning. En forsvundet ufuldstændig gruppe markeres særskilt. Status er forældet efter to minutter; højst 100 grupper fra det seneste døgn beholdes. Overvågningsfilen indeholder hverken beskedtekst eller telefonnumre og ændrer ikke modtagelse eller SIM-kvittering. Åbn den fra Drift & backup.
+- **Driftsrapport:** SMS’er, afvisninger, prøvetilstand, OpenWA-kvitteringer og målte leveringsfejl pr. dansk kalenderdag. Gennemsnit for behandling, køventetid og OpenWA-svartid gør den største fase synlig. Samlet tid måles fra SMS-tidsstemplet; et tidsstempel i fremtiden vises som ukendt. OpenWA-svartid er ikke en kvittering fra modtagerens telefon. Køventetid ved genforsøg omfatter tiden siden behandlingen. Aktuel kø-/backupstatus markeres som aktuel, også på tidligere datoer.
+
+### Prøvegendannelse, mobilmenu og indkøring
+
+**Backupkontrol** afprøver en valgt SQLite-/konfigurationsbackup i en separat midlertidig database med samme gendannelsesfunktion som serverens fulde restore. Kontrollen validerer skema, integritet, fremmednøgler, opsætning og annullering af gamle afsendelsesjobs. Driftsdatabasen og dens kø røres ikke. Seneste 30 resultater vises. Leveringsarbejderen udfører kontrollen ugentligt efter en vellykket dagsbackup; en fejl kan genforsøges tidligst næste dag. Filerne skal fortsat kopieres til en anden disk.
+
+Mobilvisningen har en sammenklappelig menu og genveje til enkeltpersonstest, fejl og drift. Beskedhistorikkens seneste søgefiltre huskes i browserens login-session; **Nulstil** rydder dem. En anden browser har egne filtre.
+
+**Indkøring** har separate, manuelt udfyldte LT300- og USB-forløb med 12 kontrolpunkter: backup, internet/LAN, modem, kort og delt SMS, stationsvalg, WhatsApp, genstart, afbrudt forbindelse, USB-skift, udgående SMS og normal drift. Gem resultat og noter efter den fysiske test. Bestået kræver en særskilt bekræftelse og gemmes i ændringsloggen; siden sender ingen beskeder. LT300-afsendelse kan ikke markeres bestået, før en understøttet afsendelsesmetode er implementeret og fysisk verificeret.
+
+De nye tabeller til forsøgsmålinger, backupkontrol og indkøringsresultater er additive. En fuld restore kræver en backup med det aktuelle databaseskema; tidligere konfigurationsbackups kan stadig bruges til opsætningsgendannelse.

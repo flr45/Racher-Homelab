@@ -13,7 +13,7 @@ COPY sitecustomize.py /usr/local/lib/python3.12/site-packages/sitecustomize.py
 COPY app.py base_app.py
 COPY queued_app.py app.py
 COPY modem_reader.py modem_reader_sbr.py gsm0338.py sms_pdu.py privacy_filter.py entrypoint.sh ./
-COPY cudy_client.py cudy_reader.py ./
+COPY cudy_client.py cudy_reader.py multipart_monitor.py ./
 RUN python -m py_compile cudy_client.py cudy_reader.py
 RUN python -m py_compile app.py base_app.py modem_reader.py modem_reader_sbr.py gsm0338.py sms_pdu.py privacy_filter.py
 RUN sh -n entrypoint.sh

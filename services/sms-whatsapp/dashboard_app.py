@@ -208,6 +208,8 @@ def guarded_group_test():
     return _original_group_test()
 app.view_functions["test_message"] = guarded_group_test
 
+import observability
+
 # No pending job may run before operational controls and crash recovery.
 with app.app_context():
     operations.recover_interrupted_alarms()

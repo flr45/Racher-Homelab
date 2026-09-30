@@ -1,6 +1,6 @@
 {% extends 'layout.html' %}
 {% block subtitle %}Driftsvalg, gamle alarmer og sikkerhedskopier samlet ét sted.{% endblock %}
-{% block content %}
+{% block content %}<section class="card"><div class="action-row"><a class="btn" href="{{ url_for('daily_report') }}">Dagens driftsrapport</a><a class="btn" href="{{ url_for('backup_checks') }}">Prøvegendannelse</a><a class="btn" href="{{ url_for('multipart_page') }}">Delte SMS’er</a><a class="btn" href="{{ url_for('commissioning_page') }}">Indkøring af LT300 / USB</a></div></section>
 <div class="settings-grid">
 <section class="card"><h2>Driftstilstand</h2><p class="help">Vedligeholdelse gemmer nye SMS’er i køen og pauser al afsendelse. Prøvetilstand gemmer nye SMS’er og de beregnede modtagere uden at oprette afsendelsesjobs. Prøvebeskeder udsendes aldrig automatisk bagefter. Begge tilstande udløber automatisk.</p>
 <form method="post" action="{{ url_for('operation_controls') }}" class="form-stack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

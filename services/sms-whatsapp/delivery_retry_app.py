@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 from functools import wraps
@@ -212,12 +213,23 @@ def attempt_delivery(
     delivery.status = "sending"
     delivery.attempted_at = base.utcnow()
     db.session.commit()
+    measured_at, measured_start = base.utcnow(), time.monotonic()
+    def measured(success, elapsed):
+        recorder = globals().get("operations_measure")
+        if recorder:
+            try:
+                recorder(delivery, inbound, measured_at, elapsed, success)
+            except Exception:
+                db.session.rollback()
+                log.exception("Kunne ikke gemme tidsmåling; leveringsstatus er allerede gemt")
     try:
         formatter = globals().get("operations_body", lambda row: row.body)
         message_id = base.send_whatsapp(delivery.recipient_phone, formatter(inbound))
     except Exception as exc:  # noqa: BLE001
+        elapsed = time.monotonic() - measured_start
         _queue_failure(delivery, exc)
         db.session.commit()
+        measured(False, elapsed)
         log.warning(
             "WhatsApp-levering %s til %s fejlede (status=%s): %s",
             delivery.id,
@@ -226,8 +238,10 @@ def attempt_delivery(
             exc,
         )
         return False
+    elapsed = time.monotonic() - measured_start
     _mark_sent(delivery, message_id, state)
     db.session.commit()
+    measured(True, elapsed)
     # A statistics failure after successful delivery must never resend an SMS.
     try:
         if delivery.inbound_id is not None:
