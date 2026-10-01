@@ -110,7 +110,7 @@ def test_history_filters_remember_reset_and_stay_per_session(client,p):
     assert client.get('/beskeder?q=needle&station=A').status_code==200
     response=client.get('/beskeder');assert response.status_code==302 and 'needle' in response.location
     other=p.app.test_client()
-    with other.session_transaction() as s:s['admin_authenticated']=True
+    with other.session_transaction() as s:s.update(admin_authenticated=True,auth_kind='environment',auth_fingerprint=p.operator_accounts.environment_fingerprint())
     assert other.get('/beskeder').status_code==200
     assert client.get('/beskeder?reset=1').status_code==302
     assert client.get('/beskeder').status_code==200

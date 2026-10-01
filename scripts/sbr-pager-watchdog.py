@@ -309,6 +309,8 @@ def compose_up(component: str, *, force_recreate: bool = False) -> str:
         "-d",
         "--no-deps",
     ]
+    if component != "gateway" and os.getenv("SMS_WHATSAPP_OFFSITE_MOUNT", "false").lower() == "true":
+        command[6:6] = ["-f", "compose/sms-whatsapp/offsite-backup.yml"]
     if force_recreate:
         command.append("--force-recreate")
     command.append(service)

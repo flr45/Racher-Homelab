@@ -18,6 +18,10 @@ case "$DRIVER" in
 esac
 WA_COMPOSE="$APP_DIR/compose/sms-whatsapp/compose.yml"
 WA=(docker compose --env-file "$ENV_FILE" -f "$WA_COMPOSE")
+OFFSITE_MOUNT="$(sed -n 's/^SMS_WHATSAPP_OFFSITE_MOUNT=//p' "$ENV_FILE" | tail -1 | tr -d '\r\"\047')"
+if [[ "$OFFSITE_MOUNT" == true ]]; then
+  WA+=(-f "$APP_DIR/compose/sms-whatsapp/offsite-backup.yml")
+fi
 GW=(docker compose --env-file "$ENV_FILE" -f "$GW_COMPOSE")
 "${WA[@]}" config --quiet
 "${GW[@]}" config --quiet
@@ -79,7 +83,7 @@ for service in sbr-pager-watchdog.service sbr-modem-watchdog.service; do
 done
 rollback() {
   echo "Opdatering fejlede. Gendanner de tidligere images." >&2
-  docker compose --env-file "$ENV_FILE" -f "$WA_COMPOSE" -f "$BACKUP_DIR/rollback-pager.yml" up -d --no-build --no-deps sms-whatsapp || true
+  "${WA[@]}" -f "$BACKUP_DIR/rollback-pager.yml" up -d --no-build --no-deps sms-whatsapp || true
   docker compose --env-file "$ENV_FILE" -f "$GW_COMPOSE" -f "$BACKUP_DIR/rollback-gateway.yml" up -d --no-build --no-deps sms-gateway || true
 }
 trap 'rollback; exit 1' ERR

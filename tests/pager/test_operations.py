@@ -154,7 +154,7 @@ def test_audit_records_actor_and_changes_without_secrets(authorized,client):
     r=p.base.Recipient.query.one()
     assert client.post(f'/brugere/{r.id}/rediger',data={'csrf_token':'test-csrf','name':'Nyt navn','phone':r.phone,'active':'1'}).status_code==302
     entry=ops.AuditEntry.query.one()
-    assert entry.actor=='admin' and 'Nyt navn' in entry.changes and 'Modtager' in entry.changes
+    assert entry.actor=='admin (miljølogin)' and 'Nyt navn' in entry.changes and 'Modtager' in entry.changes
     assert 'test-adgangskode' not in entry.changes
     before=ops.AuditEntry.query.count()
     client.post(f'/brugere/{r.id}/rediger',data={'csrf_token':'invalid','name':'bad','phone':r.phone})

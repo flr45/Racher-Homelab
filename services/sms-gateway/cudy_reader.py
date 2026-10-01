@@ -19,6 +19,14 @@ def registered(response):
     return bool(match and int(match[1]) in {1, 5})
 
 
+def read_storage(client):
+    try:
+        response = client.command('AT+CPMS?')
+        return response.strip() if '+CPMS:' in response else None
+    except Exception:
+        return None
+
+
 def read_inbox(client):
     mode = client.command("AT+CMGF?")
     match = re.search(r"\+CMGF:\s*([01])", mode)
@@ -70,6 +78,7 @@ def run():
                     if "ERROR" in network:
                         network = client.command("AT+CREG?")
                     strength = client.command("AT+CSQ")
+                    reader.write_status(storage=read_storage(client))
                     next_check = time.monotonic() + 30
                 reader.write_status(state="online" if registered(network) else "degraded", network=network.strip(), signal=strength.strip(), sim=probe["sim"].strip(), transport="cudy", capability="receive-only", last_error=None if registered(network) else "Routeren er ikke registreret på mobilnettet")
                 for message in read_inbox(client):

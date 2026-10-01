@@ -9,6 +9,10 @@ BACKUP_FILE="$(realpath -- "$BACKUP_FILE")"
 [[ -f "$BACKUP_FILE" ]] || exit 1
 cd "$APP_DIR"
 WA=(docker compose --env-file "$APP_DIR/.env" -f "$APP_DIR/compose/sms-whatsapp/compose.yml")
+OFFSITE_MOUNT="$(sed -n 's/^SMS_WHATSAPP_OFFSITE_MOUNT=//p' "$APP_DIR/.env" | tail -1 | tr -d '\r\"\047')"
+if [[ "$OFFSITE_MOUNT" == true ]]; then
+  WA+=(-f "$APP_DIR/compose/sms-whatsapp/offsite-backup.yml")
+fi
 "${WA[@]}" config --quiet
 SUDO=()
 [[ "$(id -u)" == 0 ]] || SUDO=(sudo)

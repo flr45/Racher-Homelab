@@ -22,7 +22,7 @@ import diagnostics
 
 app, base, db = delivery.app, delivery.base, delivery.db
 log = logging.getLogger("sbr-pager-operations")
-VERSION = "2026.10-operations.2"
+VERSION = "2026.10-operations.3"
 BOOTED_AT = base.utcnow()
 try:
     BUILD_AT = base.parse_received_at(json.loads(Path(__file__).with_name("build_info.json").read_text())["built_at"])
@@ -205,7 +205,7 @@ def config_snapshot():
 
 
 def record_audit(action, changes, actor=None):
-    db.session.add(AuditEntry(actor=actor or base.admin_username(), action=action[:120], changes=json.dumps(changes, ensure_ascii=False)))
+    db.session.add(AuditEntry(actor=actor or getattr(base, 'audit_actor', base.admin_username)(), action=action[:120], changes=json.dumps(changes, ensure_ascii=False)))
     db.session.commit()
 
 

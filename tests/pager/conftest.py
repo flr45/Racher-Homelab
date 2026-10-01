@@ -63,6 +63,6 @@ def authorized(p):
 def client(p):
     c = p.app.test_client()
     with c.session_transaction() as s:
-        s["admin_authenticated"] = True
+        s.update(admin_authenticated=True, auth_kind='environment', auth_fingerprint=p.operator_accounts.environment_fingerprint())
         s["csrf_token"] = "test-csrf"
     return c

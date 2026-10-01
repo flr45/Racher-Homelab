@@ -54,3 +54,12 @@ def test_compose_validation_failure_never_stops_running_pager(tmp_path):
     assert result.returncode!=0
     commands=[json.loads(line) for line in logfile.read_text().splitlines()]
     assert not any('stop' in c for c in commands)
+
+
+def test_full_restore_keeps_configured_offsite_mount(tmp_path):
+    backup, env, logfile = setup_restore(tmp_path)
+    (tmp_path / '.env').write_text('SMS_WHATSAPP_OFFSITE_MOUNT=true\n')
+    result = subprocess.run(['bash', str(ROOT/'scripts/restore-sbr-pager.sh'), str(backup), 'GENDAN'], env=env, capture_output=True)
+    commands = [json.loads(line) for line in logfile.read_text().splitlines()]
+    assert result.returncode == 0
+    assert all(any(x.endswith('sms-whatsapp/offsite-backup.yml') for x in call) for call in commands if call[:2] == ['docker','compose'])

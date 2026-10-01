@@ -38,7 +38,7 @@ def restore(source_path, target_path):
                 destination.execute("UPDATE whats_app_delivery SET status='cancelled', error='Database gendannet; gammelt job genafsendes ikke' WHERE status IN ('pending','retrying','held','sending','failed')")
                 destination.execute("UPDATE whatsapp_retry_state SET completed_at=?,next_attempt_at=NULL",(now.replace(tzinfo=None).isoformat(' '),))
                 destination.execute("UPDATE single_whatsapp_test SET status='cancelled',error='Database gendannet',completed_at=? WHERE status IN ('pending','running')",(now.replace(tzinfo=None).isoformat(' '),))
-                for key,value in (("operation_mode","maintenance"),("operation_until",(now+timedelta(minutes=30)).isoformat()),("operation_reason","Kontrollér den gendannede database")):
+                for key,value in (("operation_mode","maintenance"),("operation_until",(now+timedelta(minutes=30)).isoformat()),("operation_reason","Kontrollér den gendannede database"),("operator_auth_epoch",secrets.token_hex(32))):
                     destination.execute("INSERT INTO pager_runtime_setting(key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(key,value,now.replace(tzinfo=None).isoformat(' ')))
                 destination.commit()
                 if destination.execute("PRAGMA integrity_check").fetchone()[0] != "ok":

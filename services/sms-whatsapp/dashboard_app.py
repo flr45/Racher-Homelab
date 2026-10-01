@@ -177,6 +177,10 @@ def unified_ui(response):
                 html = html.replace('<div class="wrap">', '<div class="wrap" id="main-content" tabindex="-1">', 1)
             nav = render_template("navigation.html")
             html = re.sub(r"<body([^>]*)>", lambda m: m.group(0) + nav, html, count=1)
+            if operator_accounts.identity()['role'] == 'viewer':
+                html = html.replace('<body', '<body data-readonly="true"', 1)
+                notice = '<div class="flash readonly-notice">Læseadgang · du kan se status og historik. Ændringer og afsendelse kræver en administrator.</div>'
+                html = re.sub(r'<(?:main|div)[^>]*id="main-content"[^>]*>', lambda m: m.group(0) + notice, html, count=1)
             html = html.replace("</body>", '<script src="' + url_for("static", filename="pager.js") + '" defer></script></body>', 1)
         response.set_data(html)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -209,8 +213,13 @@ def guarded_group_test():
 app.view_functions["test_message"] = guarded_group_test
 
 import observability
+import operator_accounts
+import offsite_backup
+import resilience
 
 # No pending job may run before operational controls and crash recovery.
 with app.app_context():
     operations.recover_interrupted_alarms()
 deliveries.start_retry_worker()
+resilience.start_monitor()
+offsite_backup.start_worker()

@@ -122,10 +122,18 @@ jobs:
           SMS_GATEWAY_API_TOKEN: ci-sms-gateway-token
           CUDY_PASSWORD: ci-cudy-password
         run: |
+          mkdir -p /tmp/ci-pager-offsite
+          touch /tmp/ci-pager-offsite-key
           docker network create backend || true
           docker network create proxy || true
           docker compose \
             -f compose/sms-whatsapp/compose.yml \
+            config --quiet
+          SMS_WHATSAPP_OFFSITE_HOST_DIR=/tmp/ci-pager-offsite \
+          SMS_WHATSAPP_OFFSITE_KEY_HOST_FILE=/tmp/ci-pager-offsite-key \
+          docker compose \
+            -f compose/sms-whatsapp/compose.yml \
+            -f compose/sms-whatsapp/offsite-backup.yml \
             config --quiet
           docker compose \
             -f compose/sms-gateway/docker-compose.yml \

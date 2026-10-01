@@ -312,3 +312,82 @@ Mobilvisningen har en sammenklappelig menu og genveje til enkeltpersonstest, fej
 **Indkøring** har separate, manuelt udfyldte LT300- og USB-forløb med 12 kontrolpunkter: backup, internet/LAN, modem, kort og delt SMS, stationsvalg, WhatsApp, genstart, afbrudt forbindelse, USB-skift, udgående SMS og normal drift. Gem resultat og noter efter den fysiske test. Bestået kræver en særskilt bekræftelse og gemmes i ændringsloggen; siden sender ingen beskeder. LT300-afsendelse kan ikke markeres bestået, før en understøttet afsendelsesmetode er implementeret og fysisk verificeret.
 
 De nye tabeller til forsøgsmålinger, backupkontrol og indkøringsresultater er additive. En fuld restore kræver en backup med det aktuelle databaseskema; tidligere konfigurationsbackups kan stadig bruges til opsætningsgendannelse.
+
+## Driftsværn, personlige logins og ekstern backup
+
+**Administratorer** opretter personlige administrator- og læsekonti. Det eksisterende miljølogin bevares som nødadgang, men fremgår som miljølogin i ændringsloggen. Adgangskoder er saltede scrypt-hashes; adgangskoder og hashes skrives ikke i ændringsloggen. En kontoændring afslutter kontoens eksisterende sessioner. Den sidste aktive personlige administrator kan ikke deaktiveres eller ændres til læseadgang. Loginforsøg begrænses pr. kilde/brugernavn. Ældre login-cookies kræver nyt login efter opdateringen; fuld databasegendannelse afslutter alle eksisterende login-sessioner. Opsætningsgendannelse ændrer ikke operatørkonti.
+
+Læsekonti kan se alarmhistorik, modtagere og drift. Ændringer og afsendelse afvises på serveren; formularerne deaktiveres også i visningen. Kontoadministration og download af den fulde databasebackup kræver administratoradgang. Et nyt personligt login ændrer ikke alarmmodtagerens stationsvalg.
+
+### Målinger og driftsbeskeder
+
+**Driftsværn** måler internet, modem, WhatsApp, kø og lager cirka hvert minut i en særskilt tråd. Der oprettes kun historik ved ændret forbindelse, med en særskilt første observation. Højst 10.000 tilstandsskift og 90 dages historik beholdes; siden viser de seneste 200. Tidspunkterne afslører forældede målinger. Korte udfald mellem målingerne og perioder, hvor programmet er stoppet, kan ikke måles. Selve serverens nedetid skal overvåges fra en anden maskine.
+
+Diskkontrollen måler Pagers datavolumen og database/journalstørrelse. Standardadvarsel er mindre end 512 MiB eller 10 % ledig plads. SMS-lageret læses med `AT+CPMS?` af den eksisterende ene modemejer og varsles ved 80 %. Manglende firmwareunderstøttelse vises som ukendt og stopper ikke SMS-readerens drift. Ingen SMS slettes af kontrollen.
+
+Driftsbeskeder er **deaktiveret som standard**. Vælg én separat kanal på serveren, og aktivér derefter under Driftsværn. Aktive fejl kan udløse beskeder efter aktivering. Der sendes ingen testbesked med Gem. Kanaloplysninger og hemmeligheder vises ikke i UI eller eksport.
+
+Eksempel på en HTTPS-webhook, som accepterer JSON med felterne `title`, `message`, `component` og `recovered`:
+
+```dotenv
+SMS_WHATSAPP_ALERT_CHANNEL=webhook
+SMS_WHATSAPP_ALERT_WEBHOOK_URL=https://DIN_DRIFTSKANAL/endpoint
+SMS_WHATSAPP_ALERT_WEBHOOK_TOKEN='DIT_SEPARATE_TOKEN'
+```
+
+HTTP-redirects følges ikke, så bearer-token ikke videresendes. Alternativt mail via TLS:
+
+```dotenv
+SMS_WHATSAPP_ALERT_CHANNEL=smtp
+SMS_WHATSAPP_ALERT_SMTP_HOST=DIN_MAILSERVER
+SMS_WHATSAPP_ALERT_SMTP_PORT=587
+SMS_WHATSAPP_ALERT_SMTP_MODE=starttls
+SMS_WHATSAPP_ALERT_SMTP_USERNAME=DIT_LOGIN
+SMS_WHATSAPP_ALERT_SMTP_PASSWORD='DIN_ADGANGSKODE'
+SMS_WHATSAPP_ALERT_FROM=pager@DIT_DOMAENE.dk
+SMS_WHATSAPP_ALERT_TO=DIN_EGEN_MAIL@DIT_DOMAENE.dk
+```
+
+For implicit TLS bruges `ssl` og normalt port 465. Certifikatkontrol er aktiveret; der er ingen ukrypteret SMTP-tilstand. Begge kanaler bruger internet, men er uafhængige af OpenWA. Et komplet internetudfald eller slukket server kan derfor ikke varsles gennem denne lokale funktion.
+
+Efter genstart er der fem minutters opstartsro, så modem og OpenWA kan blive klar. Derefter varsles vedvarende fejl efter den valgte forsinkelse, normalt 120 sekunder. Gentagelser begrænses normalt til én gang i timen pr. komponent. Fejlede afleveringer kan genforsøges efter fem minutter; timeout kan give en gentagen driftsbesked, hvis kanalen allerede modtog den. Genoprettelsesbesked sendes kun efter en tidligere afleveret advarsel. Beskeder indeholder ingen alarmtekst eller telefonnumre. Køvarsling gælder normalt 20 jobs, fem minutters ventetid eller tilbageholdte jobs; bevidst vedligeholdelse/prøvetilstand udløser ikke køvarsler. Fejl i aktiv ekstern backup kan også varsles.
+
+### Krypteret kopi til anden maskine
+
+Den anden maskines mappe skal først monteres på **racherserver**, fx en mappe fra racher-pi/NAS. Valg af maskine, sti og mountmetode sker ved installationen. Programmet opretter ikke selv en netværksforbindelse eller indsamler SSH-/NAS-adgangskoder.
+
+Opret på den reelle destination en fil `.sbr-pager-offsite` med indholdet `SBR-PAGER-OFFSITE-v1`. Filen må kun ligge på den monterede destination, så kontrollen stopper, hvis mountet forsvinder og blot efterlader en tom lokal mappe. Mappen skal kunne læses og skrives af containerens uid 10001. En lokal mappe uden et reelt eksternt mount er ikke beskyttelse mod diskfejl.
+
+Generér en separat nøgle uden at vise den på skærmen, efter at den nye image er bygget. Hjælperen understøtter:
+
+```bash
+python encrypted_backup.py key --output /DIN_PRIVATE_STI/pager-offsite.key
+```
+
+Hjælperen kræver projektets Python-afhængigheder og findes også som `/app/encrypted_backup.py` i den nye Pager-container. Den overskriver ikke eksisterende nøglefiler. Nøglen skal kunne læses af containerens uid 10001 med private filrettigheder. Gem også en sikker kopi af nøglen uden for serveren, adskilt fra backuparkivet. Uden nøglen kan kopien ikke gendannes. Nøglen indgår aldrig i backuparkivet.
+
+Tilføj disse eksisterende, absolutte værtsstier i `.env`:
+
+```dotenv
+SMS_WHATSAPP_OFFSITE_MOUNT=true
+SMS_WHATSAPP_OFFSITE_HOST_DIR=/DIN_MONTEREDE_MAPPE/pager-backup
+SMS_WHATSAPP_OFFSITE_KEY_HOST_FILE=/DIN_PRIVATE_STI/pager-offsite.key
+```
+
+Opdateringsscript, boot, watchdog og fuld restore inkluderer derefter automatisk `compose/sms-whatsapp/offsite-backup.yml`. Ved manuelle Compose-kommandoer skal filen også med, så mount og nøgle bevares:
+
+```bash
+docker compose --env-file .env -f compose/sms-whatsapp/compose.yml -f compose/sms-whatsapp/offsite-backup.yml up -d --no-deps sms-whatsapp
+```
+
+Aktivér derefter **Automatisk krypteret backupkopi** under Driftsværn. En separat kopieringsarbejder pakker den seneste konsistente SQLite-/opsætningsbackup og krypterer med [Fernet](https://cryptography.io/en/latest/fernet/). Den skriver atomisk på destinationen og læser indholdet tilbage til verifikation. En manglende eller forkert mount-markør, nøgle eller rettighed giver fejlstatus; den lokale backup og aktive jobs bevares. En langsom netværksdisk kan holde kopieringsarbejderen, men holder ikke alarmlevering eller driftsmonitor. En kopi, der har været i gang i over ti minutter, eller en seneste succes ældre end 36 timer vises som forældet. Genforsøg sker højst én gang i timen. Nøglerotation skaber en ny fil; gamle nøgler skal beholdes til de gamle kopier.
+
+Denne første version understøtter højst 32 MiB ukrypteret SQLite/JSON pr. kopi for at begrænse hukommelsesforbruget. En større backup fejler tydeligt og kræver en senere streamingløsning. Eksterne backupfiler slettes ikke automatisk; højst 100 lokale overførselsresultater beholdes. Verifikation af kopi er ikke en fuld gendannelsesøvelse.
+
+Dekryptér kun til en **ny mappe**, fx med hjælperen i den nye image:
+
+```bash
+python encrypted_backup.py decrypt --input /STI/pager-backup.fernet --key /DIN_PRIVATE_STI/pager-offsite.key --output /NY_MAPPE
+```
+
+Kopien indeholder `pager.sqlite`, `pager.json` og kontrolsummer. Forkert nøgle, ændret indhold, uventede arkivstier og eksisterende målmapper afvises. Kontroller derefter SQLite-filen og brug den eksisterende eksplicitte, samme-skema restore på den stoppede Pager. Dekryptering starter ingen jobs og overskriver ikke driftsdata. Eksterne destinations- og kanaltests mangler, indtil de reelle oplysninger vælges ved installationen.

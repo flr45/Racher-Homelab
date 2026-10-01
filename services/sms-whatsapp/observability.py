@@ -266,8 +266,8 @@ def save_commissioning(driver,step):
     if result=='passed' and request.form.get('confirm')!='1':abort(400,'Bekræft at testen er udført fysisk')
     if driver=='cudy' and step=='smsout' and result=='passed':abort(409,'LT300-afsendelse er endnu ikke understøttet eller verificeret')
     row=CommissioningStep.query.filter_by(driver=driver,step=step).first()
-    if not row:row=CommissioningStep(driver=driver,step=step,result=result,actor=base.admin_username());db.session.add(row)
-    row.result,row.notes,row.actor,row.updated_at=result,request.form.get('notes','').strip()[:1000],base.admin_username(),base.utcnow()
+    if not row:row=CommissioningStep(driver=driver,step=step,result=result,actor=base.audit_actor());db.session.add(row)
+    row.result,row.notes,row.actor,row.updated_at=result,request.form.get('notes','').strip()[:1000],base.audit_actor(),base.utcnow()
     db.session.commit();ops.record_audit('Indkøringstest',{'driver':driver,'step':step,'result':result})
     return redirect(url_for('commissioning_page',driver=driver)+'#'+step)
 

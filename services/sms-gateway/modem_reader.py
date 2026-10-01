@@ -96,6 +96,15 @@ def stop(_signum, _frame):
     running = False
 
 
+def read_storage(port):
+    """Read-only, optional diagnostics; unsupported storage must not stop SMS."""
+    try:
+        response = command(port, 'AT+CPMS?', timeout=3)
+        return response.strip() if '+CPMS:' in response else None
+    except Exception:
+        return None
+
+
 def network_registration_status(response: str) -> int | None:
     match = _NETWORK_REGISTRATION_RE.search(response or "")
     if not match:
@@ -431,6 +440,7 @@ def run():
                     if now >= next_network_check:
                         network = command(port, "AT+CREG?")
                         signal_quality = command(port, "AT+CSQ")
+                        write_status(storage=read_storage(port))
                         if network_is_registered(network):
                             if network_failures:
                                 log.info(

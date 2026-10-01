@@ -40,10 +40,10 @@ elif name == "docker":
 '''
 
 
-def run_update(tmp_path, driver="usb", failure=""):
+def run_update(tmp_path, driver="usb", failure="", offsite=False):
     application = tmp_path / "app"
     application.mkdir()
-    (application / ".env").write_text("SMS_MODEM_DRIVER=" + driver + "\nCUDY_PASSWORD=test-only\n")
+    (application / ".env").write_text("SMS_MODEM_DRIVER=" + driver + "\nCUDY_PASSWORD=test-only\n" + ("SMS_WHATSAPP_OFFSITE_MOUNT=true\n" if offsite else ""))
     commands = tmp_path / "commands"
     commands.mkdir()
     for name in ("docker", "systemctl", "id", "git", "sleep"):
@@ -95,3 +95,11 @@ def test_failed_startup_rolls_back_both_images_and_restores_watchdog(tmp_path, f
     assert [call[-1] for call in rollbacks] == ["sms-whatsapp", "sms-gateway"]
     assert all("--no-build" in call and "--no-deps" in call for call in rollbacks)
     assert ["systemctl", "start", "sbr-pager-watchdog.timer"] in calls
+
+
+@pytest.mark.parametrize("failure", ["", "startup"])
+def test_update_and_rollback_keep_configured_offsite_mount(tmp_path, failure):
+    result, calls, _ = run_update(tmp_path, failure=failure, offsite=True)
+    pager_calls = [call for call in calls if call[:2] == ["docker", "compose"] and (call[-1] == "sms-whatsapp" or "config" in call and any("sms-whatsapp/compose.yml" in x for x in call))]
+    assert pager_calls and all(any(x.endswith("sms-whatsapp/offsite-backup.yml") for x in call) for call in pager_calls)
+    assert result.returncode == (0 if not failure else 1)

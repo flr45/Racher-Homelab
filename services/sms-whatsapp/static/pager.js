@@ -58,6 +58,11 @@
 })();
 
 const fullscreenButton = document.querySelector('[data-fullscreen]');
+if (document.body.dataset.readonly === 'true') {
+  for (const form of document.querySelectorAll('form[method="post"],form[method="POST"]')) {
+    for (const control of form.querySelectorAll('input,select,textarea,button')) control.disabled = true;
+  }
+}
 if (fullscreenButton) fullscreenButton.addEventListener('click', async () => {
   try { if (!document.fullscreenElement) await document.documentElement.requestFullscreen(); else await document.exitFullscreen(); }
   catch { fullscreenButton.textContent = 'Fuld skærm er ikke tilgængelig'; }

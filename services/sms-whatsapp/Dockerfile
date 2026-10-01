@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py events_app.py stats_v2.py station_filter_app.py admin_station_app.py ui_app.py history_app.py station_names_app.py geocode_app.py delivery_retry_app.py poller.py ./
 COPY dashboard_app.py ./
 COPY diagnostics.py operations.py restore_db.py observability.py ./
+COPY operator_accounts.py resilience.py offsite_backup.py encrypted_backup.py ./
 COPY templates/ templates/
 COPY static/ static/
 RUN python -m py_compile dashboard_app.py diagnostics.py operations.py
