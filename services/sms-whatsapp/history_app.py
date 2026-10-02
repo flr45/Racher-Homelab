@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import timedelta, timezone
 
-from flask import flash, redirect, render_template_string, request, url_for
+from flask import abort, flash, redirect, render_template_string, request, url_for
 
 import events_app as events
 import ui_app as previous
@@ -165,7 +165,7 @@ STATISTICS_HTML = base.BASE_HTML.replace(
 
 <section class="card span12"><h2>Tidspunkt på døgnet · 30 dage</h2>{% set maxhour = (stats.hours | map(attribute=1) | max) if stats.hours else 1 %}{% for hour,count in stats.hours %}<div class="bar"><div class="barlabel">{{ '%02d'|format(hour) }}–{{ '%02d'|format((hour+1)%24) }}</div><div class="bartrack"><div class="barfill" style="width:{{ (count / maxhour * 100)|round }}%"></div></div><div class="barvalue">{{ count }}</div></div>{% else %}<div class="empty">Ikke nok data endnu.</div>{% endfor %}</section>
 
-<section class="card span12"><div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Alarmhistorik</h2><p class="muted" style="margin:5px 0 0">Slet testhændelser herfra, så de straks forsvinder fra statistikken.</p></div><a class="btn" href="{{ url_for('alarm_map') }}">Vis på kort</a></div><div class="tablewrap"><table><thead><tr><th>Tid</th><th>Station</th><th>Alarmtype</th><th>Adresse</th><th>Status</th><th>Sending 2</th><th></th></tr></thead><tbody>{% for event in alarm_events %}<tr><td>{{ dk_time(event.started_at) }}</td><td>{{ event.station or '—' }}</td><td>{{ event.alarm_type or '—' }}</td><td class="bodycell">{{ event.address or '—' }}</td><td><span class="tag">{{ 'Komplet' if event.status == 'complete' else 'Afventer' }}</span></td><td>{{ event.followup_count or 0 }}</td><td><div class="inline-actions"><a class="btn small" href="{{ url_for('alarm_event_detail', event_id=event.id) }}">Vis</a><form method="post" action="{{ url_for('delete_alarm_event', event_id=event.id) }}" onsubmit="return confirm('Slet denne alarmhændelse og dens SBR Pager-beskeder?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path }}"><button class="btn danger small" type="submit">Slet</button></form></div></td></tr>{% else %}<tr><td colspan="7" class="empty">Ingen hændelser registreret endnu.</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="card span12"><div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Alarmhistorik</h2><p class="muted" style="margin:5px 0 0">Slet testhændelser herfra, så de straks forsvinder fra statistikken.</p></div><a class="btn" href="{{ url_for('alarm_map') }}">Vis på kort</a></div><form id="bulk-delete-alarms" method="post" action="{{ url_for('delete_alarm_events') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path }}"><input type="hidden" name="confirm" value="delete"><div class="inline-actions" style="margin-bottom:12px"><span id="alarm-selection-count" role="status">0 valgt</span><button id="delete-selected-alarms" class="btn danger" type="submit" disabled>Slet valgte</button><span class="muted">Markér blandt de højst 200 viste alarmer.</span></div></form><div class="tablewrap"><table><thead><tr><th><input id="select-all-alarms" type="checkbox" aria-label="Markér alle viste alarmer"></th><th>Tid</th><th>Station</th><th>Alarmtype</th><th>Adresse</th><th>Status</th><th>Sending 2</th><th></th></tr></thead><tbody>{% for event in alarm_events %}<tr><td><input class="alarm-selection" type="checkbox" name="event_ids" value="{{ event.id }}" form="bulk-delete-alarms" aria-label="Markér alarm {{ event.id }}"></td><td>{{ dk_time(event.started_at) }}</td><td>{{ event.station or '—' }}</td><td>{{ event.alarm_type or '—' }}</td><td class="bodycell">{{ event.address or '—' }}</td><td><span class="tag">{{ 'Komplet' if event.status == 'complete' else 'Afventer' }}</span></td><td>{{ event.followup_count or 0 }}</td><td><div class="inline-actions"><a class="btn small" href="{{ url_for('alarm_event_detail', event_id=event.id) }}">Vis</a><form method="post" action="{{ url_for('delete_alarm_event', event_id=event.id) }}" onsubmit="return confirm('Slet denne alarmhændelse og dens SBR Pager-beskeder?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path }}"><button class="btn danger small" type="submit">Slet</button></form></div></td></tr>{% else %}<tr><td colspan="8" class="empty">Ingen hændelser registreret endnu.</td></tr>{% endfor %}</tbody></table></div></section>
 </div><div class="footer">Slettede hændelser indgår ikke længere i statistikken. Tider vises i Europe/Copenhagen.</div>
 </div>
 """,
@@ -175,7 +175,7 @@ STATISTICS_HTML = base.BASE_HTML.replace(
 EVENT_DETAIL_HTML = base.BASE_HTML.replace(
     "{% block content %}{% endblock %}",
     r"""
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='leaflet/leaflet.css') }}">
 <style>#eventMap{height:360px;border-radius:14px;border:1px solid var(--border);overflow:hidden}.map-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.coord-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.coord-grid input{width:100%;background:#09111a;border:1px solid var(--border);color:var(--text);border-radius:10px;padding:9px 10px}</style>
 <div class="wrap">
 <div class="top"><div class="brand"><h1>Alarmhændelse #{{ event.id }}</h1><p>{{ dk_time(event.started_at) }} · {{ event.sender }}</p></div><div class="actions"><a class="btn" href="{{ url_for('alarm_map') }}">Alarmkort</a><a class="btn" href="{{ url_for('alarm_statistics') }}">← Alarmstatistik</a><a class="btn" href="{{ url_for('dashboard') }}">Administration</a></div></div>
@@ -184,19 +184,24 @@ EVENT_DETAIL_HTML = base.BASE_HTML.replace(
 <section class="card span4"><h2>Alarm</h2><div class="metric" style="font-size:18px">{{ event.alarm_type or 'Ukendt type' }}</div><p class="muted">Station {{ event.station or '—' }}</p></section>
 <section class="card span4"><h2>Adresse</h2><div style="font-size:17px;font-weight:700">{{ event.address or 'Ikke fundet automatisk' }}</div><p class="muted">Sending 2: {{ event.followup_count or 0 }}</p></section>
 
-<section class="card span12"><div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Kortplacering</h2><p class="muted" style="margin:5px 0 0">Klik på kortet for at placere turen. Positionen gemmes lokalt i SBR Pager.</p></div></div><div id="eventMap"></div><form method="post" action="{{ url_for('save_alarm_location', event_id=event.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="coord-grid"><input id="lat" name="latitude" inputmode="decimal" placeholder="Breddegrad" value="{{ location.latitude if location else '' }}" required><input id="lon" name="longitude" inputmode="decimal" placeholder="Længdegrad" value="{{ location.longitude if location else '' }}" required></div><div class="map-actions"><button class="btn primary" type="submit">Gem på alarmkort</button>{% if location %}</form><form method="post" action="{{ url_for('remove_alarm_location', event_id=event.id) }}" onsubmit="return confirm('Fjern kortplaceringen for denne tur?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Fjern fra kort</button></form>{% else %}</form>{% endif %}</div></section>
+<section class="card span12"><div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Kortplacering</h2><p class="muted" style="margin:5px 0 0">Klik på kortet for at placere turen. Positionen gemmes lokalt i SBR Pager.</p></div></div><p id="mapStatus" class="muted" role="status">Kortet indlæses…</p><div id="eventMap"></div><form method="post" action="{{ url_for('save_alarm_location', event_id=event.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="coord-grid"><input id="lat" name="latitude" inputmode="decimal" placeholder="Breddegrad" value="{{ location.latitude if location else '' }}" required><input id="lon" name="longitude" inputmode="decimal" placeholder="Længdegrad" value="{{ location.longitude if location else '' }}" required></div><div class="map-actions"><button class="btn primary" type="submit">Gem på alarmkort</button>{% if location %}</form><form method="post" action="{{ url_for('remove_alarm_location', event_id=event.id) }}" onsubmit="return confirm('Fjern kortplaceringen for denne tur?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Fjern fra kort</button></form>{% else %}</form>{% endif %}</div></section>
 
 <section class="card span12"><h2>Tidslinje</h2><div class="tablewrap"><table><thead><tr><th>Modtaget</th><th>Type</th><th>Dele</th><th>Original tekst</th><th>WhatsApp</th></tr></thead><tbody>{% for row in timeline %}<tr><td>{{ dk_time(row.message.received_at) }}</td><td><span class="tag">{{ row.label }}</span></td><td>{{ (row.message.part_current|string + '/' + row.message.part_total|string) if row.message.part_total else '1/1' }}</td><td class="bodycell">{{ row.message.raw_body }}{% if 'message_detail' in config.get('PAGER_OPERATION_ENDPOINTS',[]) %}<div><a href="{{ url_for('message_detail',inbound_id=row.message.inbound_id) }}">Behandling og kvitteringer →</a></div>{% endif %}</td><td>{% for d in row.deliveries %}<div>{{ d.recipient_name }} · {{ d.status }}</div>{% else %}<span class="muted">Ingen leveringer</span>{% endfor %}</td></tr>{% endfor %}</tbody></table></div></section>
 <section class="card span12" style="border-color:#60313a;background:#24151a"><div class="top"><div><h2 style="margin:0">Slet hændelse</h2><p class="muted" style="margin:5px 0 0">Fjerner hændelsen, dens SBR Pager-beskeder, leveringslogs og kortplacering. Den forsvinder derefter fra statistikken.</p></div><form method="post" action="{{ url_for('delete_alarm_event', event_id=event.id) }}" onsubmit="return confirm('Er du sikker? Handlingen kan ikke fortrydes.')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn danger" type="submit">Slet hændelse</button></form></div></section>
 </div></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='leaflet/leaflet.js') }}"></script>
 <script>
 (function(){
+  if(!window.L){document.getElementById('mapStatus').textContent='Kortet kunne ikke startes. Genindlæs siden; koordinater kan stadig indtastes nedenfor.';return;}
   const savedLat = {{ location.latitude|tojson if location else 'null' }};
   const savedLon = {{ location.longitude|tojson if location else 'null' }};
   const start = (savedLat !== null && savedLon !== null) ? [savedLat, savedLon] : [55.402, 11.355];
   const map = L.map('eventMap').setView(start, (savedLat !== null ? 15 : 10));
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+  const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'});
+  let tileFailed = false;
+  tiles.on('tileerror', function(){ tileFailed = true; document.getElementById('mapStatus').textContent='Baggrundskortet kunne ikke hentes. Kontrollér internetforbindelsen. Gemte markører og koordinater er stadig tilgængelige.'; });
+  tiles.on('load', function(){ if(!tileFailed) document.getElementById('mapStatus').textContent='Kortet er klar.'; });
+  tiles.addTo(map);
   let marker = null;
   function setMarker(lat, lon){ if(marker){ marker.setLatLng([lat,lon]); } else { marker=L.marker([lat,lon]).addTo(map); } document.getElementById('lat').value=Number(lat).toFixed(6); document.getElementById('lon').value=Number(lon).toFixed(6); }
   if(savedLat !== null && savedLon !== null){ setMarker(savedLat, savedLon); }
@@ -210,18 +215,23 @@ EVENT_DETAIL_HTML = base.BASE_HTML.replace(
 MAP_HTML = base.BASE_HTML.replace(
     "{% block content %}{% endblock %}",
     r"""
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='leaflet/leaflet.css') }}">
 <style>#alarmMap{height:70vh;min-height:520px;border-radius:16px;border:1px solid var(--border);overflow:hidden}.mapnote{margin-top:10px;color:var(--muted);font-size:13px}</style>
 <div class="wrap">
 <div class="top"><div class="brand"><h1>Alarmkort</h1><p>SBR Pager · gemte ture</p></div><div class="actions"><a class="btn" href="{{ url_for('alarm_statistics') }}">Alarmstatistik</a><a class="btn" href="{{ url_for('dashboard') }}">← Administration</a></div></div>
-<section class="card span12"><div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">{{ points|length }} gemte ture</h2><p class="muted" style="margin:5px 0 0">Klik på en markør for at læse om turen og åbne hele hændelsen.</p></div></div><div id="alarmMap"></div><div class="mapnote">Kort: © OpenStreetMap contributors. Kun ture med en gemt kortplacering vises.</div></section>
+<section class="card span12"><div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">{{ points|length }} gemte ture</h2><p class="muted" style="margin:5px 0 0">Klik på en markør for at læse om turen og åbne hele hændelsen.</p></div></div><p id="mapStatus" class="muted" role="status">Kortet indlæses…</p><div id="alarmMap"></div>{% if not points %}<p class="mapnote">Ingen alarmer har en gemt kortplacering. Åbn en alarm i historikken for at placere den manuelt.</p>{% endif %}<div class="mapnote">Kort: © OpenStreetMap contributors. Kun ture med en gemt kortplacering vises.</div></section>
 </div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='leaflet/leaflet.js') }}"></script>
 <script>
 (function(){
+  if(!window.L){document.getElementById('mapStatus').textContent='Kortet kunne ikke startes. Genindlæs siden.';return;}
   const points = {{ points|tojson }};
   const map = L.map('alarmMap').setView([55.402, 11.355], 9);
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+  const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'});
+  let tileFailed = false;
+  tiles.on('tileerror', function(){ tileFailed = true; document.getElementById('mapStatus').textContent='Baggrundskortet kunne ikke hentes. Kontrollér internetforbindelsen. Gemte markører og koordinater er stadig tilgængelige.'; });
+  tiles.on('load', function(){ if(!tileFailed) document.getElementById('mapStatus').textContent='Kortet er klar.'; });
+  tiles.addTo(map);
   const bounds=[];
   points.forEach(function(item){
     const marker=L.marker([item.lat,item.lon]).addTo(map); bounds.push([item.lat,item.lon]);
@@ -241,7 +251,7 @@ MAP_HTML = base.BASE_HTML.replace(
 
 def _safe_next(default: str) -> str:
     target = (request.form.get("next") or "").strip()
-    return target if target.startswith("/") and not target.startswith("//") else default
+    return target if target.startswith("/") and not target.startswith("//") and "\\" not in target and not any(ord(char) < 32 for char in target) else default
 
 
 def _timeline_for(event: events.AlarmEvent) -> list[dict]:
@@ -290,22 +300,49 @@ app.view_functions["alarm_statistics"] = base.login_required(alarm_statistics_vi
 app.view_functions["alarm_event_detail"] = base.login_required(alarm_event_detail_view)
 
 
+def _delete_alarm_events(ids):
+    """Delete local event data and audit in one transaction; caller holds delivery lock."""
+    import json
+    import operations
+    inbound_ids = [row.inbound_id for row in events.AlarmEventMessage.query.filter(events.AlarmEventMessage.event_id.in_(ids)).all()]
+    try:
+        AlarmEventLocation.query.filter(AlarmEventLocation.event_id.in_(ids)).delete(synchronize_session=False)
+        if inbound_ids:
+            base.WhatsAppDelivery.query.filter(base.WhatsAppDelivery.inbound_id.in_(inbound_ids)).delete(synchronize_session=False)
+        events.AlarmEventMessage.query.filter(events.AlarmEventMessage.event_id.in_(ids)).delete(synchronize_session=False)
+        if inbound_ids:
+            base.InboundMessage.query.filter(base.InboundMessage.id.in_(inbound_ids)).delete(synchronize_session=False)
+        events.AlarmEvent.query.filter(events.AlarmEvent.id.in_(ids)).delete(synchronize_session=False)
+        db.session.add(operations.AuditEntry(actor=base.audit_actor(), action="delete_alarm_events", changes=json.dumps({"event_ids": ids, "count": len(ids)})))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+
+@app.post("/alarmer/slet-valgte")
+@base.login_required
+def delete_alarm_events():
+    base.check_csrf()
+    values = request.form.getlist("event_ids")
+    if request.form.get("confirm") != "delete" or not 1 <= len(values) <= 200:
+        abort(400, "Vælg mellem 1 og 200 alarmer og bekræft sletningen.")
+    if any(not value.isascii() or not value.isdecimal() or len(value) > 10 or int(value) < 1 for value in values):
+        abort(400, "Ugyldige alarmnumre.")
+    ids = sorted(set(map(int, values)))
+    if events.AlarmEvent.query.filter(events.AlarmEvent.id.in_(ids)).count() != len(ids):
+        abort(409, "En valgt alarm findes ikke længere. Genindlæs historikken; ingen alarmer blev slettet.")
+    _delete_alarm_events(ids)
+    flash(f"{len(ids)} alarmhændelser er slettet og indgår ikke længere i statistikken.")
+    return redirect(_safe_next(url_for("alarm_statistics")))
+
+
 @app.post("/alarmer/<int:event_id>/slet")
 @base.login_required
 def delete_alarm_event(event_id: int):
     base.check_csrf()
     event = db.get_or_404(events.AlarmEvent, event_id)
-    messages = events.AlarmEventMessage.query.filter_by(event_id=event.id).all()
-    inbound_ids = [row.inbound_id for row in messages]
-
-    AlarmEventLocation.query.filter_by(event_id=event.id).delete(synchronize_session=False)
-    if inbound_ids:
-        base.WhatsAppDelivery.query.filter(base.WhatsAppDelivery.inbound_id.in_(inbound_ids)).delete(synchronize_session=False)
-    events.AlarmEventMessage.query.filter_by(event_id=event.id).delete(synchronize_session=False)
-    if inbound_ids:
-        base.InboundMessage.query.filter(base.InboundMessage.id.in_(inbound_ids)).delete(synchronize_session=False)
-    db.session.delete(event)
-    db.session.commit()
+    _delete_alarm_events([event.id])
     flash("Alarmhændelsen er slettet og indgår ikke længere i statistikken.")
     return redirect(_safe_next(url_for("alarm_statistics")))
 

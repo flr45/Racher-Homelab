@@ -192,7 +192,8 @@ def unified_ui(response):
 
 
 # Serialize deletion with delivery attempts; FK cascades remove retry states.
-app.view_functions["delete_alarm_event"] = deliveries.serialized(app.view_functions["delete_alarm_event"])
+for _delete_endpoint in ("delete_alarm_event", "delete_alarm_events"):
+    app.view_functions[_delete_endpoint] = deliveries.serialized(app.view_functions[_delete_endpoint])
 
 
 # Import after the existing routes so extension callbacks cannot form a cycle.

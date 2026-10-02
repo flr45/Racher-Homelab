@@ -47,7 +47,9 @@ login og AT-statusprøve. Firmware leverer login-formularen med HTTP 403;
 driveren accepterer kun dette svar, hvis en genkendelig login-formular findes.
 Den 2. oktober 2026 blev opdateringen installeret på racherserver. Operatøren
 bekræftede kort SMS og derefter en samlet lang SMS med danske tegn i WhatsApp.
-Genstart, netværksudfald og USB-skift er endnu ikke fysisk bekræftet.
+Genstart er også fysisk bekræftet: boot-service og alle tre applikationer
+startede korrekt, og operatøren bekræftede SMS efter genstart.
+Netværksudfald og USB-skift er endnu ikke fysisk bekræftet.
 
 **På denne firmware skal Cudy-appens SMS → Aktivér være slået fra under
 AT-baseret modtagelse.** Med routerens egen SMS-indbakke aktiveret så vores
@@ -429,3 +431,45 @@ python encrypted_backup.py decrypt --input /STI/pager-backup.fernet --key /DIN_P
 ```
 
 Kopien indeholder `pager.sqlite`, `pager.json` og kontrolsummer. Forkert nøgle, ændret indhold, uventede arkivstier og eksisterende målmapper afvises. Kontroller derefter SQLite-filen og brug den eksisterende eksplicitte, samme-skema restore på den stoppede Pager. Dekryptering starter ingen jobs og overskriver ikke driftsdata. Eksterne destinations- og kanaltests mangler, indtil de reelle oplysninger vælges ved installationen.
+
+## Alarmkort og samlet sletning
+
+Kortbiblioteket Leaflet 1.9.4 leveres nu lokalt med programmet; licensen ligger
+ved de pakkede filer. Baggrundskortet kommer fortsat fra OpenStreetMap og kræver
+internet. Kortet viser en fejltekst ved manglende kortfelter og forklarer, når
+ingen hændelser har gemte koordinater. Eksisterende manuelle placeringer bevares.
+
+DAWA lukkede 1. oktober 2026. Standardopslaget anvender derfor KDS Adressevask
+og derefter Adressevælgerens adresse-ID-opslag. Kun entydige matches (1000/900)
+gemmes; intervaladresser bliver ikke placeret ved gæt. EPSG:25832-koordinater
+konverteres til kortets WGS84. Et tidligere eksplicit DAWA-URL i `.env` skal
+ændres til `SMS_WHATSAPP_GEOCODER_URL=https://adressevaelger.dk/vask/`.
+Token sættes via `SMS_WHATSAPP_GEOCODER_TOKEN`; KDS anbefaler aktuelt
+`adressevaelger123`, indtil brugerstyring indføres. Adresseopslag sker i
+baggrunden og blokerer ikke WhatsApp. Liveopslag fra racherserver skal verificeres.
+
+Gamle hændelser uden placering kan behandles efter opdateringen:
+
+```bash
+docker exec -i sbr-sms-whatsapp python - <<'PYCODE'
+import geocode_app
+print(geocode_app.backfill_missing_locations(limit=100))
+PYCODE
+```
+
+På Alarmstatistik kan administratorer markere enkelte eller alle viste
+hændelser (højst 200). `Slet valgte` viser antallet og kræver en bekræftelse.
+Sletningen fjerner de valgte lokale hændelser, SMS-data, leveringer, ventende
+jobs og placeringer i én transaktion; allerede udsendte WhatsApp-beskeder
+berøres ikke. En forældet markering afviser hele sletningen. Ændringsloggen
+gemmer operatør og hændelsesnumre, uden beskedtekst. Læseadgang kan ikke slette.
+
+LT300 V3 understøtter WISP og failover i rækkefølgen WAN → WISP → Cellular
+ifølge Cudys produktspecifikation. Uden en aktiv WAN-forbindelse kan tilsluttet
+Wi-Fi via WISP være primært, med mobilnet som reserve. Afprøv SMS-modtagelse
+både med Wi-Fi aktivt og efter udfald; SIM/modem skal fortsat være registreret,
+og routerens egen SMS-læser skal fortsat være slået fra.
+
+Kilder: [KDS Adressevask](https://confluence.kds.dk/display/ADV/Adressevask),
+[KDS token](https://confluence.kds.dk/display/ADV/Brugerstyring),
+[Cudy LT300 V3](https://www.cudy.com/en-us/products/lt300-3-0).

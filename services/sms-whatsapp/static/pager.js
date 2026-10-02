@@ -22,6 +22,26 @@
       }catch(_){document.getElementById('single-test-refresh').textContent='Status kunne ikke hentes. Genindlæs siden; testen genudsendes ikke.';}
     },5000);
   }
+  const bulkForm = document.getElementById('bulk-delete-alarms');
+  if(bulkForm && document.body.dataset.readonly !== 'true') {
+    const boxes = [...document.querySelectorAll('.alarm-selection')];
+    const all = document.getElementById('select-all-alarms');
+    const button = document.getElementById('delete-selected-alarms');
+    const selected = () => boxes.filter(box => box.checked).length;
+    const update = () => {
+      const count = selected();
+      document.getElementById('alarm-selection-count').textContent = count + ' valgt';
+      button.disabled = count === 0;
+      all.checked = boxes.length > 0 && count === boxes.length;
+      all.indeterminate = count > 0 && count < boxes.length;
+    };
+    all.addEventListener('change', () => {boxes.forEach(box => box.checked = all.checked); update();});
+    boxes.forEach(box => box.addEventListener('change', update));
+    bulkForm.addEventListener('submit', event => {
+      if(!selected() || !confirm('Slet ' + selected() + ' valgte alarmer med Pager-beskeder, leveringslogs og kortplaceringer? Handlingen kan ikke fortrydes.')) event.preventDefault();
+    });
+    update();
+  }
   if (!document.getElementById('overall-label')) return;
   const labels = {online:'Online', ready:'Forbundet', offline:'Offline', missing:'Session mangler', unknown:'Ukendt', connecting:'Forbinder', initializing:'Starter', stale:'Status forældet', degraded:'Kræver opmærksomhed'};
   async function refresh() {
@@ -59,6 +79,7 @@
 
 const fullscreenButton = document.querySelector('[data-fullscreen]');
 if (document.body.dataset.readonly === 'true') {
+  for(const control of document.querySelectorAll('.alarm-selection,#select-all-alarms')) control.disabled=true;
   for (const form of document.querySelectorAll('form[method="post"],form[method="POST"]')) {
     for (const control of form.querySelectorAll('input,select,textarea,button')) control.disabled = true;
   }
