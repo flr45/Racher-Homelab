@@ -40,6 +40,30 @@ ingen beskeder. `Send testbesked` i UI er en brugerhandling.
 
 ## Den planlagte drift: LT300 til internet og SMS
 
+### Skift fra en stoppet USB-gateway til LT300
+
+LT300 V3.0 med firmware 2.5.12 har under indkøring svaret på driverens
+login og AT-statusprøve. Firmware leverer login-formularen med HTTP 403;
+driveren accepterer kun dette svar, hvis en genkendelig login-formular findes.
+Det bekræfter ikke endnu den samlede SMS-til-WhatsApp-levering.
+
+Gem en privat kopi af `.env`, før routeroplysninger tilføjes. Behold USB som
+valgt driver under forberedelsen. Tilføj `CUDY_BASE_URL`, `CUDY_USERNAME` og
+`CUDY_PASSWORD` i `.env`, og hent opdateringsbranchen som ovenfor. Kør derefter:
+
+```bash
+SBR_PAGER_TARGET_DRIVER=cudy \
+SBR_PAGER_ROLLBACK_ENV=/ABSOLUT/STI/TIL/DIN/ENV-BACKUP \
+bash scripts/update-sbr-pager.sh
+```
+
+Scriptet pauser aktive watchdogs, før driveren ændres. En stoppet gateway
+sikkerhedskopieres fra en privat kopi af hele datamappen, inklusive SQLite
+WAL-filer. Den eksisterende image kører kun Python-backup, uden netværk eller
+modemlæser. En fejl gendanner det tidligere miljø og forsøger image-rollback
+med den tidligere modemtype. USB-drift kan først genoptages med fysisk
+tilsluttet USB-modem og SIM; software-rollback flytter ikke SIM-kortet.
+
 LT300 skal være primær forbindelse for **både internet og SMS**. Serverens
 Ethernet-kabel tilsluttes routerens LAN-port. Serverens LAN-forbindelse sættes
 til DHCP, så IP-adresse, standardgateway og DNS kommer fra LT300. Docker,

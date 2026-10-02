@@ -11,6 +11,7 @@ command -v docker >/dev/null
 
 DRIVER="$(sed -n 's/^SMS_MODEM_DRIVER=//p' "$ENV_FILE" | tail -1 | tr -d '\r\"\047')"
 DRIVER="${DRIVER:-usb}"
+DRIVER="${SBR_PAGER_TARGET_DRIVER:-$DRIVER}"
 case "$DRIVER" in
   usb) GW_COMPOSE="$APP_DIR/compose/sms-gateway/docker-compose.yml" ;;
   cudy) GW_COMPOSE="$APP_DIR/compose/sms-gateway/cudy.yml" ;;
@@ -30,10 +31,83 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 BACKUP_DIR="$APP_DIR/manual-backups/pager-update-$STAMP"
 mkdir -p "$BACKUP_DIR"
 cp "$ENV_FILE" "$BACKUP_DIR/env.backup"
+# During a USB -> Cudy transition the caller saves the original environment
+# before entering router credentials. Use that private copy for rollback.
+if [[ -n "${SBR_PAGER_ROLLBACK_ENV:-}" ]]; then
+  [[ -f "$SBR_PAGER_ROLLBACK_ENV" ]] || { echo "Rollback-miljøfil mangler." >&2; exit 1; }
+  cp "$SBR_PAGER_ROLLBACK_ENV" "$BACKUP_DIR/env.backup"
+fi
+chmod 600 "$BACKUP_DIR/env.backup"
+OLD_DRIVER="$(sed -n 's/^SMS_MODEM_DRIVER=//p' "$BACKUP_DIR/env.backup" | tail -1 | tr -d '\r\"\047')"
+case "${OLD_DRIVER:-usb}" in
+  usb) OLD_GW_COMPOSE="$APP_DIR/compose/sms-gateway/docker-compose.yml" ;;
+  cudy) OLD_GW_COMPOSE="$APP_DIR/compose/sms-gateway/cudy.yml" ;;
+  *) echo "Ukendt modemtype i rollback-miljøfil." >&2; exit 1 ;;
+esac
 git rev-parse HEAD > "$BACKUP_DIR/checkout.txt"
+
+SUDO=()
+[[ "$(id -u)" == 0 ]] || SUDO=(sudo)
+ACTIVE_TIMERS=()
+restore_timers() {
+  for timer in "${ACTIVE_TIMERS[@]}"; do
+    "${SUDO[@]}" systemctl start "$timer" || true
+  done
+}
+trap restore_timers EXIT
+# Before image replacement, failures leave services intact and restore the
+# original driver/environment before the watchdog timers are resumed.
+trap 'cp "$BACKUP_DIR/env.backup" "$ENV_FILE"; chmod 600 "$ENV_FILE"; exit 1' ERR
+for timer in sbr-pager-watchdog.timer sbr-modem-watchdog.timer; do
+  if systemctl is-active --quiet "$timer"; then
+    ACTIVE_TIMERS+=("$timer")
+    "${SUDO[@]}" systemctl stop "$timer"
+  fi
+done
+# A service started just before its timer stopped must also finish first.
+for service in sbr-pager-watchdog.service sbr-modem-watchdog.service; do
+  if systemctl is-active --quiet "$service"; then
+    "${SUDO[@]}" systemctl stop "$service"
+  fi
+done
+
+if [[ -n "${SBR_PAGER_TARGET_DRIVER:-}" ]]; then
+  # Change the selected driver only after its watchdogs have stopped.
+  sed '/^SMS_MODEM_DRIVER=/d' "$ENV_FILE" > "$BACKUP_DIR/env.target"
+  printf 'SMS_MODEM_DRIVER=%s\n' "$DRIVER" >> "$BACKUP_DIR/env.target"
+  cp "$BACKUP_DIR/env.target" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+fi
 
 backup_db() {
   local container="$1" database="$2" staged="/tmp/sbr-pager-update-$$.db"
+  if [[ "$(docker inspect "$container" --format '{{.State.Running}}')" == false ]]; then
+    # A stopped USB container cannot be started without its physical device.
+    # Copy its entire data directory (including WAL) and back up that private
+    # snapshot with the existing image, without its entrypoint or network.
+    local snapshot="$BACKUP_DIR/$container-source" image
+    mkdir -m 700 "$snapshot"
+    docker cp "$container:/data/." "$snapshot"
+    [[ "$(docker inspect "$container" --format '{{.State.Running}}')" == false ]] || {
+      echo "Containeren startede under backup; afbryder uden installation." >&2; return 1;
+    }
+    image="$(docker inspect "$container" --format '{{.Image}}')"
+    docker run --rm --network none --read-only --user "$(id -u):$(id -g)" --cap-drop ALL \
+      --security-opt no-new-privileges:true \
+      --mount "type=bind,src=$snapshot,dst=/snapshot" \
+      --entrypoint python "$image" -c '
+import sqlite3, sys
+source = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True)
+target = sqlite3.connect("/snapshot/consistent.db")
+source.backup(target)
+assert target.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+target.close(); source.close()
+' "/snapshot/$database"
+    mv "$snapshot/consistent.db" "$BACKUP_DIR/$database"
+    chmod 600 "$BACKUP_DIR/$database"
+    rm -rf -- "$snapshot"
+    return
+  fi
   docker exec "$container" python -c '
 import sqlite3, sys
 source = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True)
@@ -60,31 +134,16 @@ echo "Backup og tidligere images er klar. Bygger den nye version."
 "${WA[@]}" build sms-whatsapp
 "${GW[@]}" build sms-gateway
 
-SUDO=()
-[[ "$(id -u)" == 0 ]] || SUDO=(sudo)
-ACTIVE_TIMERS=()
-restore_timers() {
-  for timer in "${ACTIVE_TIMERS[@]}"; do
-    "${SUDO[@]}" systemctl start "$timer" || true
-  done
-}
-trap restore_timers EXIT
-for timer in sbr-pager-watchdog.timer sbr-modem-watchdog.timer; do
-  if systemctl is-active --quiet "$timer"; then
-    ACTIVE_TIMERS+=("$timer")
-    "${SUDO[@]}" systemctl stop "$timer"
-  fi
-done
-# A service started just before its timer stopped must also finish first.
-for service in sbr-pager-watchdog.service sbr-modem-watchdog.service; do
-  if systemctl is-active --quiet "$service"; then
-    "${SUDO[@]}" systemctl stop "$service"
-  fi
-done
 rollback() {
   echo "Opdatering fejlede. Gendanner de tidligere images." >&2
+  "${GW[@]}" stop sms-gateway || true
+  cp "$BACKUP_DIR/env.backup" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
   "${WA[@]}" -f "$BACKUP_DIR/rollback-pager.yml" up -d --no-build --no-deps sms-whatsapp || true
-  docker compose --env-file "$ENV_FILE" -f "$GW_COMPOSE" -f "$BACKUP_DIR/rollback-gateway.yml" up -d --no-build --no-deps sms-gateway || true
+  docker compose --env-file "$ENV_FILE" -f "$OLD_GW_COMPOSE" -f "$BACKUP_DIR/rollback-gateway.yml" up -d --no-build --no-deps sms-gateway || true
+  if [[ "${OLD_DRIVER:-usb}" == usb && "$DRIVER" == cudy ]]; then
+    echo "Rollback bruger USB igen; SMS kræver tilsluttet USB-modem og SIM." >&2
+  fi
 }
 trap 'rollback; exit 1' ERR
 trap 'rollback; exit 130' INT
