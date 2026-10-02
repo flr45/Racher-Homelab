@@ -3,7 +3,10 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timedelta, timezone
+
+from functools import wraps
 
 from flask import flash, jsonify, redirect, render_template_string, request, url_for
 
@@ -26,6 +29,20 @@ RETRY_MAX_SECONDS = max(RETRY_BASE_SECONDS, int(os.getenv("SMS_WHATSAPP_RETRY_MA
 RETRY_MAX_ATTEMPTS = max(1, int(os.getenv("SMS_WHATSAPP_RETRY_MAX_ATTEMPTS", "20")))
 RETRY_MAX_AGE_HOURS = max(1, int(os.getenv("SMS_WHATSAPP_RETRY_MAX_AGE_HOURS", "24")))
 RETRY_POLL_SECONDS = max(2, int(os.getenv("SMS_WHATSAPP_RETRY_POLL_SECONDS", "5")))
+ASYNC_DELIVERY = os.getenv("SMS_WHATSAPP_ASYNC_DELIVERY", "true").lower() == "true"
+_delivery_lock = threading.RLock()
+_enqueue_lock = threading.RLock()
+_wake_event = threading.Event()
+
+
+def serialized(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        with _delivery_lock:
+            return fn(*args, **kwargs)
+    return wrapper
+
+
 QUALITY_FILTER_ENABLED = os.getenv(
     "SMS_WHATSAPP_QUALITY_FILTER_ENABLED", "true"
 ).strip().lower() in {"1", "true", "yes", "on"}
@@ -193,16 +210,26 @@ def attempt_delivery(
     inbound: base.InboundMessage,
 ) -> bool:
     state = _state_for(delivery.id)
+    delivery.status = "sending"
+    delivery.attempted_at = base.utcnow()
+    db.session.commit()
+    measured_at, measured_start = base.utcnow(), time.monotonic()
+    def measured(success, elapsed):
+        recorder = globals().get("operations_measure")
+        if recorder:
+            try:
+                recorder(delivery, inbound, measured_at, elapsed, success)
+            except Exception:
+                db.session.rollback()
+                log.exception("Kunne ikke gemme tidsmåling; leveringsstatus er allerede gemt")
     try:
-        message_id = base.send_whatsapp(delivery.recipient_phone, inbound.body)
-        _mark_sent(delivery, message_id, state)
-        db.session.commit()
-        if delivery.inbound_id is not None:
-            stations.events.mark_first_delivery(delivery.inbound_id, delivery.attempted_at)
-        return True
+        formatter = globals().get("operations_body", lambda row: row.body)
+        message_id = base.send_whatsapp(delivery.recipient_phone, formatter(inbound))
     except Exception as exc:  # noqa: BLE001
+        elapsed = time.monotonic() - measured_start
         _queue_failure(delivery, exc)
         db.session.commit()
+        measured(False, elapsed)
         log.warning(
             "WhatsApp-levering %s til %s fejlede (status=%s): %s",
             delivery.id,
@@ -211,15 +238,41 @@ def attempt_delivery(
             exc,
         )
         return False
+    elapsed = time.monotonic() - measured_start
+    _mark_sent(delivery, message_id, state)
+    db.session.commit()
+    measured(True, elapsed)
+    # A statistics failure after successful delivery must never resend an SMS.
+    try:
+        if delivery.inbound_id is not None:
+            stations.events.mark_first_delivery(delivery.inbound_id, delivery.attempted_at)
+    except Exception:
+        db.session.rollback()
+        log.exception("Kunne ikke opdatere leveringstid for %s", delivery.id)
+    return True
 
 
 def deliver_inbound_resilient(inbound: base.InboundMessage) -> tuple[int, int]:
+    # Enqueue must remain independent of the worker's slow network calls.
+    with _enqueue_lock:
+        return _enqueue_inbound(inbound)
+
+
+def _enqueue_inbound(inbound: base.InboundMessage) -> tuple[int, int]:
     """Station-filtered delivery with durable retry state.
 
-    The first OpenWA attempt still happens immediately. If it fails, the same
-    delivery row is kept and retried in the background instead of the alarm
-    being abandoned after one request.
+    All recipients are recorded before acknowledging the SMS. Network I/O is
+    handled by the worker, so a slow recipient cannot block the modem reader.
+    Repeated ingest resumes an interrupted enqueue without resending sent rows.
     """
+
+    if InboundDecision.query.filter_by(inbound_id=inbound.id).first() is not None:
+        sent = base.WhatsAppDelivery.query.filter_by(inbound_id=inbound.id, status="sent").count()
+        queued = base.WhatsAppDelivery.query.filter(
+            base.WhatsAppDelivery.inbound_id == inbound.id,
+            base.WhatsAppDelivery.status.in_(("pending", "retrying")),
+        ).count()
+        return sent, queued
 
     quality_ok, quality_reason = message_quality(inbound.body)
     if QUALITY_FILTER_ENABLED and not quality_ok:
@@ -234,16 +287,20 @@ def deliver_inbound_resilient(inbound: base.InboundMessage) -> tuple[int, int]:
         )
         return 0, 0
 
+    guard = globals().get("operations_before_enqueue")
+    if guard and guard(inbound):
+        return 0, 0
+
     _record_decision(inbound, "deliver", None)
-    db.session.commit()
 
     station = stations.station_for_inbound(inbound)
     recipients = base.Recipient.query.filter_by(active=True).order_by(base.Recipient.name).all()
+    selections = stations.subscription_map()
     sent = 0
     queued_or_failed = 0
 
     for recipient in recipients:
-        if not stations.recipient_accepts(recipient.id, station):
+        if not stations.accepts_selection(selections.get(recipient.id, {stations.ALL_STATIONS}), station):
             continue
 
         existing = (
@@ -269,13 +326,28 @@ def deliver_inbound_resilient(inbound: base.InboundMessage) -> tuple[int, int]:
             attempted_at=base.utcnow(),
         )
         db.session.add(delivery)
-        db.session.commit()
+        db.session.flush()
+        db.session.add(WhatsAppRetryState(
+            delivery_id=delivery.id,
+            attempts=0,
+            first_failed_at=base.utcnow(),
+            next_attempt_at=base.utcnow(),
+            updated_at=base.utcnow(),
+        ))
+        queued_or_failed += 1
 
-        if attempt_delivery(delivery, inbound):
-            sent += 1
-        else:
-            queued_or_failed += 1
-
+    if not sent and not queued_or_failed:
+        reason = "Ingen aktive modtagere har valgt Test" if station == stations.TEST_STATION else "Ingen aktive modtagere har valgt denne station" if station else "Ingen aktive modtagere med Alle stationer"
+        _record_decision(inbound, "no_recipients", reason)
+    db.session.commit()
+    if ASYNC_DELIVERY or (globals().get("operations_paused") and operations_paused()):
+        _wake_event.set()
+    else:
+        # Compatibility mode and embedded build checks.
+        for delivery in base.WhatsAppDelivery.query.filter_by(inbound_id=inbound.id, status="pending").all():
+            if attempt_delivery(delivery, inbound):
+                sent += 1
+                queued_or_failed -= 1
     return sent, queued_or_failed
 
 
@@ -319,11 +391,31 @@ def _seed_recent_legacy_failures() -> int:
     return created
 
 
+@serialized
 def retry_due_once(limit: int = 20) -> dict:
-    if not RETRY_ENABLED:
+    if not RETRY_ENABLED and not ASYNC_DELIVERY:
         return {"checked": 0, "sent": 0, "remaining": 0}
 
+    paused = globals().get("operations_paused")
+    if paused and paused():
+        return {"checked": 0, "sent": 0, "remaining": queue_snapshot()["active"]}
+
     _seed_recent_legacy_failures()
+    # Recover rows committed by older code before a crash, without reviving
+    # terminal failures or rows whose retry state was deliberately completed.
+    orphans = base.WhatsAppDelivery.query.filter(
+        base.WhatsAppDelivery.status == "pending",
+        base.WhatsAppDelivery.inbound_id.is_not(None),
+        ~base.WhatsAppDelivery.id.in_(db.session.query(WhatsAppRetryState.delivery_id)),
+    ).limit(100).all()
+    for delivery in orphans:
+        db.session.add(WhatsAppRetryState(
+            delivery_id=delivery.id, attempts=0,
+            first_failed_at=delivery.attempted_at or base.utcnow(),
+            next_attempt_at=base.utcnow(), updated_at=base.utcnow(),
+        ))
+    if orphans:
+        db.session.commit()
     now = base.utcnow()
     rows = (
         db.session.query(WhatsAppRetryState, base.WhatsAppDelivery, base.InboundMessage)
@@ -341,7 +433,26 @@ def retry_due_once(limit: int = 20) -> dict:
     )
 
     sent = 0
-    for _state, delivery, inbound in rows:
+    for state, delivery, inbound in rows:
+        first = _aware(state.first_failed_at) or now
+        if (now - first).total_seconds() >= RETRY_MAX_AGE_HOURS * 3600 or state.attempts >= RETRY_MAX_ATTEMPTS:
+            delivery.status = "failed"
+            delivery.error = "Leveringens tids- eller forsøgsgrænse er nået"
+            state.next_attempt_at = None
+            state.completed_at = now
+            db.session.commit()
+            continue
+        hold = globals().get("operations_hold_stale")
+        if hold and hold(state, delivery, now):
+            continue
+        recipient = base.Recipient.query.filter_by(phone=delivery.recipient_phone, active=True).first()
+        if recipient is None or not stations.recipient_accepts(recipient.id, stations.station_for_inbound(inbound)):
+            delivery.status = "cancelled"
+            delivery.error = "Modtageren er pauset, ændret, slettet eller har fravalgt stationen"
+            state.next_attempt_at = None
+            state.completed_at = now
+            db.session.commit()
+            continue
         if attempt_delivery(delivery, inbound):
             sent += 1
 
@@ -379,9 +490,10 @@ def quality_snapshot() -> dict:
 
 
 def queue_snapshot() -> dict:
-    retrying = base.WhatsAppDelivery.query.filter_by(status="retrying").count()
-    pending = base.WhatsAppDelivery.query.filter_by(status="pending").count()
-    failed = base.WhatsAppDelivery.query.filter_by(status="failed").count()
+    alarms = base.WhatsAppDelivery.query.filter(base.WhatsAppDelivery.inbound_id.is_not(None))
+    retrying = alarms.filter_by(status="retrying").count()
+    pending = alarms.filter_by(status="pending").count()
+    failed = alarms.filter_by(status="failed").count()
     active = WhatsAppRetryState.query.filter(WhatsAppRetryState.completed_at.is_(None)).count()
 
     oldest = (
@@ -422,15 +534,25 @@ def _retry_worker() -> None:
     while not _stop_event.is_set():
         try:
             with app.app_context():
+                recover = globals().get("operations_recover")
+                if recover:
+                    recover()
                 retry_due_once()
+                runner = globals().get("manual_test_runner")
+                if runner:
+                    runner()
+                housekeeper = globals().get("operations_housekeeping")
+                if housekeeper:
+                    housekeeper()
         except Exception:  # noqa: BLE001
             log.exception("WhatsApp retry-worker fejlede")
-        _stop_event.wait(RETRY_POLL_SECONDS)
+        _wake_event.wait(RETRY_POLL_SECONDS)
+        _wake_event.clear()
 
 
 def start_retry_worker() -> None:
     global _worker_started
-    if not RETRY_ENABLED or not RETRY_WORKER_ENABLED:
+    if not (RETRY_ENABLED or ASYNC_DELIVERY) or not RETRY_WORKER_ENABLED:
         return
     with _worker_lock:
         if _worker_started:
@@ -519,6 +641,7 @@ app.view_functions["health"] = health_with_delivery_queue
 
 @app.post("/leveringsko/genforsog")
 @base.login_required
+@serialized
 def retry_whatsapp_deliveries_now():
     base.check_csrf()
     now = base.utcnow()
@@ -530,6 +653,8 @@ def retry_whatsapp_deliveries_now():
             base.WhatsAppDelivery.inbound_id.is_not(None),
             base.WhatsAppDelivery.attempted_at >= cutoff,
         )
+        .join(base.InboundMessage, base.InboundMessage.id == base.WhatsAppDelivery.inbound_id)
+        .filter(base.InboundMessage.created_at >= cutoff)
         .order_by(base.WhatsAppDelivery.id.asc())
         .limit(100)
         .all()
@@ -540,27 +665,33 @@ def retry_whatsapp_deliveries_now():
             state = WhatsAppRetryState(
                 delivery_id=delivery.id,
                 attempts=0,
-                first_failed_at=now,
+                first_failed_at=delivery.attempted_at or now,
                 updated_at=now,
             )
             db.session.add(state)
         state.attempts = 0
-        state.first_failed_at = now
         state.next_attempt_at = now
         state.completed_at = None
         state.updated_at = now
         delivery.status = "retrying"
     db.session.commit()
 
-    result = retry_due_once(limit=100)
-    flash(
-        f"Leveringskø behandlet: {result['sent']} sendt nu, "
-        f"{result['remaining']} afventer fortsat."
-    )
-    return redirect(request.referrer or url_for("dashboard"))
+    WhatsAppRetryState.query.filter(WhatsAppRetryState.completed_at.is_(None), WhatsAppRetryState.next_attempt_at.is_not(None)).update({"next_attempt_at": now})
+    db.session.commit()
+    _wake_event.set()
+    flash("Leveringskøen er klar til et nyt forsøg.")
+    return redirect(url_for("dashboard"))
 
 
 with app.app_context():
     db.create_all()
 
-start_retry_worker()
+# dashboard_app starts the worker after all safety callbacks and recovery hooks.
+
+
+def record_sender_rejection(inbound):
+    _record_decision(inbound, "sender_rejected", "Afsendernummeret var ikke godkendt ved modtagelsen")
+    db.session.commit()
+
+
+base.record_sender_rejection = record_sender_rejection

@@ -6,6 +6,11 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: sqlite:////data/sms-gateway.db
+      SMS_MODEM_DRIVER: usb
+      CUDY_BASE_URL: ${CUDY_BASE_URL:-http://192.168.10.1}
+      CUDY_USERNAME: ${CUDY_USERNAME:-admin}
+      CUDY_PASSWORD: ${CUDY_PASSWORD:-}
+      CUDY_HTTP_TIMEOUT_SECONDS: ${CUDY_HTTP_TIMEOUT_SECONDS:-15}
       MODEM_DEVICE: /dev/sbr-sms-modem
       MODEM_BAUDRATE: ${SMS_MODEM_BAUDRATE:-115200}
       MODEM_POLL_SECONDS: ${SMS_MODEM_POLL_SECONDS:-0.5}

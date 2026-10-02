@@ -30,7 +30,7 @@ CONTAINERS = {
     "pager": "sbr-sms-whatsapp",
     "openwa": "racher-sms-openwa",
 }
-_CREG_RE = re.compile(r"\+CREG:\s*\d+\s*,\s*(\d+)")
+_CREG_RE = re.compile(r"\+(?:CREG|CEREG|CGREG):\s*\d+\s*,\s*(\d+)")
 
 
 def load_env(path: Path) -> None:
@@ -292,7 +292,7 @@ def recover_openwa_session() -> str:
 
 def compose_up(component: str, *, force_recreate: bool = False) -> str:
     if component == "gateway":
-        compose_file = "compose/sms-gateway/docker-compose.yml"
+        compose_file = "compose/sms-gateway/cudy.yml" if os.getenv("SMS_MODEM_DRIVER", "usb") == "cudy" else "compose/sms-gateway/docker-compose.yml"
         service = "sms-gateway"
     else:
         compose_file = "compose/sms-whatsapp/compose.yml"
@@ -309,6 +309,8 @@ def compose_up(component: str, *, force_recreate: bool = False) -> str:
         "-d",
         "--no-deps",
     ]
+    if component != "gateway" and os.getenv("SMS_WHATSAPP_OFFSITE_MOUNT", "false").lower() == "true":
+        command[6:6] = ["-f", "compose/sms-whatsapp/offsite-backup.yml"]
     if force_recreate:
         command.append("--force-recreate")
     command.append(service)

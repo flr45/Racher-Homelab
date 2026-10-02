@@ -1,12 +1,7 @@
-"""Automatic address geocoding for the SBR Pager alarm map.
+"""Background alarm geocoding using KDS Adressevælger, with legacy provider support.
 
-The alarm/WhatsApp path completes before geocoding is scheduled. This keeps
-notification delivery independent of the external address service. Only safe
-DAWA datavask matches (category A or B) are persisted automatically; uncertain
-category C matches are left for manual placement in the admin UI.
-
-The provider URL is configurable so DAWA can be replaced without changing the
-stored alarm-map data when the service is retired.
+Delivery completes independently. Only unique exact/near-exact address matches
+are persisted; uncertain matches remain available for manual placement.
 """
 
 from __future__ import annotations
@@ -16,6 +11,9 @@ import logging
 import os
 import re
 import threading
+import uuid
+from pyproj import Transformer
+from pyproj.exceptions import ProjError
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -34,12 +32,15 @@ log = logging.getLogger("sbr-pager-geocode")
 AUTO_GEOCODE = os.getenv("SBR_PAGER_AUTO_GEOCODE", "true").lower() == "true"
 GEOCODER_URL = os.getenv(
     "SBR_PAGER_GEOCODER_URL",
-    "https://api.dataforsyningen.dk/datavask/adgangsadresser",
+    "https://adressevaelger.dk/vask/",
 ).strip()
 GEOCODER_TIMEOUT_SECONDS = max(
     1.0,
     float(os.getenv("SBR_PAGER_GEOCODER_TIMEOUT_SECONDS", "4")),
 )
+
+GEOCODER_TOKEN = os.getenv("SBR_PAGER_GEOCODER_TOKEN", "adressevaelger123").strip()
+_UTM_TO_WGS84 = Transformer.from_crs("EPSG:25832", "EPSG:4326", always_xy=True)
 
 
 def _valid_coordinates(value) -> tuple[float, float] | None:
@@ -92,6 +93,31 @@ def parse_geocode_result(document: dict) -> tuple[float, float, str] | None:
     return coordinates[0], coordinates[1], category
 
 
+def parse_adressevaelger_location(document):
+    if not isinstance(document, dict) or document.get("status") != "ok":
+        return None
+    address = document.get("adresse") or {}
+    house = address.get("husnummer") or document.get("husnummer") or {}
+    if str(house.get("status")) != "3":
+        return None
+    geometry = (house.get("adgangspunkt") or {}).get("geometri") or {}
+    crs = ((geometry.get("crs") or {}).get("properties") or {}).get("name")
+    coords = geometry.get("coordinates")
+    if geometry.get("type") != "Point" or crs != "EPSG:25832" or not isinstance(coords, list) or len(coords) != 2:
+        return None
+    try:
+        lon, lat = _UTM_TO_WGS84.transform(float(coords[0]), float(coords[1]), errcheck=True)
+    except (TypeError, ValueError, ProjError):
+        return None
+    return _valid_coordinates([lon, lat])
+
+
+def _request_json(url):
+    outgoing = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "SBR-Pager/1.0 automatic-alarm-map"})
+    with urllib.request.urlopen(outgoing, timeout=GEOCODER_TIMEOUT_SECONDS) as response:
+        return json.loads(response.read(1048576).decode("utf-8"))
+
+
 def address_candidates(address: str) -> list[str]:
     """Prefer the address-only segment if an alarm line contains · separators."""
     raw = " ".join((address or "").strip().split())
@@ -116,42 +142,37 @@ def address_candidates(address: str) -> list[str]:
 
 
 def geocode_address(address: str):
-    """Resolve an alarm address through the configured DAWA-compatible service."""
+    """Use the official replacement API, retaining configured DAWA-compatible URLs."""
     if not AUTO_GEOCODE or not GEOCODER_URL:
         return None
-
+    official = urllib.parse.urlsplit(GEOCODER_URL).hostname == "adressevaelger.dk"
     for candidate in address_candidates(address):
-        separator = "&" if "?" in GEOCODER_URL else "?"
-        url = GEOCODER_URL + separator + urllib.parse.urlencode({"betegnelse": candidate})
-        outgoing = urllib.request.Request(
-            url,
-            headers={
-                "Accept": "application/json",
-                "User-Agent": "SBR-Pager/1.0 automatic-alarm-map",
-            },
-        )
         try:
-            with urllib.request.urlopen(outgoing, timeout=GEOCODER_TIMEOUT_SECONDS) as response:
-                document = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            log.warning("Automatisk adresseopslag fejlede for %r: %s", candidate, exc)
+            params = {"adresse": candidate, "token": GEOCODER_TOKEN} if official else {"betegnelse": candidate}
+            document = _request_json(GEOCODER_URL + ("&" if "?" in GEOCODER_URL else "?") + urllib.parse.urlencode(params))
+            if official:
+                if not isinstance(document, dict):
+                    return None
+                code = (document.get("vaskestatus") or {}).get("kode")
+                match = document.get("vaskeresultat") or {}
+                # Intervals and ambiguous/no matches must never become guessed alarm pins.
+                if code not in (1000, 900) or str(match.get("status")) != "3":
+                    continue
+                address_id = str(uuid.UUID(match.get("adresse_id_lokalid", "")))
+                root = urllib.parse.urlsplit(GEOCODER_URL)
+                detail_url = urllib.parse.urlunsplit((root.scheme, root.netloc, "/adresser/" + address_id, urllib.parse.urlencode({"token": GEOCODER_TOKEN}), ""))
+                coords = parse_adressevaelger_location(_request_json(detail_url))
+                parsed = (coords[0], coords[1], str(code)) if coords else None
+            else:
+                parsed = parse_geocode_result(document)
+                if isinstance(document, dict) and document.get("kategori") == "C":
+                    return None
+            if parsed:
+                return {"latitude": parsed[0], "longitude": parsed[1], "category": parsed[2], "query": candidate}
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, TypeError, AttributeError) as exc:
+            # Exception URLs can contain API tokens: only log the exception class.
+            log.warning("Automatisk adresseopslag fejlede (%s)", type(exc).__name__)
             return None
-
-        parsed = parse_geocode_result(document)
-        if parsed:
-            latitude, longitude, category = parsed
-            return {
-                "latitude": latitude,
-                "longitude": longitude,
-                "category": category,
-                "query": candidate,
-            }
-
-        category = str(document.get("kategori") or "").strip().upper() if isinstance(document, dict) else ""
-        if category == "C":
-            log.warning("Usikkert adresse-match (kategori C) blev ikke gemt automatisk: %r", candidate)
-            return None
-
     return None
 
 

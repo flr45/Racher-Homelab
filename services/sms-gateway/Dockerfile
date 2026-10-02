@@ -13,6 +13,8 @@ COPY sitecustomize.py /usr/local/lib/python3.12/site-packages/sitecustomize.py
 COPY app.py base_app.py
 COPY queued_app.py app.py
 COPY modem_reader.py modem_reader_sbr.py gsm0338.py sms_pdu.py privacy_filter.py entrypoint.sh ./
+COPY cudy_client.py cudy_reader.py multipart_monitor.py ./
+RUN python -m py_compile cudy_client.py cudy_reader.py
 RUN python -m py_compile app.py base_app.py modem_reader.py modem_reader_sbr.py gsm0338.py sms_pdu.py privacy_filter.py
 RUN sh -n entrypoint.sh
 RUN python -c 'from privacy_filter import redact_personal_data; s="(S) Brovej 1, 4180 Sorø\nPatient: Peter Jensen\nCPR: 010190-1234\nKontakt: +45 22 27 03 96\nMail: test@example.dk"; r=redact_personal_data(s); assert "Peter Jensen" not in r and "010190" not in r and "22 27 03 96" not in r and "test@example.dk" not in r and "Brovej 1, 4180 Sorø" in r'

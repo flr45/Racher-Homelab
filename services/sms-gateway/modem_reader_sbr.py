@@ -536,6 +536,8 @@ def send_multipart_prealerts(parts: list[sms_pdu.DecodedSmsPart]) -> None:
 
 def parse_cmgl_with_prealerts(response: str) -> list[dict]:
     parts = sms_pdu.parse_cmgl_parts(response)
+    from multipart_monitor import observe
+    observe(parts)
     send_multipart_prealerts(parts)
     messages = sms_pdu.assemble_parts(parts)
     part_by_index = {part.index: part for part in parts}

@@ -1,42 +1,78 @@
-# SMS → WhatsApp Gateway
+# SBR Pager · SMS → WhatsApp
 
-Selvstændigt Racher-Homelab-modul som læser nye indgående SMS'er fra den eksisterende `sms-gateway`, godkender afsenderen mod en administrerbar allowlist og videresender teksten til aktive WhatsApp-modtagere via OpenWA.
+SMS fra godkendte afsendere samles som alarmhændelser og videresendes til
+aktive WhatsApp-modtagere via OpenWA. Stationsvalg og Test opt-in bevares.
 
-## Funktioner
+## Drift
 
-- Flere godkendte SMS-afsendere, administreret i web-UI.
-- Flere WhatsApp-modtagere med aktiv/pause og sletning.
-- Første start springer eksisterende SMS-historik over, så gamle alarmer ikke udsendes.
-- Deduplikering via SMS-gatewayens message-id.
-- Standard-kommandoerne `status`, `server status` og `serverstatus` videresendes ikke.
-- Log over accepterede/afviste SMS'er og WhatsApp-leveringer.
-- Testbesked fra admin-siden.
-- OpenWA-status på dashboardet.
-- Fejl i OpenWA påvirker ikke SMS-modemmet, Vagtbytte eller den eksisterende SMS-kø.
+`SIM800C / Huawei USB → SMS Gateway → vedvarende WhatsApp-kø → OpenWA`
 
-## Dataflow
+Alternativt: `Cudy LT300 LAN → AT-webformular → samme SMS Gateway og kø`.
+Cudy-adapteren er forberedt ud fra den officielle LT300-demo. Den skal
+idriftsættes på den konkrete router/firmware, før USB erstattes. Den modtager
+SMS; udgående SMS er fortsat en USB-funktion.
 
-`Huawei E180 → sms-gateway → sms-whatsapp poller → allowlist → OpenWA → WhatsApp-modtagere`
+## Brugerflade
 
-Polleren bruger den eksisterende `GET /api/messages` med `SMS_GATEWAY_API_TOKEN`. Modemporten åbnes derfor fortsat kun af den eksisterende modem-reader.
+- Overblik med modem, WhatsApp, alarmhændelser, modtagere og leveringskø.
+- Brugere & stationer med almindelige stationsvalg og separat Test opt-in.
+- Alarmhistorik, statistik, kort og hændelsernes Sending 2-tidslinjer.
+- Forbindelser med USB/Cudy-status og en Cudy-test uden netværksændringer.
+- Indstillinger med godkendte SMS-afsendere og pre-alarm ventetid.
+- Tekniske logs er foldet sammen; status opdateres uden at genindlæse formularer.
 
-## OpenWA
+## Leveringssikkerhed
 
-OpenWA skal være netværksmæssigt tilgængelig fra `sbr-sms-whatsapp`. Standard er `http://openwa:2785/api`. API-key sendes i `X-API-Key`, og `SMS_WHATSAPP_OPENWA_SESSION_ID` skal være OpenWA-sessionens id/UUID.
+Alle modtagerjobs gemmes, før modemmet får kvittering. WhatsApp-kald kører i
+baggrunden. Fejl forsøges igen med stigende ventetid; pending jobs genoptages
+efter genstart. Gamle alarmer, pauserede/slettede modtagere og fravalgte
+stationer kontrolleres før et nyt forsøg. OpenWA skal kvittere med besked-id,
+før en levering mærkes sendt. Et netværksbrud efter faktisk afsendelse men før
+kvittering kan stadig give en gentagelse; OpenWA-grænsefladen garanterer ikke
+præcis én levering.
 
-Hvis din eksisterende OpenWA-container (`racher-pager-openwa`) kører i en anden Compose-stack, kan den uden at eksponere API'et offentligt kobles på det fælles backend-netværk:
+Kør én Gunicorn worker, som i Dockerfile. Ingest og køarbejder har separate
+låse, så langsom netværksafsendelse ikke spærrer for modtagelsen.
+`SMS_WHATSAPP_RETRY_WORKER=false` stopper baggrundsarbejderen og bruges kun i
+test/vedligehold. I normal drift skal den være `true`.
+
+## Installation
+
+Se [opdaterings- og Cudy-guide](../../docs/SBR-PAGER-UPDATE.md).
+Programmet bruger eksisterende SQLite- og OpenWA-volumener.
+Admin bindes fortsat til konfigureret localhost/Tailscale-IP; Pagerens
+opstart efter Tailscale styres fortsat af `sbr-pager-boot.service`.
+
+## Test
 
 ```bash
-docker network connect backend racher-pager-openwa
+python -m pip install -r services/sms-whatsapp/requirements.txt pyserial==3.5 -r tests/pager/requirements.txt
+python -m pytest -q tests/pager
 ```
 
-Derefter skal containeren kunne nås på et navn på det netværk. Hvis DNS-navnet `openwa` ikke findes dér, kan `SMS_WHATSAPP_OPENWA_URL` sættes til containerens navn, fx `http://racher-pager-openwa:2785/api`.
+Regressionstests dækker kø/genstart, langsom WhatsApp, deduplikering,
+stationsvalg, sletning, ugyldigt input, dansk tegnsæt og Cudys login/AT-formular.
+Dockerfile indeholder desuden de eksisterende alarm-, modem- og PDU-kontroller.
 
-## Start
+### Afsenderfilter
 
-```bash
-cd ~/Racher-Homelab
-docker compose --env-file .env -f compose/sms-whatsapp/compose.yml up -d --build
-```
+Indstillinger har en afkrydsningsboks til at videresende SMS fra alle
+telefonnumre. Valget gemmes i den eksisterende runtime-indstillingstabel og
+bevares efter genstart. Slå den fra for at bruge listen med godkendte numre
+igen. Stationsvalg, Test-opt-in og modemstøjsfilter gælder fortsat; tidligere
+afviste SMS genudsendes ikke. API-token og administratorlogin kræves stadig.
 
-Admin-UI bindes som standard kun på hostens `127.0.0.1:8091`. Eksponér den via din eksisterende reverse proxy/Tailscale, hvis den skal åbnes fra andre enheder.
+### Drift og test
+
+Overblik viser separat DNS/HTTPS-kontrol, SMS-status og OpenWA-status.
+`/enkelt-test` køer en manuel test til én aktiv bruger og viser OpenWA-id og
+svartid; resultatet er ikke telefonens leverings-/læsekvittering. Testen
+genudsendes ikke automatisk efter fejl eller afbrudt afsendelse.
+`/diagnostik` viser gemte afvisningsårsager og leveringsfejl uden netværkskald
+eller afsendelse. Alle sider og status-API'er kræver administratorlogin.
+
+Operational administration now includes daily consistent SQLite backups with configuration restore, bounded maintenance/pilot modes, explicit approval of stale or interrupted deliveries, searchable message history, per-recipient timelines, configuration audit, routing preview, startup checks, sanitized diagnostic export and a private status-only screen. Test SMS are explicitly marked; potential duplicate text is flagged without suppressing legitimate alarms. Subscription lookups are batched and existing databases receive time/status indexes. The worker starts only after safety controls and crash recovery are initialized. Optional retention defaults to disabled. See `docs/SBR-PAGER-UPDATE.md` for all controls, backup limits and offline database recovery.
+
+Recipient station matrices support confirmed bulk updates; recipient failure history includes measured attempts and current unresolved jobs. Daily reports use Danish calendar days and distinguish processing, queue wait and OpenWA response time. Multipart diagnostics use the active reader's actual PDU scans, with bounded text-free status storage. Backups can be restored into an isolated test database manually or weekly. The mobile menu collapses, history filters stay per login session, and separate LT300/USB commissioning checklists record manual physical-test results. These controls do not install the software or send commissioning messages automatically; LT300 outgoing SMS remains unsupported pending firmware verification.
+
+Personal scrypt-hashed operator accounts add server-enforced read-only access and named audit entries, retaining environment recovery login. Existing sessions are invalidated by account edits and full database restoration. Independent monitoring tracks bounded connection transitions, delivery backlog and disk/SMS storage; optional TLS email or HTTPS webhook alerts are disabled until configured and enabled. An independent backup courier writes authenticated encrypted backup bundles to an explicitly mounted second-machine directory with a required marker, verifies read-back, rate-limits retries and never changes live jobs. Destination, key and notification channel must be selected at installation. Optional offsite Compose configuration is retained by boot, watchdog, update and restore scripts. See the update guide for limits and setup.

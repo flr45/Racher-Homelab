@@ -35,6 +35,9 @@ GATEWAY_STATUS_FILE = Path(os.getenv("GATEWAY_STATUS_FILE", "/data/gateway-statu
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:////data/sms-gateway.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite:"):
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"connect_args": {"timeout": 30}}
 db = SQLAlchemy(app)
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("sms-gateway")
@@ -55,7 +58,7 @@ def require_api_token():
     if (
         not separator
         or scheme.lower() != "bearer"
-        or not hmac.compare_digest(supplied.strip(), configured)
+        or not hmac.compare_digest(supplied.strip().encode("utf-8"), configured.encode("utf-8"))
     ):
         return jsonify(error="Ikke godkendt"), 401
     return None
@@ -120,6 +123,8 @@ def utc_iso():
 
 
 def normalize_phone(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Ugyldigt telefonnummer")
     phone = re.sub(r"[\s()-]", "", value or "")
     if phone.startswith("00"):
         phone = "+" + phone[2:]
@@ -127,7 +132,7 @@ def normalize_phone(value: str) -> str:
         phone = "+45" + phone
     if not PHONE_PATTERN.fullmatch(phone):
         raise ValueError("Ugyldigt telefonnummer")
-    return phone
+    return phone if phone.startswith("+") else "+" + phone
 
 
 def parse_received_at(value):
@@ -343,6 +348,8 @@ def process_incoming(
     source_message_id: str | None = None,
 ):
     sender = normalize_phone(sender)
+    if not isinstance(body, str):
+        raise ValueError("SMS-teksten skal være tekst")
     body = (body or "").strip()
     if not body:
         raise ValueError("SMS-teksten er tom")
@@ -449,6 +456,12 @@ def health():
     gateway_status = read_status_file(GATEWAY_STATUS_FILE)
     gateway_last_received = gateway_status.get("last_received_sms_at") or latest_message_at
     modem_state = str(modem_status.get("state") or "unknown").lower()
+    try:
+        updated = parse_received_at(modem_status.get("updated_at")) if modem_status.get("updated_at") else None
+        if modem_state == "online" and (updated is None or (utcnow() - updated).total_seconds() > 120):
+            modem_state = "stale"
+    except ValueError:
+        modem_state = "stale"
     overall_status = (
         "ok"
         if database_status == "online" and modem_state == "online"
@@ -460,6 +473,8 @@ def health():
         checked_at=utc_iso(),
         modem={
             "state": modem_state,
+            "transport": os.getenv("SMS_MODEM_DRIVER", "usb"),
+            "capability": "receive-only" if os.getenv("SMS_MODEM_DRIVER", "usb") == "cudy" else "send-receive",
             "device": modem_status.get("device") or os.getenv("MODEM_DEVICE", "/dev/ttyUSB0"),
             "updated_at": modem_status.get("updated_at"),
             "last_message_at": modem_status.get("last_message_at"),
@@ -484,6 +499,8 @@ def health():
 @app.post("/api/incoming")
 def incoming():
     payload = request.get_json(force=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Der forventes et JSON-objekt"), 400
     try:
         inbound, recipients, vagtbytte_result = process_incoming(
             payload.get("sender", ""),
