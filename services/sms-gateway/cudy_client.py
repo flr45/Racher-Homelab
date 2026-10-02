@@ -37,10 +37,14 @@ class FormPage(HTMLParser):
             self.forms.append(self.form)
         elif tag == "input" and self.form is not None and attrs.get("name"):
             self.form["fields"][attrs["name"]] = attrs.get("value", "")
+        elif tag == "button" and self.form is not None and attrs.get("name"):
+            self.form.setdefault("buttons", {})[attrs["name"]] = attrs.get("value", "")
         elif tag == "textarea":
             self.textarea = attrs.get("name") or attrs.get("id")
             if self.textarea:
                 self.textareas[self.textarea] = ""
+                if self.form is not None:
+                    self.form.setdefault("textareas", set()).add(self.textarea)
 
     def handle_endtag(self, tag):
         if tag == "form":
@@ -189,6 +193,41 @@ class CudyClient:
             self.at_form = None
             raise CudyError("Cudy gav ikke et genkendeligt AT-svar; SMS beholdes på routeren")
         return result
+
+    def prepare_sms(self, recipient: str, body: str):
+        """Validate the observed LT300 V3 form without submitting an SMS.
+
+        The returned token-bearing fields are private and must never be logged.
+        Production sending remains disabled until acknowledgement is verified.
+        """
+        if not isinstance(recipient, str) or not re.fullmatch(r"\+[1-9][0-9]{7,14}", recipient):
+            raise CudyError("Modtager skal være ét telefonnummer med landekode")
+        if not isinstance(body, str) or not body.strip() or len(body) > 160:
+            raise CudyError("Prøve-SMS skal indeholde 1–160 tegn")
+        if any(ord(char) < 32 and char not in "\n\r\t" for char in body):
+            raise CudyError("SMS-teksten indeholder ugyldige kontroltegn")
+        url = self.root + "admin/network/gcom/sms/smsnew?nomodal=&iface=4g"
+        page = self._request(url)
+        if page.containing("luci_password"):
+            self._login(page)
+            page = self._request(url)
+        phone = "cbid.smsnew.1.phone"
+        content = "cbid.smsnew.1.content"
+        send = "cbid.smsnew.1.send"
+        form = page.containing(phone)
+        if (not form or not form["fields"].get("token")
+                or content not in form.get("textareas", set())
+                or send not in form.get("buttons", {})):
+            raise CudyError("Routerens SMS-formular genkendes ikke; intet sendt")
+        action = self._same_origin(urllib.parse.urljoin(url, form["action"] or url))
+        if urllib.parse.urlsplit(action).path != urllib.parse.urlsplit(url).path:
+            raise CudyError("Ukendt SMS-formularadresse; intet sendt")
+        # Copy only the observed safe controls, never unrelated configuration.
+        fields = {key: form["fields"][key] for key in ("token", "_csrf") if key in form["fields"]}
+        fields.update({"cbi.submit": "1", "timeclock": str(int(time.time())),
+                       phone: recipient, content: body, send: form["buttons"][send]})
+        multipart_form(fields)  # Validate encoding before a future explicit send.
+        return action, fields
 
     def probe(self):
         self.connect()

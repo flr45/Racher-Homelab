@@ -504,3 +504,7 @@ git show FETCH_HEAD:scripts/probe-cudy-features.py | docker exec -i racher-sms-g
 ```
 
 Kontrollen logger ind med containerens eksisterende routeropsætning og læser fire sider. Den sender ingen SMS og viser kun feltnavne, felttyper og en begrænset liste af statusord, aldrig feltværdier, beskedtekster eller loginhemmeligheder. Output skal bruges til næste adapterændring; der må ikke gættes på en afsendelses-API.
+
+LT300 V3.0/2.5.12 formularstruktur er nu fysisk aflæst: `cbid.smsnew.1.phone`, `cbid.smsnew.1.content` og knappen `cbid.smsnew.1.send`. Adapterens `prepare_sms()` validerer telefonnummer, kort prøvetekst, token, felter og samme lokale formularadresse uden at sende. Den bruges endnu ikke af driftskøen. HTTP 200 er ikke en afsendelseskvittering. Næste fysiske kontrol er én tydeligt mærket prøve-SMS fra routerens webformular, herunder kvitteringen og modtagelsen på telefonen. Den native SMS-læser skal fortsat forblive deaktiveret.
+
+Statusfragmenterne viste både Cellular/Connected og WAN/Connected, mens WISP-fragmentet kun viste WISP. Det beviser ikke aktiv internetrute; automatisk Wi-Fi/4G-kildevisning må derfor stadig ikke udledes af disse ord alene.

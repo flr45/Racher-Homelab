@@ -159,3 +159,47 @@ def test_mode_restored_even_if_inbox_read_fails():
     router = type('Router', (), {'command':staticmethod(command)})()
     with pytest.raises(CudyError):cudy_reader.read_inbox(router)
     assert calls[-1] == 'AT+CMGF=1'
+
+
+SMS_FORM = '''<form action="/cgi-bin/luci/admin/network/gcom/sms/smsnew?iface=4g"><input name="token" value="private-token"><input name="cbi.submit" value="1"><input name="cbid.smsnew.1.phone"><textarea name="cbid.smsnew.1.content"></textarea><button name="cbid.smsnew.1.send" value="1" type="submit">Send</button></form>'''
+
+
+def test_prepare_sms_uses_observed_v3_fields_and_never_submits():
+    requests = []
+    def open_page(request, timeout):
+        requests.append(request)
+        return Response(SMS_FORM.encode())
+    router = type('Router', (), {'open': staticmethod(open_page)})()
+    action, fields = CudyClient(opener=router).prepare_sms('+4512345678', 'SBR prøve æøå')
+    assert action.endswith('smsnew?iface=4g')
+    assert fields['cbid.smsnew.1.phone'] == '+4512345678'
+    assert fields['cbid.smsnew.1.content'] == 'SBR prøve æøå'
+    assert fields['cbid.smsnew.1.send'] == '1'
+    assert all(request.data is None for request in requests)
+
+
+@pytest.mark.parametrize('recipient,body', [('12345678','test'),('+4512345678,+4587654321','test'),('+4512345678',''),('+4512345678','x'*161),('+4512345678','bad\x00text')])
+def test_invalid_sms_is_rejected_before_network(recipient, body):
+    def refuse(*args, **kwargs):
+        pytest.fail('No request expected')
+    client = CudyClient(opener=type('Router', (), {'open': staticmethod(refuse)})())
+    with pytest.raises(CudyError):
+        client.prepare_sms(recipient, body)
+
+
+@pytest.mark.parametrize('document', [
+    SMS_FORM.replace('name="cbid.smsnew.1.content"','name="other"'),
+    SMS_FORM.replace('name="cbid.smsnew.1.send"','name="other"'),
+    SMS_FORM.replace('value="private-token"','value=""'),
+    SMS_FORM.replace('/cgi-bin/luci/admin/network/gcom/sms/smsnew?iface=4g','https://other.invalid/send'),
+    SMS_FORM.replace('/cgi-bin/luci/admin/network/gcom/sms/smsnew?iface=4g','/cgi-bin/luci/admin/system/reboot'),
+])
+def test_unknown_sms_form_fails_without_submission(document):
+    requests=[]
+    def open_page(request, timeout):
+        requests.append(request)
+        return Response(document.encode())
+    client=CudyClient(opener=type('Router', (), {'open': staticmethod(open_page)})())
+    with pytest.raises(CudyError):
+        client.prepare_sms('+4512345678', 'test')
+    assert all(request.data is None for request in requests)
