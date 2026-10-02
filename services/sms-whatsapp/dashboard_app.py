@@ -184,7 +184,13 @@ def unified_ui(response):
             html = html.replace("</body>", '<script src="' + url_for("static", filename="pager.js") + '" defer></script></body>', 1)
         response.set_data(html)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "same-origin"
+    # OSM requires browser Referer identification; cross-origin requests receive
+    # only the site origin, never the alarm URL, query or message details.
+    response.headers["Referrer-Policy"] = (
+        "strict-origin-when-cross-origin"
+        if request.endpoint in {"alarm_map", "alarm_event_detail"}
+        else "same-origin"
+    )
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     if not request.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-store"

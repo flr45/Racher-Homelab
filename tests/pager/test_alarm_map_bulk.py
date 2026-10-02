@@ -99,3 +99,13 @@ def test_bulk_deletion_forbidden_for_viewer(authorized):
     viewer=personal_client(authorized,add_operator(authorized,role='viewer'))
     assert viewer.post('/alarmer/slet-valgte',data={'csrf_token':'test-csrf','confirm':'delete','event_ids':ids}).status_code==403
     assert events.AlarmEvent.query.count()==3
+
+
+def test_map_pages_send_origin_only_referrer_and_other_pages_keep_existing_policy(authorized,client):
+    ids=make_alarms(authorized)
+    for path in ('/alarmkort',f'/alarmer/{ids[0]}'):
+        response=client.get(path)
+        assert response.headers['Referrer-Policy']=='strict-origin-when-cross-origin'
+        assert b"referrerPolicy:'strict-origin-when-cross-origin'" in response.data
+        assert 'Kortet er klar.'.encode() not in response.data
+    assert client.get('/alarmer').headers['Referrer-Policy']=='same-origin'

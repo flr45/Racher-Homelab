@@ -473,3 +473,14 @@ og routerens egen SMS-læser skal fortsat være slået fra.
 Kilder: [KDS Adressevask](https://confluence.kds.dk/display/ADV/Adressevask),
 [KDS token](https://confluence.kds.dk/display/ADV/Brugerstyring),
 [Cudy LT300 V3](https://www.cudy.com/en-us/products/lt300-3-0).
+
+
+Kortets browserkald til OpenStreetMap sender nu hjemmesidens origin som
+Referer. Den tidligere `same-origin`-politik skjulte Referer og var i strid
+med OSMs krav; operatørens skærmbillede viste derfor "Access blocked"-felter.
+Kortsiderne bruger `strict-origin-when-cross-origin`, og kortbillederne har
+samme eksplicitte politik. Alarmsti og parametre sendes ikke til OSM.
+Andre administratorsider beholder `same-origin`. En indlæst billedfil
+kaldes ikke længere "Kortet er klar", da OSM også kan returnere en blokering
+som et billede. Genindlæs kortet normalt efter opdateringen; undgå gentagne
+hårde genindlæsninger, som kan omgå browserens cache.

@@ -197,10 +197,10 @@ EVENT_DETAIL_HTML = base.BASE_HTML.replace(
   const savedLon = {{ location.longitude|tojson if location else 'null' }};
   const start = (savedLat !== null && savedLon !== null) ? [savedLat, savedLon] : [55.402, 11.355];
   const map = L.map('eventMap').setView(start, (savedLat !== null ? 15 : 10));
-  const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'});
+  const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, referrerPolicy:'strict-origin-when-cross-origin', attribution:'&copy; OpenStreetMap contributors'});
   let tileFailed = false;
-  tiles.on('tileerror', function(){ tileFailed = true; document.getElementById('mapStatus').textContent='Baggrundskortet kunne ikke hentes. Kontrollér internetforbindelsen. Gemte markører og koordinater er stadig tilgængelige.'; });
-  tiles.on('load', function(){ if(!tileFailed) document.getElementById('mapStatus').textContent='Kortet er klar.'; });
+  tiles.on('tileerror', function(){ tileFailed = true; document.getElementById('mapStatus').textContent='Baggrundskortet kunne ikke hentes. Forbindelsen eller kortudbyderen afviste opslaget. Gemte markører og koordinater er stadig tilgængelige.'; });
+  tiles.on('load', function(){ if(!tileFailed) document.getElementById('mapStatus').textContent='Kortbaggrund: OpenStreetMap.'; });
   tiles.addTo(map);
   let marker = null;
   function setMarker(lat, lon){ if(marker){ marker.setLatLng([lat,lon]); } else { marker=L.marker([lat,lon]).addTo(map); } document.getElementById('lat').value=Number(lat).toFixed(6); document.getElementById('lon').value=Number(lon).toFixed(6); }
@@ -227,10 +227,10 @@ MAP_HTML = base.BASE_HTML.replace(
   if(!window.L){document.getElementById('mapStatus').textContent='Kortet kunne ikke startes. Genindlæs siden.';return;}
   const points = {{ points|tojson }};
   const map = L.map('alarmMap').setView([55.402, 11.355], 9);
-  const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'});
+  const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, referrerPolicy:'strict-origin-when-cross-origin', attribution:'&copy; OpenStreetMap contributors'});
   let tileFailed = false;
-  tiles.on('tileerror', function(){ tileFailed = true; document.getElementById('mapStatus').textContent='Baggrundskortet kunne ikke hentes. Kontrollér internetforbindelsen. Gemte markører og koordinater er stadig tilgængelige.'; });
-  tiles.on('load', function(){ if(!tileFailed) document.getElementById('mapStatus').textContent='Kortet er klar.'; });
+  tiles.on('tileerror', function(){ tileFailed = true; document.getElementById('mapStatus').textContent='Baggrundskortet kunne ikke hentes. Forbindelsen eller kortudbyderen afviste opslaget. Gemte markører og koordinater er stadig tilgængelige.'; });
+  tiles.on('load', function(){ if(!tileFailed) document.getElementById('mapStatus').textContent='Kortbaggrund: OpenStreetMap.'; });
   tiles.addTo(map);
   const bounds=[];
   points.forEach(function(item){
