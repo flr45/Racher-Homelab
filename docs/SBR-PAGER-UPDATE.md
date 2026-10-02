@@ -45,7 +45,18 @@ ingen beskeder. `Send testbesked` i UI er en brugerhandling.
 LT300 V3.0 med firmware 2.5.12 har under indkøring svaret på driverens
 login og AT-statusprøve. Firmware leverer login-formularen med HTTP 403;
 driveren accepterer kun dette svar, hvis en genkendelig login-formular findes.
-Det bekræfter ikke endnu den samlede SMS-til-WhatsApp-levering.
+Den 2. oktober 2026 blev opdateringen installeret på racherserver. Operatøren
+bekræftede kort SMS og derefter en samlet lang SMS med danske tegn i WhatsApp.
+Genstart, netværksudfald og USB-skift er endnu ikke fysisk bekræftet.
+
+**På denne firmware skal Cudy-appens SMS → Aktivér være slået fra under
+AT-baseret modtagelse.** Med routerens egen SMS-indbakke aktiveret så vores
+læser kun del 1 af 2, før gruppen forsvandt; andre beskeder lå i routerens
+indbakke. Efter deaktivering bekræftede operatøren levering af hele den lange
+testbesked. Det peger på konkurrerende læsere af samme modemlager. Routerens
+internetforbindelse forblev i brug. Behold routerindbakken deaktiveret under
+drift; ændr ikke radio, APN eller modemets SMS-indstillinger for dette skift.
+Andre firmwareversioner kræver deres egen korte og delte SMS-test.
 
 Gem en privat kopi af `.env`, før routeroplysninger tilføjes. Behold USB som
 valgt driver under forberedelsen. Tilføj `CUDY_BASE_URL`, `CUDY_USERNAME` og
@@ -174,9 +185,12 @@ Cudy dokumenterer SMS og AT-kommandoer i
 Adapterens felter og login følger den officielle
 [LT300-emulator](https://support.cudy.com/emulator/LT300/) og dens
 [sysauth.js](https://support.cudy.com/emulator/LT300/luci-static/bootstrap/js/sysauth.js).
-Dette er en firmwareafhængig webgrænseflade; fysisk routertest mangler endnu.
+Dette er en firmwareafhængig webgrænseflade. Kort og delt SMS er fysisk
+bekræftet på LT300 V3.0 / 2.5.12, som beskrevet ovenfor.
 
-Tilslut SIM og Ethernet. Kontrollér, at Cudys egen side kan modtage SMS.
+Tilslut SIM og Ethernet. Cudys egen indbakke kan bruges til en indledende
+modtagelsestest, før vores læser starter. På V3.0 / 2.5.12 skal SMS → Aktivér
+derefter slås fra i Cudy-appen, så vores AT-læser har modemlageret alene.
 Tilføj følgende i `/opt/SBR-Pager-Gateway/.env`, med din egen adgangskode:
 
 ```dotenv
@@ -316,7 +330,7 @@ Scriptet pauser Pager-watchdog og stopper Pager før filskift. OpenWA og SMS Gat
 | Fejlrapport | Download af eksplicit udvalgte tilstande og antal; ingen rå fejl, beskedtekst, telefonnumre, adresser, URL’er eller nøgler |
 | Driftsvisning | Store statusfelter, seneste aktivitet og kø uden beskedtekst/telefonnumre; login kræves; fuldskærmsknap og opdatering hvert 30. sekund |
 | Historikoprydning | Som standard deaktiveret. Valgfrit 30–3650 dage, begrænsede portioner efter en vellykket dagsbackup. Ventende/tilbageholdte alarmer bevares; også afsluttede testlogs og gammel ændringslog ryddes |
-| LT300-status | SIM, signal og registreret mobilnet vises, når Gateway faktisk leverer dem. Firmware og fysisk modtagelse skal stadig verificeres |
+| LT300-status | SIM, signal og registreret mobilnet vises, når Gateway faktisk leverer dem. V3.0 / 2.5.12 er afprøvet med kort og delt SMS; andre firmwareversioner skal verificeres |
 
 Udgående SMS via LT300 er fortsat en hardwareafhængig opgave. Den eksisterende adapter er modtagelse alene, og der er ikke tilføjet en uverificeret afsendelseskommando. USB-afsendelse og statusresponder bevares under indkøringen.
 
