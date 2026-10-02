@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import abort, flash, redirect, render_template_string, request, url_for
 
@@ -216,10 +216,12 @@ MAP_HTML = base.BASE_HTML.replace(
     "{% block content %}{% endblock %}",
     r"""
 <link rel="stylesheet" href="{{ url_for('static', filename='leaflet/leaflet.css') }}">
-<style>#alarmMap{height:70vh;min-height:520px;border-radius:16px;border:1px solid var(--border);overflow:hidden}.mapnote{margin-top:10px;color:var(--muted);font-size:13px}</style>
+<style>.alarm-cluster{background:#177a62;color:white;border:3px solid white;border-radius:50%;text-align:center;line-height:34px;font-weight:700;box-shadow:0 2px 7px #0005}#alarmMap{height:70vh;min-height:520px;border-radius:16px;border:1px solid var(--border);overflow:hidden}.mapnote{margin-top:10px;color:var(--muted);font-size:13px}</style>
 <div class="wrap">
 <div class="top"><div class="brand"><h1>Alarmkort</h1><p>SBR Pager · gemte ture</p></div><div class="actions"><a class="btn" href="{{ url_for('alarm_statistics') }}">Alarmstatistik</a><a class="btn" href="{{ url_for('dashboard') }}">← Administration</a></div></div>
-<section class="card span12"><div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">{{ points|length }} gemte ture</h2><p class="muted" style="margin:5px 0 0">Klik på en markør for at læse om turen og åbne hele hændelsen.</p></div></div><p id="mapStatus" class="muted" role="status">Kortet indlæses…</p><div id="alarmMap"></div>{% if not points %}<p class="mapnote">Ingen alarmer har en gemt kortplacering. Åbn en alarm i historikken for at placere den manuelt.</p>{% endif %}<div class="mapnote">Kort: © OpenStreetMap contributors. Kun ture med en gemt kortplacering vises.</div></section>
+<section class="card span12"><form method="get" class="inline-actions"><label>Station <select name="station"><option value="">Alle stationer</option>{% for station in stations %}<option value="{{ station }}" {{ 'selected' if station==selected_station }}>{{ station }}</option>{% endfor %}</select></label><label>Fra <input type="date" name="from" value="{{ request.args.get('from', '') }}"></label><label>Til <input type="date" name="to" value="{{ request.args.get('to', '') }}"></label><button class="btn" type="submit">Vis udvalg</button><a class="btn" href="{{ url_for('alarm_map') }}">Nulstil</a></form></section>
+<section class="card span12"><div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">{{ points|length }} af {{ total }} gemte ture</h2><p class="muted" style="margin:5px 0 0">Klik på en markør for at læse om turen og åbne hele hændelsen.</p></div></div><p id="mapStatus" class="muted" role="status">Kortet indlæses…</p><div id="alarmMap"></div>{% if not points %}<p class="mapnote">Ingen alarmer har en gemt kortplacering. Åbn en alarm i historikken for at placere den manuelt.</p>{% endif %}<div class="mapnote">Kort: © OpenStreetMap contributors. Kun ture med en gemt kortplacering vises. Højst 1.000 ture vises; vælg station eller dato for et mindre udvalg.</div></section>
+<section class="card span12"><h2>{{ missing_count }} alarmer mangler kortplacering</h2><p class="muted">De seneste 100 i dit udvalg. Åbn en alarm for at placere den manuelt.</p>{% for event in missing %}<p><a href="{{ url_for('alarm_event_detail', event_id=event.id) }}">#{{ event.id }} · {{ event.station or '—' }} · {{ dk_time(event.started_at) }} · {{ event.address or 'Adresse mangler' }}</a></p>{% else %}<p>Ingen manglende placeringer i udvalget.</p>{% endfor %}</section>
 </div>
 <script src="{{ url_for('static', filename='leaflet/leaflet.js') }}"></script>
 <script>
@@ -232,17 +234,20 @@ MAP_HTML = base.BASE_HTML.replace(
   tiles.on('tileerror', function(){ tileFailed = true; document.getElementById('mapStatus').textContent='Baggrundskortet kunne ikke hentes. Forbindelsen eller kortudbyderen afviste opslaget. Gemte markører og koordinater er stadig tilgængelige.'; });
   tiles.on('load', function(){ if(!tileFailed) document.getElementById('mapStatus').textContent='Kortbaggrund: OpenStreetMap.'; });
   tiles.addTo(map);
-  const bounds=[];
-  points.forEach(function(item){
-    const marker=L.marker([item.lat,item.lon]).addTo(map); bounds.push([item.lat,item.lon]);
-    const box=document.createElement('div');
-    const title=document.createElement('strong'); title.textContent=(item.station ? 'Station '+item.station+' · ' : '')+(item.alarm_type || 'Alarm'); box.appendChild(title);
-    const address=document.createElement('div'); address.textContent=item.address || 'Adresse ikke registreret'; box.appendChild(address);
-    const time=document.createElement('div'); time.textContent=item.time; box.appendChild(time);
-    const link=document.createElement('a'); link.href=item.url; link.textContent='Åbn tur'; link.style.display='inline-block'; link.style.marginTop='6px'; box.appendChild(link);
-    marker.bindPopup(box);
-  });
+  const bounds=points.map(item=>[item.lat,item.lon]);
+  const layer=L.layerGroup().addTo(map);
+  function redraw(){
+    layer.clearLayers();const groups=new Map();
+    points.forEach(item=>{const pixel=map.project([item.lat,item.lon],map.getZoom());const key=Math.floor(pixel.x/60)+':'+Math.floor(pixel.y/60);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(item);});
+    groups.forEach(items=>{
+      const first=items[0];const box=document.createElement('div');box.style.maxHeight='240px';box.style.overflowY='auto';
+      items.forEach(item=>{const row=document.createElement('p');const link=document.createElement('a');link.href=item.url;link.textContent=(item.station||'Alarm')+' · '+(item.alarm_type||'Alarm')+' · '+(item.address||'Adresse mangler')+' · '+item.time;row.appendChild(link);box.appendChild(row);});
+      const options=items.length>1?{icon:L.divIcon({className:'alarm-cluster',html:String(items.length),iconSize:[40,40]})}:{};
+      L.marker([first.lat,first.lon],options).bindPopup(box).addTo(layer);
+    });
+  }
   if(bounds.length===1){ map.setView(bounds[0],15); } else if(bounds.length>1){ map.fitBounds(bounds,{padding:[25,25]}); }
+  map.on('zoomend',redraw);redraw();
 })();
 </script>
 """,
@@ -388,12 +393,30 @@ def remove_alarm_location(event_id: int):
 @app.get("/alarmkort")
 @base.login_required
 def alarm_map():
-    rows = (
-        db.session.query(AlarmEventLocation, events.AlarmEvent)
-        .join(events.AlarmEvent, events.AlarmEvent.id == AlarmEventLocation.event_id)
-        .order_by(events.AlarmEvent.started_at.desc())
-        .all()
-    )
+    station = _station_filter(request.args.get('station'))
+    query = _event_query(station)
+    dates = {}
+    for key in ('from', 'to'):
+        raw = request.args.get(key, '').strip()
+        try:
+            dates[key] = datetime.strptime(raw, '%Y-%m-%d').replace(tzinfo=events.COPENHAGEN) if raw else None
+        except ValueError:
+            abort(400, 'Dato skal være ÅÅÅÅ-MM-DD.')
+    if dates['from'] and dates['to'] and dates['from'] > dates['to']:
+        abort(400, 'Startdato skal ligge før slutdato.')
+    if dates['from']:
+        query = query.filter(events.AlarmEvent.started_at >= dates['from'].astimezone(timezone.utc))
+    if dates['to']:
+        query = query.filter(events.AlarmEvent.started_at < (dates['to'] + timedelta(days=1)).astimezone(timezone.utc))
+    located = query.join(AlarmEventLocation, AlarmEventLocation.event_id == events.AlarmEvent.id)
+    total = located.count()
+    selected = located.order_by(events.AlarmEvent.started_at.desc()).limit(1000).all()
+    ids = [event.id for event in selected]
+    locations = {row.event_id: row for row in AlarmEventLocation.query.filter(AlarmEventLocation.event_id.in_(ids)).all()}
+    rows = [(locations[event.id], event) for event in selected]
+    missing_query = query.filter(~events.AlarmEvent.id.in_(db.session.query(AlarmEventLocation.event_id)))
+    missing_count = missing_query.count()
+    missing = missing_query.order_by(events.AlarmEvent.started_at.desc()).limit(100).all()
     points = [
         {
             "lat": location.latitude,
@@ -406,7 +429,7 @@ def alarm_map():
         }
         for location, event in rows
     ]
-    return render_template_string(MAP_HTML, title="Alarmkort", points=points)
+    return render_template_string(MAP_HTML, title="Alarmkort", points=points, total=total, missing=missing, missing_count=missing_count, stations=station_options(), selected_station=station)
 
 
 with app.app_context():

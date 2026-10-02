@@ -109,3 +109,27 @@ def test_map_pages_send_origin_only_referrer_and_other_pages_keep_existing_polic
         assert b"referrerPolicy:'strict-origin-when-cross-origin'" in response.data
         assert 'Kortet er klar.'.encode() not in response.data
     assert client.get('/alarmer').headers['Referrer-Policy']=='same-origin'
+
+
+@pytest.mark.parametrize('query',['from=bad','from=2026-10-03&to=2026-10-02','to=2026-02-30'])
+def test_map_rejects_invalid_date_ranges(client, query):
+    assert client.get('/alarmkort?' + query).status_code == 400
+
+
+def test_map_filters_local_dates_stations_and_missing_locations(authorized, client):
+    from datetime import datetime, timezone
+    ids = make_alarms(authorized)
+    rows = events.AlarmEvent.query.order_by(events.AlarmEvent.id).all()
+    for row in rows:
+        row.station = 'S'
+        row.started_at = datetime(2026, 10, 1, 22, 30, tzinfo=timezone.utc)
+    rows[1].started_at = datetime(2026, 10, 2, 22, 30, tzinfo=timezone.utc)
+    history.AlarmEventLocation.query.filter_by(event_id=ids[2]).delete()
+    authorized.db.session.commit()
+    response = client.get('/alarmkort?station=S&from=2026-10-02&to=2026-10-02')
+    assert response.status_code == 200
+    assert b'1 af 1 gemte ture' in response.data
+    assert b'1 alarmer mangler kortplacering' in response.data
+    assert b'alarm-cluster' in response.data
+    response = client.get('/alarmkort?station=M')
+    assert b'0 af 0 gemte ture' in response.data

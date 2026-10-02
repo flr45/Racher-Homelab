@@ -55,6 +55,8 @@
       }
       document.getElementById('internet-detail').textContent=data.internet.detail;
       const timeLabel=value=>value ? new Date(value).toLocaleString('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
+      const multipart = document.getElementById('multipart-warning');
+      if(multipart && data.multipart){multipart.hidden=!data.multipart.warning;multipart.querySelector('span').textContent=data.multipart.count+' ufuldstændige SMS-grupper: '+data.multipart.detail+'.';}
       if(data.ops){
         document.getElementById('last-sms').textContent=timeLabel(data.ops.last_sms);
         document.getElementById('last-sent').textContent=timeLabel(data.ops.last_sent);

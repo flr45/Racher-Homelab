@@ -6,6 +6,9 @@ from pathlib import Path
 import secrets
 import sqlite3
 import threading
+import tempfile
+import time
+import restore_db
 from datetime import timedelta
 
 from flask import flash, redirect, request, url_for
@@ -64,6 +67,27 @@ def destination():
     return resolved
 
 
+def verify_external_archive(target, key_path):
+    """Decrypt the remote copy and exercise the same offline restore on scratch DBs."""
+    with tempfile.TemporaryDirectory(prefix='pager-offsite-restore-') as temporary:
+        root = Path(temporary)
+        extracted = encrypted_backup.decrypt_to_directory(target, key_path, root / 'unpacked')
+        ops.validated_config(json.loads((extracted / 'pager.json').read_text()))
+        current = root / 'current.sqlite'
+        with sqlite3.connect(Path(db.engine.url.database).resolve().as_uri() + '?mode=ro', uri=True) as source, sqlite3.connect(current) as snapshot:
+            deadline = time.monotonic() + 30
+            def progress(*args):
+                if time.monotonic() > deadline:
+                    raise TimeoutError("Gendannelseskontrol tog for lang tid")
+            source.backup(snapshot, pages=256, progress=progress)
+        restore_db.restore(extracted / 'pager.sqlite', current)
+        with sqlite3.connect(current) as restored:
+            if restored.execute('PRAGMA integrity_check').fetchone()[0] != 'ok' or restored.execute('PRAGMA foreign_key_check').fetchone():
+                raise ValueError('Gendannelseskontrol fejlede')
+            if restored.execute("SELECT count(*) FROM whats_app_delivery WHERE status IN ('pending','retrying','held','sending')").fetchone()[0]:
+                raise ValueError('Gendannelsen beholdt aktive jobs')
+
+
 def transfer_once():
     if not enabled() or not configured():
         return
@@ -112,8 +136,9 @@ def transfer_once():
             if crypt.decrypt(temporary.read_bytes()) != payload:
                 raise ValueError('Kopiens integritet')
             temporary.replace(target)
+        verify_external_archive(target, key_path)
         row.ciphertext_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
-        row.state, row.detail = 'passed', 'Krypteret kopi skrevet og læst tilbage med verificeret indhold'
+        row.state, row.detail = 'passed', 'Krypteret kopi læst tilbage og prøvegendannet isoleret; ingen driftsdata ændret'
     except Exception:
         row.state, row.detail = 'failed', 'Kopiering fejlede. Kontrollér mount-markør, nøgle, rettigheder, forbindelse og grænsen på 32 MiB.'
     finally:

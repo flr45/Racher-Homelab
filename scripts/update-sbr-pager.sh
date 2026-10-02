@@ -134,7 +134,17 @@ echo "Backup og tidligere images er klar. Bygger den nye version."
 "${WA[@]}" build sms-whatsapp
 "${GW[@]}" build sms-gateway
 
+BOOT_TARGET="${SBR_PAGER_BOOT_TARGET:-/usr/local/sbin/sbr-pager-boot}"
+BOOT_CHANGED=false
+BOOT_EXISTED=false
 rollback() {
+  if [[ "$BOOT_CHANGED" == true ]]; then
+    if [[ "$BOOT_EXISTED" == true ]]; then
+      "${SUDO[@]}" install -m 755 "$BACKUP_DIR/sbr-pager-boot" "$BOOT_TARGET" || true
+    else
+      "${SUDO[@]}" rm -f "$BOOT_TARGET" || true
+    fi
+  fi
   echo "Opdatering fejlede. Gendanner de tidligere images." >&2
   "${GW[@]}" stop sms-gateway || true
   cp "$BACKUP_DIR/env.backup" "$ENV_FILE"
@@ -148,6 +158,17 @@ rollback() {
 trap 'rollback; exit 1' ERR
 trap 'rollback; exit 130' INT
 trap 'rollback; exit 143' TERM
+
+# systemd executes this copied file, not the checkout. Keep it in this rollback.
+bash -n "$APP_DIR/scripts/sbr-pager-boot.sh"
+[[ ! -L "$BOOT_TARGET" ]] || { echo "Opstartsfil må ikke være et symbolsk link." >&2; exit 1; }
+if [[ -f "$BOOT_TARGET" ]]; then
+  "${SUDO[@]}" cp "$BOOT_TARGET" "$BACKUP_DIR/sbr-pager-boot"
+  BOOT_EXISTED=true
+fi
+"${SUDO[@]}" install -m 755 "$APP_DIR/scripts/sbr-pager-boot.sh" "$BOOT_TARGET.new-$$"
+BOOT_CHANGED=true
+"${SUDO[@]}" mv -f "$BOOT_TARGET.new-$$" "$BOOT_TARGET"
 
 # OpenWA is deliberately not recreated: keep the existing WhatsApp session.
 "${WA[@]}" up -d --no-build --no-deps sms-whatsapp
@@ -169,6 +190,11 @@ if [[ "$READY" != true ]]; then
 fi
 trap - ERR
 trap - INT TERM
+restore_timers
+ACTIVE_TIMERS=()
+if [[ -f "$APP_DIR/scripts/check-sbr-pager.py" ]]; then
+  python3 "$APP_DIR/scripts/check-sbr-pager.py" || echo "Opdateringen er installeret, men driftskontrollen har punkter til opfølgning."
+fi
 echo "Opdateringen er startet. SMS-kilde: $DRIVER."
 echo "Backup og rollback-filer: $BACKUP_DIR"
 echo "Kontrollér modem, WhatsApp og leveringer på overblikket. Ingen testbesked er sendt."

@@ -55,6 +55,30 @@ STATUS_LABELS = {"ready": "Forbundet", "online": "Online", "offline": "Offline",
 app.jinja_env.globals.update(status_label=lambda value: STATUS_LABELS.get(str(value).lower(), str(value)), station_name=names.station_name)
 
 
+_multipart_cache = (0.0, {})
+_multipart_lock = threading.Lock()
+
+
+def multipart_summary():
+    """A missing part is a warning after 60 seconds, or immediately if lost."""
+    global _multipart_cache
+    with _multipart_lock:
+        if time.monotonic() - _multipart_cache[0] < 15:
+            return dict(_multipart_cache[1])
+        try:
+            source = gateway_request('/api/multipart')
+            current = source.get('state') == 'current'
+            rows = [row for row in source.get('groups', []) if row.get('missing') and
+                    (row.get('state') == 'disappeared' or row.get('wait_seconds', 0) >= 60)]
+            summary = {'state': source.get('state', 'unknown'), 'count': len(rows),
+                       'detail': '; '.join(f"{len(row.get('seen', []))} af {row.get('expected')} dele" for row in rows[:3]),
+                       'warning': current and bool(rows)}
+        except Exception:
+            summary = {'state': 'unknown', 'count': 0, 'detail': '', 'warning': False}
+        _multipart_cache = (time.monotonic(), summary)
+        return dict(summary)
+
+
 def snapshot():
     gateway = gateway_status()
     queue = deliveries.queue_snapshot()
@@ -62,9 +86,10 @@ def snapshot():
     internet = diagnostics.internet_status()
     modem = gateway.get("modem") or {}
     good = internet.get("state") == "online" and modem.get("state") == "online" and wa.get("state") == "ready" and not queue["failed"]
+    multipart = multipart_summary()
     ops = operations.operation_snapshot()
-    good = good and ops["mode"]["name"] == "normal" and not ops["held"] and not ops["failure_warning"]
-    return {"ops": ops, "gateway": gateway, "modem": modem, "queue": queue, "wa": wa,
+    good = good and not multipart["warning"] and ops["mode"]["name"] == "normal" and not ops["held"] and not ops["failure_warning"]
+    return {"multipart": multipart, "ops": ops, "gateway": gateway, "modem": modem, "queue": queue, "wa": wa,
             "internet": internet, "good": good, "quality": deliveries.quality_snapshot(), "stats": events.stats_snapshot()}
 
 
@@ -113,7 +138,7 @@ def cudy_connection_test():
 @base.login_required
 def dashboard_status():
     data = snapshot()
-    return jsonify(ops=data["ops"], internet=data["internet"], modem=data["modem"], openwa=data["wa"], queue=data["queue"], good=data["good"])
+    return jsonify(multipart=data["multipart"], ops=data["ops"], internet=data["internet"], modem=data["modem"], openwa=data["wa"], queue=data["queue"], good=data["good"])
 
 
 @app.get("/diagnostik")

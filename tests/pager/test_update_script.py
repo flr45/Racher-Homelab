@@ -52,6 +52,9 @@ elif name == "docker":
 def run_update(tmp_path, driver="usb", failure="", offsite=False, stopped=False, rollback_driver=None, target_driver=None):
     application = tmp_path / "app"
     application.mkdir()
+    (application / 'scripts').mkdir()
+    (application / 'scripts/sbr-pager-boot.sh').write_text((ROOT / 'scripts/sbr-pager-boot.sh').read_text())
+    (tmp_path / 'installed-boot').write_text('#!/bin/sh\n# old boot\n')
     (application / ".env").write_text("SMS_MODEM_DRIVER=" + driver + "\nCUDY_PASSWORD=test-only\n" + ("SMS_WHATSAPP_OFFSITE_MOUNT=true\n" if offsite else ""))
     commands = tmp_path / "commands"
     commands.mkdir()
@@ -61,7 +64,7 @@ def run_update(tmp_path, driver="usb", failure="", offsite=False, stopped=False,
         command.chmod(0o755)
     log = tmp_path / "operations.jsonl"
     environment = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
-                       SBR_PAGER_ROOT=str(application), UPDATE_TEST_LOG=str(log),
+                       SBR_PAGER_ROOT=str(application), SBR_PAGER_BOOT_TARGET=str(tmp_path / "installed-boot"), UPDATE_TEST_LOG=str(log),
                        UPDATE_TEST_FAILURE=failure)
     environment["UPDATE_TEST_STOPPED"] = "true" if stopped else "false"
     if target_driver:
@@ -156,3 +159,11 @@ def test_target_driver_changes_only_in_controlled_update_and_rolls_back(tmp_path
     if not failure:
         gateway = [call for call in recreations(calls) if call[-1] == "sms-gateway"]
         assert any(x.endswith("sms-gateway/cudy.yml") for x in gateway[0])
+
+
+@pytest.mark.parametrize('failure', ['', 'startup', 'health'])
+def test_boot_helper_is_updated_and_restored_on_failure(tmp_path,failure):
+    result,calls,application=run_update(tmp_path,failure=failure)
+    installed=(tmp_path/'installed-boot').read_text()
+    assert installed == ('#!/bin/sh\n# old boot\n' if failure else (ROOT/'scripts/sbr-pager-boot.sh').read_text())
+    assert result.returncode == (1 if failure else 0)

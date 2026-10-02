@@ -422,7 +422,7 @@ docker compose --env-file .env -f compose/sms-whatsapp/compose.yml -f compose/sm
 
 Aktivér derefter **Automatisk krypteret backupkopi** under Driftsværn. En separat kopieringsarbejder pakker den seneste konsistente SQLite-/opsætningsbackup og krypterer med [Fernet](https://cryptography.io/en/latest/fernet/). Den skriver atomisk på destinationen og læser indholdet tilbage til verifikation. En manglende eller forkert mount-markør, nøgle eller rettighed giver fejlstatus; den lokale backup og aktive jobs bevares. En langsom netværksdisk kan holde kopieringsarbejderen, men holder ikke alarmlevering eller driftsmonitor. En kopi, der har været i gang i over ti minutter, eller en seneste succes ældre end 36 timer vises som forældet. Genforsøg sker højst én gang i timen. Nøglerotation skaber en ny fil; gamle nøgler skal beholdes til de gamle kopier.
 
-Denne første version understøtter højst 32 MiB ukrypteret SQLite/JSON pr. kopi for at begrænse hukommelsesforbruget. En større backup fejler tydeligt og kræver en senere streamingløsning. Eksterne backupfiler slettes ikke automatisk; højst 100 lokale overførselsresultater beholdes. Verifikation af kopi er ikke en fuld gendannelsesøvelse.
+Denne første version understøtter højst 32 MiB ukrypteret SQLite/JSON pr. kopi for at begrænse hukommelsesforbruget. En større backup fejler tydeligt og kræver en senere streamingløsning. Eksterne backupfiler slettes ikke automatisk; højst 100 lokale overførselsresultater beholdes. Hver ny kopi dekrypteres og prøvegendannes nu i en isoleret midlertidig database. Skema, integritet, fremmednøgler og annullering af gamle afsendelsesjobs kontrolleres. Det erstatter ikke en øvelse med en helt ny server og de separate nøgler.
 
 Dekryptér kun til en **ny mappe**, fx med hjælperen i den nye image:
 
@@ -484,3 +484,23 @@ Andre administratorsider beholder `same-origin`. En indlæst billedfil
 kaldes ikke længere "Kortet er klar", da OSM også kan returnere en blokering
 som et billede. Genindlæs kortet normalt efter opdateringen; undgå gentagne
 hårde genindlæsninger, som kan omgå browserens cache.
+
+
+## Driftsforbedringer efter LT300-idriftsættelse
+
+- Overblikket advarer om ufuldstændige SMS'er efter 60 sekunder eller straks, hvis delene er forsvundet. Forældede gatewaydata udlægges ikke som en ny konstateret SMS-fejl.
+- Alarmkortet kan filtreres på station og dansk lokal dato. Overlappende markører samles med en tæller og links til alarmerne. Højst 1.000 placerede alarmer vises; de seneste 100 uden placering vises separat.
+- Opdateringsscriptet installerer også den kopierede opstartsfil og gendanner den ved rollback. Efter opdateringen køres `python3 scripts/check-sbr-pager.py`. Kontrollen viser container-, systemd-, modem-, internet-, WhatsApp- og multipartstatus. Den sender ingen testbeskeder og starter ingen afsendelsesarbejdere.
+- Ekstern backup afprøver hver ny kopi med en isoleret gendannelse. Destination og nøgle skal stadig sættes op efter afsnittet ovenfor.
+
+### Afventende firmwarekontrol
+
+Automatisk registrering af aktiv Wi-Fi/4G-forbindelse og udgående LT300-SMS er endnu ikke aktiveret. En tilsluttet mobilradio beviser ikke, at internettet går over 4G. Afsendelsesformular og kvittering skal først verificeres på den konkrete firmware. Kør denne strukturkontrol på racherserver:
+
+```bash
+cd /opt/SBR-Pager-Gateway &&
+git fetch origin codex/sms-whatsapp-review-cudy &&
+git show FETCH_HEAD:scripts/probe-cudy-features.py | docker exec -i racher-sms-gateway python -
+```
+
+Kontrollen logger ind med containerens eksisterende routeropsætning og læser fire sider. Den sender ingen SMS og viser kun feltnavne, felttyper og en begrænset liste af statusord, aldrig feltværdier, beskedtekster eller loginhemmeligheder. Output skal bruges til næste adapterændring; der må ikke gættes på en afsendelses-API.
