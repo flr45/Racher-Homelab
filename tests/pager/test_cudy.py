@@ -1,5 +1,6 @@
 import hashlib
 import io
+import urllib.error
 import urllib.parse
 
 import pytest
@@ -48,6 +49,37 @@ def test_official_form_login_challenge_and_session_expiry():
     router.expire_once = True
     assert "+CSQ: 21" in client.command("AT+CSQ")
     assert len([req for req in router.requests if req.data and b'luci_password' in req.data]) == 2
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_http_login_challenge_and_expired_session(status):
+    router = Router()
+    original_open = router.open
+    def open_with_challenge(request, timeout):
+        response = original_open(request, timeout)
+        body = response.read()
+        response.close()
+        if body == LOGIN.encode():
+            raise urllib.error.HTTPError(request.full_url, status, "Login required", {}, io.BytesIO(body))
+        return Response(body)
+    router.open = open_with_challenge
+    client = CudyClient("http://192.168.10.1", password="päss", opener=router)
+    assert "+CSQ: 21" in client.command("AT+CSQ")
+    router.expire_once = True
+    assert "+CSQ: 21" in client.command("AT+CSQ")
+    assert len([req for req in router.requests if req.data and b'luci_password' in req.data]) == 2
+
+
+@pytest.mark.parametrize("status,body", [(403, b"Access denied"), (500, LOGIN.encode())])
+def test_http_errors_without_valid_authentication_challenge_still_fail(status, body):
+    router = Router()
+    def refuse(request, timeout):
+        router.requests.append(request)
+        raise urllib.error.HTTPError(request.full_url, status, "Denied", {}, io.BytesIO(body))
+    router.open = refuse
+    with pytest.raises(CudyError, match=f"HTTP {status}"):
+        CudyClient("http://192.168.10.1", password="secret", opener=router).connect()
+    assert all(request.data is None for request in router.requests)
 
 
 def test_unknown_firmware_fails_before_any_at_command():

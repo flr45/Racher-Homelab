@@ -127,6 +127,13 @@ class CudyClient:
             with self.opener.open(urllib.request.Request(url, data=data, headers=headers), timeout=self.timeout) as response:
                 return FormPage(response.read(512 * 1024).decode("utf-8", errors="replace"))
         except urllib.error.HTTPError as exc:
+            # LT300 V3 firmware serves its login challenge with HTTP 403.
+            # Only recognize a real login form; other HTTP failures stay errors.
+            with exc:
+                if exc.code in (401, 403):
+                    page = FormPage(exc.read(512 * 1024).decode("utf-8", errors="replace"))
+                    if page.containing("luci_password"):
+                        return page
             raise CudyError(f"Cudy svarede HTTP {exc.code}; kontrollér adresse, login og firmware") from None
         except (urllib.error.URLError, TimeoutError, OSError):
             raise CudyError("Cudy kunne ikke kontaktes; kontrollér LAN-forbindelse og routeradresse") from None
