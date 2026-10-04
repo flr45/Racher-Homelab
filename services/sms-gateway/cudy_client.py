@@ -320,6 +320,7 @@ class CudyClient:
         *,
         confirm_seconds: float = 12.0,
         poll_seconds: float = 0.5,
+        settle_seconds: float | None = None,
     ) -> dict:
         """Send one SMS with SMS Enable on and reconcile it against Outbox.
 
@@ -374,6 +375,18 @@ class CudyClient:
                 if accepted_cfg or time.monotonic() >= deadline:
                     break
                 time.sleep(interval)
+
+            # The physical LT300 test showed that Outbox insertion can precede
+            # handset delivery. Keep SMS Enable on for a short drain window so
+            # the modem has time to hand the accepted message to the network.
+            if accepted_cfg:
+                settle = (
+                    float(os.getenv("CUDY_SMS_SEND_SETTLE_SECONDS", "10"))
+                    if settle_seconds is None
+                    else float(settle_seconds)
+                )
+                if settle > 0:
+                    time.sleep(min(30.0, settle))
         finally:
             if not original_enabled:
                 try:
