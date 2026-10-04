@@ -325,11 +325,39 @@ def compose_up(component: str, *, force_recreate: bool = False) -> str:
     return action
 
 
+def openwa_session_state_from_issue(issue: str | None) -> str | None:
+    prefix = "OpenWA session status="
+    if not issue or not issue.startswith(prefix):
+        return None
+    return issue[len(prefix):].strip().lower() or None
+
+
 def recover_component(component: str, issue: str | None = None) -> str:
     if component == "gateway" and issue and issue.startswith("SMS-modem"):
         return "modem-recovery delegeret til sbr-modem-watchdog"
 
     if component == "openwa":
+        state = openwa_session_state_from_issue(issue)
+
+        # qr_ready means the linked-device authentication is no longer usable.
+        # Restarting the container cannot repair that state and previously caused
+        # an endless restart/start loop while the operator still had to scan QR.
+        if state == "qr_ready":
+            return "QR-parring kræves; ingen automatisk containerrestart"
+
+        # For a running OpenWA with a non-ready session, try the least invasive
+        # recovery only. In particular, "Session is already started" is not a
+        # reason to restart Chromium/OpenWA and risk making auth recovery worse.
+        if state is not None and state != "offline":
+            try:
+                return recover_openwa_session()
+            except Exception as exc:  # noqa: BLE001
+                detail = str(exc)
+                if "session is already started" in detail.lower():
+                    return "OpenWA session er allerede startet; ingen containerrestart"
+                raise
+
+        # Only container/API level failures may escalate to a container restart.
         try:
             return recover_openwa_session()
         except Exception as exc:  # noqa: BLE001
@@ -337,7 +365,7 @@ def recover_component(component: str, issue: str | None = None) -> str:
             name = CONTAINERS[component]
             result = run(["docker", "restart", name], timeout=90)
             if result.returncode == 0:
-                return f"docker restart {name} (session-start fejlede: {log_detail[:180]})"
+                return f"docker restart {name} (OpenWA/API-recovery fejlede: {log_detail[:180]})"
             return compose_up(component)
 
     # Pagerens host-port kan fejle under boot, hvis Tailscale-IP'en endnu
@@ -512,6 +540,12 @@ def main() -> int:
                 recovered_at=now if alerted else item.get("recovered_at"),
             )
             continue
+
+        # A changed failure mode starts a new consecutive-failure streak.
+        # This keeps the threshold meaningful (e.g. disconnected -> qr_ready)
+        # instead of carrying a months-long counter into a different incident.
+        if previous_issue and issue != previous_issue:
+            failures = 0
 
         failures += 1
         item["failures"] = failures
