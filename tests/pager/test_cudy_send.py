@@ -1,4 +1,4 @@
-from cudy_client import CudyClient, CudyError
+from cudy_client import CudyClient, CudyError, FormPage
 
 
 class FakeCudy(CudyClient):
@@ -126,3 +126,47 @@ def test_cudy_outgoing_api_requires_explicit_send_flag(g, monkeypatch):
     )
     assert claimed.status_code == 200
     assert claimed.get_json()["recipient"] == "+4522270396"
+
+def test_outbox_ids_match_observed_lt300_more_details_markup():
+    document = """
+    <table><tr><td>
+      <button onclick='cbi_show_modal(this,
+        "/cgi-bin/luci/admin/network/gcom/sms/readsms",
+        "iface=4g&cfg=cfg0bab7b&smsbox=sto");return false;'>
+        More Details
+      </button>
+    </td></tr></table>
+    """
+
+    class HtmlClient(CudyClient):
+        def __init__(self):
+            pass
+
+        def _authenticated_page(self, url):
+            return FormPage(document)
+
+    assert HtmlClient().outbox_ids() == ["cfg0bab7b"]
+
+
+def test_outbox_message_reads_phone_and_textarea():
+    document = """
+    <form action="/cgi-bin/luci/admin/network/gcom/sms/readsms">
+      <input name="token" value="secret">
+      <input name="cbid.smsread.1.phone" value="+4522270396">
+      <textarea name="cbid.smsread.1.content">Alarmtest</textarea>
+    </form>
+    """
+
+    class DetailClient(CudyClient):
+        def __init__(self):
+            self.root = "http://cudy.test/cgi-bin/luci/"
+
+        def _authenticated_page(self, url):
+            return FormPage(document)
+
+    item = DetailClient().outbox_message("cfg0bab7b")
+    assert item == {
+        "cfg": "cfg0bab7b",
+        "recipient": "+4522270396",
+        "body": "Alarmtest",
+    }
