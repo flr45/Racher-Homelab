@@ -218,9 +218,17 @@ def test_sms_fallback_failure_stays_in_durable_retry_queue(authorized, monkeypat
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("SMS modem offline")),
     )
 
-    from test_delivery import ingest
-
-    assert ingest(p, source="sms-fallback-test").status_code == 201
+    response = p.app.test_client().post(
+        "/api/incoming",
+        json={
+            "sender": "+4512345678",
+            "body": "(S)M+V · Bygn.brand · Eksempelvej 12, 4180 Sorø",
+            "receivedAt": "2026-09-30T20:00:00Z",
+            "sourceMessageId": "sms-fallback-test",
+        },
+        headers={"Authorization": "Bearer test-ingest"},
+    )
+    assert response.status_code == 201
     assert p.deliveries.retry_due_once()["sent"] == 0
     delivery = p.base.WhatsAppDelivery.query.one()
     assert delivery.status == "retrying"
