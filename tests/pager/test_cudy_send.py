@@ -1,4 +1,5 @@
 from cudy_client import CudyClient, CudyError, FormPage
+from cudy_reader import outgoing_sms_parts
 
 
 class FakeCudy(CudyClient):
@@ -126,6 +127,7 @@ def test_cudy_outgoing_api_requires_explicit_send_flag(g, monkeypatch):
     )
     assert claimed.status_code == 200
     assert claimed.get_json()["recipient"] == "+4522270396"
+    assert claimed.get_json()["created_at"]
 
 def test_outbox_ids_match_observed_lt300_more_details_markup():
     document = """
@@ -170,3 +172,36 @@ def test_outbox_message_reads_phone_and_textarea():
         "recipient": "+4522270396",
         "body": "Alarmtest",
     }
+
+def test_short_outgoing_sms_gets_stable_job_marker():
+    message = {
+        "id": 42,
+        "created_at": "2026-10-04T16:10:00+00:00",
+        "recipient": "+4522270396",
+        "body": "Kort alarm",
+    }
+
+    first = outgoing_sms_parts(message)
+    second = outgoing_sms_parts(message)
+
+    assert first == second
+    assert len(first) == 1
+    assert first[0].startswith("[SBR ")
+    assert first[0].endswith("Kort alarm")
+    assert len(first[0]) <= 160
+
+
+def test_long_outgoing_sms_is_split_into_numbered_parts_under_160_chars():
+    body = " ".join(["Alarmtekst"] * 80)
+    message = {
+        "id": 43,
+        "created_at": "2026-10-04T16:11:00+00:00",
+        "recipient": "+4522270396",
+        "body": body,
+    }
+
+    parts = outgoing_sms_parts(message)
+
+    assert len(parts) > 1
+    assert all(len(part) <= 160 for part in parts)
+    assert all(f"{index}/{len(parts)}" in part for index, part in enumerate(parts, 1))
