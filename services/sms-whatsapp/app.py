@@ -340,6 +340,21 @@ def send_fallback_sms(phone: str, message: str) -> str:
     )
 
 
+def _definitive_openwa_rejection(exc: Exception) -> bool:
+    """True only when OpenWA explicitly rejected before accepting the send.
+
+    Transport timeouts and connection loss are deliberately excluded because
+    the message may already have been handed to WhatsApp and immediate failover
+    could create a duplicate alarm.
+    """
+    detail = str(exc).lower()
+    return (
+        "session" in detail
+        and ("is not active" in detail or "not active" in detail)
+        and "openwa http 400" in detail
+    )
+
+
 def _send_whatsapp_via(
     requester,
     session_id: str,
@@ -380,18 +395,28 @@ def send_whatsapp(phone: str, message: str) -> str | None:
     # next transport.
     primary = _primary_openwa_status_uncached()
     if primary.get("state") == "ready":
-        return _send_whatsapp_via(openwa_request, openwa_session_id(), phone, body)
+        try:
+            return _send_whatsapp_via(openwa_request, openwa_session_id(), phone, body)
+        except Exception as exc:  # noqa: BLE001
+            if not _definitive_openwa_rejection(exc):
+                raise
+            primary = {"state": "rejected", "detail": str(exc)[:180]}
 
     backup_status = {"state": "disabled", "detail": "Backup er ikke konfigureret"}
     if backup is not None:
         backup_status = _backup_openwa_status_uncached()
         if backup_status.get("state") == "ready":
-            return _send_whatsapp_via(
-                backup_openwa_request,
-                str(backup["session_id"]),
-                phone,
-                body,
-            )
+            try:
+                return _send_whatsapp_via(
+                    backup_openwa_request,
+                    str(backup["session_id"]),
+                    phone,
+                    body,
+                )
+            except Exception as exc:  # noqa: BLE001
+                if not _definitive_openwa_rejection(exc):
+                    raise
+                backup_status = {"state": "rejected", "detail": str(exc)[:180]}
 
     if sms_fallback is not None:
         return send_fallback_sms(phone, body)
