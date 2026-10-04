@@ -50,6 +50,7 @@ def test_cudy_send_enables_before_submit_and_restores_afterwards():
         "Alarmtest",
         confirm_seconds=1,
         poll_seconds=0.01,
+        settle_seconds=0,
     )
 
     assert result["accepted"] is True
@@ -71,6 +72,7 @@ def test_cudy_send_reconciles_outbox_after_ambiguous_submit_error():
         "Alarmtest",
         confirm_seconds=1,
         poll_seconds=0.01,
+        settle_seconds=0,
     )
 
     assert result["accepted"] is True
