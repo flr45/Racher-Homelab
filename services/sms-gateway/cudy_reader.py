@@ -15,6 +15,7 @@ reader = pager.reader
 log = logging.getLogger("sms-cudy-reader")
 POLL_SECONDS = max(2.0, float(os.getenv("CUDY_POLL_SECONDS", "5")))
 SEND_ENABLED = os.getenv("CUDY_SMS_SEND_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+SEND_SETTLE_SECONDS = max(0.0, float(os.getenv("CUDY_SMS_SEND_SETTLE_SECONDS", "10")))
 CAPABILITY = "send-receive" if SEND_ENABLED else "receive-only"
 
 
@@ -121,40 +122,69 @@ def process_outbox(client):
 
         try:
             cfgs = []
-            restore_errors = []
-            for part in parts:
-                existing = None if reader.SMS_DRY_RUN else client.find_outbox_message(
-                    recipient,
-                    part,
-                )
-                if existing is not None:
-                    cfgs.append(existing["cfg"])
-                    log.info(
-                        "Cudy SMS %s-del findes allerede i Outbox (cfg=%s); "
-                        "springer dublet over",
-                        message_id,
-                        existing["cfg"],
-                    )
-                    continue
+            missing_parts = []
 
-                if reader.SMS_DRY_RUN:
-                    log.info(
-                        "DRY RUN Cudy SMS %s til %s: %s",
-                        message_id,
-                        recipient,
-                        part,
-                    )
-                    result = {
-                        "accepted": True,
-                        "cfg": "dry-run",
-                        "restore_error": None,
-                    }
-                else:
-                    result = client.send_sms(recipient, part)
+            if reader.SMS_DRY_RUN:
+                missing_parts = list(parts)
+            else:
+                for part in parts:
+                    existing = client.find_outbox_message(recipient, part)
+                    if existing is not None:
+                        cfgs.append(existing["cfg"])
+                        log.info(
+                            "Cudy SMS %s-del findes allerede i Outbox (cfg=%s); "
+                            "springer dublet over",
+                            message_id,
+                            existing["cfg"],
+                        )
+                    else:
+                        missing_parts.append(part)
 
-                cfgs.append(str(result.get("cfg") or ""))
-                if result.get("restore_error"):
-                    restore_errors.append(str(result["restore_error"]))
+            original_enabled = None
+            restore_error = None
+            try:
+                if missing_parts and not reader.SMS_DRY_RUN:
+                    original_enabled = client.sms_enabled()
+                    if not original_enabled:
+                        client.set_sms_enabled(True)
+
+                for part in missing_parts:
+                    if reader.SMS_DRY_RUN:
+                        log.info(
+                            "DRY RUN Cudy SMS %s til %s: %s",
+                            message_id,
+                            recipient,
+                            part,
+                        )
+                        result = {
+                            "accepted": True,
+                            "cfg": "dry-run",
+                            "restore_error": None,
+                        }
+                    else:
+                        # The batch owns SMS Enable, so individual parts can
+                        # skip their own post-send drain wait. One shared drain
+                        # window runs after the final accepted part.
+                        result = client.send_sms(
+                            recipient,
+                            part,
+                            settle_seconds=0,
+                        )
+
+                    cfgs.append(str(result.get("cfg") or ""))
+
+                if (
+                    missing_parts
+                    and not reader.SMS_DRY_RUN
+                    and SEND_SETTLE_SECONDS > 0
+                ):
+                    time.sleep(min(30.0, SEND_SETTLE_SECONDS))
+            finally:
+                if original_enabled is False:
+                    try:
+                        client.set_sms_enabled(False)
+                    except CudyError as exc:
+                        restore_error = str(exc)
 
             reader.complete_outgoing(message_id, "sent")
             status = {
@@ -165,17 +195,18 @@ def process_outbox(client):
                 "last_sent_recipient": recipient,
                 "last_error": None,
             }
-            if restore_errors:
+            if restore_error:
                 status["state"] = "degraded"
                 status["last_error"] = (
                     "SMS blev accepteret, men Cudy SMS Enable kunne ikke "
-                    "gendannes: " + "; ".join(restore_errors)
+                    "gendannes: " + restore_error
                 )[:240]
             reader.write_status(**status)
             log.info(
-                "Udgående Cudy SMS %s accepteret til %s (cfg=%s)",
+                "Udgående Cudy SMS %s accepteret til %s (%s del(e), cfg=%s)",
                 message_id,
                 recipient,
+                len(parts),
                 ",".join(cfgs),
             )
         except (CudyError, ValueError) as exc:
