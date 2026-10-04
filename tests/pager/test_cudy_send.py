@@ -1,4 +1,5 @@
 from cudy_client import CudyClient, CudyError, FormPage
+import cudy_reader
 from cudy_reader import outgoing_sms_parts
 
 
@@ -205,3 +206,70 @@ def test_long_outgoing_sms_is_split_into_numbered_parts_under_160_chars():
     assert len(parts) > 1
     assert all(len(part) <= 160 for part in parts)
     assert all(f"{index}/{len(parts)}" in part for index, part in enumerate(parts, 1))
+
+def test_cudy_reader_keeps_sms_enabled_for_whole_multipart_batch(monkeypatch):
+    message = {
+        "id": 77,
+        "created_at": "2026-10-04T16:20:00+00:00",
+        "recipient": "+4522270396",
+        "body": " ".join(["Lang alarmtekst"] * 40),
+    }
+    expected_parts = outgoing_sms_parts(message)
+    assert len(expected_parts) > 1
+
+    jobs = [message, None]
+    completed = []
+
+    monkeypatch.setattr(cudy_reader, "SEND_ENABLED", True)
+    monkeypatch.setattr(cudy_reader, "SEND_SETTLE_SECONDS", 0)
+    monkeypatch.setattr(cudy_reader.reader, "SMS_DRY_RUN", False)
+    monkeypatch.setattr(cudy_reader.reader, "OUTBOX_BATCH_SIZE", 20)
+    monkeypatch.setattr(cudy_reader.reader, "running", True)
+    monkeypatch.setattr(cudy_reader.reader, "claim_outgoing", lambda: jobs.pop(0))
+    monkeypatch.setattr(
+        cudy_reader.reader,
+        "complete_outgoing",
+        lambda message_id, status, error=None, retry=False: completed.append(
+            (message_id, status, error, retry)
+        ),
+    )
+    monkeypatch.setattr(cudy_reader.reader, "write_status", lambda **values: None)
+    monkeypatch.setattr(
+        cudy_reader.reader,
+        "utc_iso",
+        lambda: "2026-10-04T16:20:10+00:00",
+    )
+
+    class BatchClient:
+        def __init__(self):
+            self.enabled = False
+            self.enable_events = []
+            self.sent = []
+
+        def find_outbox_message(self, recipient, part):
+            return None
+
+        def sms_enabled(self):
+            return self.enabled
+
+        def set_sms_enabled(self, enabled):
+            self.enabled = bool(enabled)
+            self.enable_events.append(self.enabled)
+            return self.enabled
+
+        def send_sms(self, recipient, part, *, settle_seconds=None):
+            assert self.enabled is True
+            assert settle_seconds == 0
+            self.sent.append((recipient, part))
+            return {
+                "accepted": True,
+                "cfg": f"cfg{len(self.sent)}",
+                "restore_error": None,
+            }
+
+    client = BatchClient()
+    cudy_reader.process_outbox(client)
+
+    assert client.enable_events == [True, False]
+    assert [part for _, part in client.sent] == expected_parts
+    assert completed == [(77, "sent", None, False)]
