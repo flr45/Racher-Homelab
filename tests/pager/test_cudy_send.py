@@ -140,7 +140,7 @@ def test_outbox_ids_match_observed_lt300_more_details_markup():
 
     class HtmlClient(CudyClient):
         def __init__(self):
-            pass
+            self.root = "http://cudy.test/cgi-bin/luci/"
 
         def _authenticated_page(self, url):
             return FormPage(document)
