@@ -470,10 +470,18 @@ base.send_sms = send_sms
 base.process_incoming = process_incoming
 
 
+def cudy_send_enabled() -> bool:
+    if os.getenv("SMS_MODEM_DRIVER", "usb") != "cudy":
+        return True
+    return os.getenv("CUDY_SMS_SEND_ENABLED", "false").lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
 @app.post("/api/outgoing")
 def outgoing():
-    if os.getenv("SMS_MODEM_DRIVER", "usb") == "cudy":
-        return jsonify(error="Cudy-adapteren understøtter SMS-modtagelse; vælg USB til udgående SMS"), 409
+    if not cudy_send_enabled():
+        return jsonify(error="Cudy SMS-afsendelse er ikke aktiveret"), 409
     payload = request.get_json(force=True)
     if not isinstance(payload, dict):
         return jsonify(error="Der forventes et JSON-objekt"), 400
@@ -489,7 +497,7 @@ def outgoing():
 
 @app.post("/api/outgoing/claim")
 def claim_outgoing():
-    if os.getenv("SMS_MODEM_DRIVER", "usb") == "cudy":
+    if not cudy_send_enabled():
         return "", 204
     message = claim_outbound_message()
     if message is None:
