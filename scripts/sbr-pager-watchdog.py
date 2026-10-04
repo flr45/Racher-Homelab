@@ -222,7 +222,12 @@ def collect_checks() -> tuple[dict[str, str | None], dict]:
     if checks["openwa"] is None and pager_payload is not None:
         openwa = pager_payload.get("openwa") or {}
         state = str(openwa.get("state", "unknown")).lower()
-        if state != "ready":
+        active_channel = str(openwa.get("active") or "").lower()
+        if state == "ready" and active_channel == "backup":
+            primary = openwa.get("primary") or {}
+            primary_state = str(primary.get("state", "unknown")).lower()
+            checks["openwa"] = f"OpenWA primær status={primary_state}; backup aktiv"
+        elif state != "ready":
             startup_grace = max(
                 0,
                 int(os.getenv("SBR_WATCHDOG_OPENWA_STARTUP_GRACE_SECONDS", "300")),
@@ -326,10 +331,13 @@ def compose_up(component: str, *, force_recreate: bool = False) -> str:
 
 
 def openwa_session_state_from_issue(issue: str | None) -> str | None:
-    prefix = "OpenWA session status="
-    if not issue or not issue.startswith(prefix):
+    if not issue:
         return None
-    return issue[len(prefix):].strip().lower() or None
+    for prefix in ("OpenWA session status=", "OpenWA primær status="):
+        if issue.startswith(prefix):
+            value = issue[len(prefix):].split(";", 1)[0].strip().lower()
+            return value or None
+    return None
 
 
 def recover_component(component: str, issue: str | None = None) -> str:
