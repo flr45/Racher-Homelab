@@ -313,6 +313,20 @@ class CudyClient:
 
         return {"cfg": cfg, "recipient": recipient, "body": body}
 
+    def find_outbox_message(self, recipient: str, body: str) -> dict | None:
+        """Find an exact previously accepted Outbox item."""
+        for cfg in self.outbox_ids():
+            try:
+                item = self.outbox_message(cfg)
+            except CudyError:
+                continue
+            if (
+                item["recipient"] == recipient
+                and item["body"].strip() == body.strip()
+            ):
+                return item
+        return None
+
     def send_sms(
         self,
         recipient: str,
