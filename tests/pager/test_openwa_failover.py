@@ -233,3 +233,33 @@ def test_sms_fallback_failure_stays_in_durable_retry_queue(authorized, monkeypat
     delivery = p.base.WhatsAppDelivery.query.one()
     assert delivery.status == "retrying"
     assert "SMS modem offline" in (delivery.error or "")
+
+
+def test_definitive_inactive_primary_rejection_can_fall_through_to_sms(p, monkeypatch):
+    monkeypatch.setenv("OPENWA_SESSION_ID", "primary-session")
+    monkeypatch.setenv("SMS_FALLBACK_GATEWAY_URL", "http://sms-backup:8080")
+    monkeypatch.setenv("SMS_FALLBACK_GATEWAY_TOKEN", "sms-backup-key")
+    monkeypatch.setattr(
+        p.base,
+        "_primary_openwa_status_uncached",
+        lambda: {"state": "ready", "detail": "SBR-PAGER"},
+    )
+    monkeypatch.setattr(
+        p.base,
+        "openwa_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError(
+                "OpenWA HTTP 400: "
+                "{\"message\":\"Session 'primary-session' is not active. Start the session first.\"}"
+            )
+        ),
+    )
+    sms_calls = []
+    monkeypatch.setattr(
+        p.base,
+        "send_fallback_sms",
+        lambda phone, body: sms_calls.append((phone, body)) or "sms-fallback:77",
+    )
+
+    assert p.base.send_whatsapp("+4511111111", "Alarm") == "sms-fallback:77"
+    assert sms_calls == [("+4511111111", "Alarm")]
