@@ -46,6 +46,14 @@ fi
 echo "Starter OpenWA..."
 "${WA[@]}"     up -d --no-build openwa
 
+BACKUP_URL="$(sed -n 's/^SMS_WHATSAPP_OPENWA_BACKUP_URL=//p' "$ENV" | tail -1 | tr -d '\r\"\047')"
+BACKUP_KEY="$(sed -n 's/^SMS_WHATSAPP_OPENWA_BACKUP_API_KEY=//p' "$ENV" | tail -1 | tr -d '\r\"\047')"
+BACKUP_SESSION="$(sed -n 's/^SMS_WHATSAPP_OPENWA_BACKUP_SESSION_ID=//p' "$ENV" | tail -1 | tr -d '\r\"\047')"
+if [[ -n "$BACKUP_URL" && -n "$BACKUP_KEY" && -n "$BACKUP_SESSION" ]]; then
+    echo "Starter sekundær OpenWA..."
+    "${WA[@]}" --profile whatsapp-backup up -d --no-build openwa-backup
+fi
+
 echo "Recreater SBR Pager efter bind-IP er klar..."
 "${WA[@]}"     up -d --no-build --no-deps --force-recreate sms-whatsapp
 
