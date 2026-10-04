@@ -261,6 +261,85 @@ def phone_to_chat_id(phone: str) -> str:
     return re.sub(r"\D", "", normalize_phone(phone)) + "@c.us"
 
 
+def sms_fallback_config() -> dict | None:
+    base_url = os.getenv("SMS_FALLBACK_GATEWAY_URL", "").strip().rstrip("/")
+    token = os.getenv("SMS_FALLBACK_GATEWAY_TOKEN", "").strip()
+    if not base_url and not token:
+        return None
+    if not base_url or not token:
+        return {"invalid": True, "base_url": base_url, "token": token}
+    return {
+        "base_url": base_url,
+        "token": token,
+        "wait_seconds": max(5, int(os.getenv("SMS_FALLBACK_WAIT_SECONDS", "45"))),
+        "poll_seconds": max(0.25, float(os.getenv("SMS_FALLBACK_POLL_SECONDS", "1"))),
+    }
+
+
+def _fallback_sms_request(
+    url: str,
+    token: str,
+    *,
+    method: str = "GET",
+    payload: dict | None = None,
+    timeout: int = 10,
+):
+    data = None
+    headers = {"Authorization": f"Bearer {token}"}
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            return json.loads(body) if body else {}
+    except urllib.error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"SMS fallback HTTP {exc.code}: {details[:500]}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"SMS fallback kan ikke kontaktes: {exc.reason}") from exc
+
+
+def send_fallback_sms(phone: str, message: str) -> str:
+    config = sms_fallback_config()
+    if config is None:
+        raise RuntimeError("SMS fallback er ikke konfigureret")
+    if config.get("invalid"):
+        raise RuntimeError("SMS fallback er kun delvist konfigureret")
+
+    queued = _fallback_sms_request(
+        f"{config['base_url']}/api/outgoing",
+        config["token"],
+        method="POST",
+        payload={"recipient": normalize_phone(phone), "body": message},
+    )
+    message_id = queued.get("id") if isinstance(queued, dict) else None
+    if not message_id:
+        raise RuntimeError("SMS fallback-køen kvitterede ikke med et id")
+
+    deadline = time.monotonic() + config["wait_seconds"]
+    while time.monotonic() < deadline:
+        current = _fallback_sms_request(
+            f"{config['base_url']}/api/outgoing/{message_id}",
+            config["token"],
+            timeout=8,
+        )
+        status = str(current.get("status") or "").lower()
+        if status == "sent":
+            return f"sms-fallback:{message_id}"
+        if status in {"failed", "unknown"}:
+            raise RuntimeError(
+                current.get("error")
+                or f"SMS fallback endte med status={status}"
+            )
+        time.sleep(config["poll_seconds"])
+
+    raise TimeoutError(
+        "SMS fallback blev ikke bekræftet sendt inden timeout; beholdes i retry-kø"
+    )
+
+
 def _send_whatsapp_via(
     requester,
     session_id: str,
@@ -283,30 +362,39 @@ def send_whatsapp(phone: str, message: str) -> str | None:
         raise ValueError("Beskeden er tom")
 
     backup = backup_openwa_config()
-    if backup is None:
-        # Keep the established single-channel behavior when no backup is
-        # configured. This avoids adding an extra status round-trip per message.
+    sms_fallback = sms_fallback_config()
+
+    # Preserve the established single-channel path when no failover transport is
+    # configured. This avoids an extra status round-trip in existing installs.
+    if backup is None and sms_fallback is None:
         return _send_whatsapp_via(openwa_request, openwa_session_id(), phone, body)
 
-    if backup.get("invalid"):
+    if backup is not None and backup.get("invalid"):
         raise RuntimeError("Backup-OpenWA er kun delvist konfigureret")
+    if sms_fallback is not None and sms_fallback.get("invalid"):
+        raise RuntimeError("SMS fallback er kun delvist konfigureret")
 
-    # Fail over only before the external send side effect. If the primary says it
-    # is ready, use it and propagate any send error to the durable retry queue.
-    # We deliberately do not send the same job on backup after an ambiguous
-    # primary send failure, which would risk duplicate alarm delivery.
+    # Fail over only before the external send side effect. If a channel was
+    # reported ready and its actual send call becomes ambiguous, propagate that
+    # error to the durable retry queue instead of risking a duplicate on the
+    # next transport.
     primary = _primary_openwa_status_uncached()
     if primary.get("state") == "ready":
         return _send_whatsapp_via(openwa_request, openwa_session_id(), phone, body)
 
-    backup_status = _backup_openwa_status_uncached()
-    if backup_status.get("state") == "ready":
-        return _send_whatsapp_via(
-            backup_openwa_request,
-            str(backup["session_id"]),
-            phone,
-            body,
-        )
+    backup_status = {"state": "disabled", "detail": "Backup er ikke konfigureret"}
+    if backup is not None:
+        backup_status = _backup_openwa_status_uncached()
+        if backup_status.get("state") == "ready":
+            return _send_whatsapp_via(
+                backup_openwa_request,
+                str(backup["session_id"]),
+                phone,
+                body,
+            )
+
+    if sms_fallback is not None:
+        return send_fallback_sms(phone, body)
 
     raise RuntimeError(
         "Ingen WhatsApp-forbindelse er klar "
