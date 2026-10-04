@@ -1,10 +1,12 @@
 """Read SMS through the LT300's stock LuCI AT form; reuse the USB alarm flow."""
+import hashlib
 import json
 import logging
 import os
 import re
 import signal
 import time
+import textwrap
 
 import modem_reader_sbr as pager
 from cudy_client import CudyClient, CudyError
@@ -60,6 +62,48 @@ def import_message(client, message):
 
 
 
+
+def outgoing_sms_parts(message: dict) -> list[str]:
+    """Create <=160-char parts with a stable per-queue-job marker."""
+    body = " ".join(str(message.get("body") or "").split())
+    if not body:
+        raise ValueError("SMS-teksten er tom")
+
+    stable = "|".join(
+        [
+            str(message.get("id") or ""),
+            str(message.get("created_at") or ""),
+            str(message.get("recipient") or ""),
+        ]
+    )
+    tag = hashlib.sha256(stable.encode("utf-8")).hexdigest()[:6].upper()
+    single_prefix = f"[SBR {tag}] "
+    if len(single_prefix) + len(body) <= 160:
+        return [single_prefix + body]
+
+    total_guess = 2
+    while True:
+        longest_prefix = f"[SBR {tag} {total_guess}/{total_guess}] "
+        width = max(1, 160 - len(longest_prefix))
+        chunks = textwrap.wrap(
+            body,
+            width=width,
+            break_long_words=True,
+            break_on_hyphens=False,
+            replace_whitespace=True,
+            drop_whitespace=True,
+        )
+        total = len(chunks)
+        if total == total_guess:
+            break
+        total_guess = total
+
+    return [
+        f"[SBR {tag} {index}/{total}] {chunk}"
+        for index, chunk in enumerate(chunks, 1)
+    ]
+
+
 def process_outbox(client):
     """Deliver queued outgoing jobs through Cudy when explicitly enabled."""
     if not SEND_ENABLED:
@@ -73,14 +117,44 @@ def process_outbox(client):
 
         message_id = message["id"]
         recipient = message["recipient"]
-        body = message["body"]
+        parts = outgoing_sms_parts(message)
 
         try:
-            if reader.SMS_DRY_RUN:
-                log.info("DRY RUN Cudy SMS %s til %s: %s", message_id, recipient, body)
-                result = {"accepted": True, "cfg": "dry-run", "restore_error": None}
-            else:
-                result = client.send_sms(recipient, body)
+            cfgs = []
+            restore_errors = []
+            for part in parts:
+                existing = None if reader.SMS_DRY_RUN else client.find_outbox_message(
+                    recipient,
+                    part,
+                )
+                if existing is not None:
+                    cfgs.append(existing["cfg"])
+                    log.info(
+                        "Cudy SMS %s-del findes allerede i Outbox (cfg=%s); "
+                        "springer dublet over",
+                        message_id,
+                        existing["cfg"],
+                    )
+                    continue
+
+                if reader.SMS_DRY_RUN:
+                    log.info(
+                        "DRY RUN Cudy SMS %s til %s: %s",
+                        message_id,
+                        recipient,
+                        part,
+                    )
+                    result = {
+                        "accepted": True,
+                        "cfg": "dry-run",
+                        "restore_error": None,
+                    }
+                else:
+                    result = client.send_sms(recipient, part)
+
+                cfgs.append(str(result.get("cfg") or ""))
+                if result.get("restore_error"):
+                    restore_errors.append(str(result["restore_error"]))
 
             reader.complete_outgoing(message_id, "sent")
             status = {
@@ -91,28 +165,27 @@ def process_outbox(client):
                 "last_sent_recipient": recipient,
                 "last_error": None,
             }
-            if result.get("restore_error"):
+            if restore_errors:
                 status["state"] = "degraded"
                 status["last_error"] = (
                     "SMS blev accepteret, men Cudy SMS Enable kunne ikke "
-                    "gendannes: " + str(result["restore_error"])
+                    "gendannes: " + "; ".join(restore_errors)
                 )[:240]
             reader.write_status(**status)
             log.info(
                 "Udgående Cudy SMS %s accepteret til %s (cfg=%s)",
                 message_id,
                 recipient,
-                result.get("cfg"),
+                ",".join(cfgs),
             )
         except (CudyError, ValueError) as exc:
-            # Never auto-retry an ambiguous Cudy send. send_sms() reconciles
-            # Outbox first, but a very late router write could otherwise make a
-            # retry produce a duplicate SMS.
+            # Parts carry a stable queue-job marker. On retry, already accepted
+            # parts are found in Outbox and skipped instead of being duplicated.
             reader.complete_outgoing(
                 message_id,
                 "failed",
                 error=str(exc),
-                retry=False,
+                retry=True,
             )
             reader.write_status(
                 state="degraded",
