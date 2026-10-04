@@ -28,6 +28,7 @@ class FormPage(HTMLParser):
         self.form = None
         self.textareas = {}
         self.textarea = None
+        self.document = document
         self.feed(document)
 
     def handle_starttag(self, tag, attrs):
@@ -195,15 +196,14 @@ class CudyClient:
         return result
 
     def prepare_sms(self, recipient: str, body: str):
-        """Validate the observed LT300 V3 form without submitting an SMS.
+        """Validate and prepare the observed LT300 V3 SMS form.
 
         The returned token-bearing fields are private and must never be logged.
-        Production sending remains disabled until acknowledgement is verified.
         """
         if not isinstance(recipient, str) or not re.fullmatch(r"\+[1-9][0-9]{7,14}", recipient):
             raise CudyError("Modtager skal være ét telefonnummer med landekode")
         if not isinstance(body, str) or not body.strip() or len(body) > 160:
-            raise CudyError("Prøve-SMS skal indeholde 1–160 tegn")
+            raise CudyError("SMS skal indeholde 1–160 tegn")
         if any(ord(char) < 32 and char not in "\n\r\t" for char in body):
             raise CudyError("SMS-teksten indeholder ugyldige kontroltegn")
         url = self.root + "admin/network/gcom/sms/smsnew?nomodal=&iface=4g"
@@ -229,9 +229,179 @@ class CudyClient:
         multipart_form(fields)  # Validate encoding before a future explicit send.
         return action, fields
 
+    def _authenticated_page(self, url: str):
+        page = self._request(url)
+        if page.containing("luci_password"):
+            self._login(page)
+            page = self._request(url)
+        return page
+
+    def sms_enabled(self) -> bool:
+        """Return the stock-firmware SMS service state without changing it."""
+        url = self.root + "admin/network/gcom/config/sms"
+        page = self._authenticated_page(url)
+        form = page.containing("cbid.sms.4g.enabled")
+        if not form or not form["fields"].get("token"):
+            raise CudyError("Routerens SMS Enable-formular genkendes ikke")
+        value = str(form["fields"].get("cbid.sms.4g.enabled", "")).strip()
+        if value not in {"0", "1"}:
+            raise CudyError("Routerens SMS Enable-status er ukendt")
+        return value == "1"
+
+    def set_sms_enabled(self, enabled: bool) -> bool:
+        """Set SMS Enable through the observed LuCI form and verify the result."""
+        url = self.root + "admin/network/gcom/config/sms"
+        page = self._authenticated_page(url)
+        form = page.containing("cbid.sms.4g.enabled")
+        if not form or not form["fields"].get("token"):
+            raise CudyError("Routerens SMS Enable-formular genkendes ikke")
+
+        fields = dict(form["fields"])
+        fields["cbi.submit"] = "1"
+        fields["cbi.cbe.sms.4g.enabled"] = "1"
+        fields["cbid.sms.4g.enabled"] = "1" if enabled else "0"
+        if "cbi.apply" in form.get("buttons", {}):
+            fields["cbi.apply"] = form["buttons"]["cbi.apply"]
+
+        action = self._same_origin(
+            urllib.parse.urljoin(url, form["action"] or url)
+        )
+        if urllib.parse.urlsplit(action).path != urllib.parse.urlsplit(url).path:
+            raise CudyError("Ukendt SMS Enable-formularadresse")
+
+        self._request(action, fields)
+        time.sleep(1)
+        current = self.sms_enabled()
+        if current is not bool(enabled):
+            raise CudyError(
+                "Cudy bekræftede ikke ændringen af SMS Enable-status"
+            )
+        return current
+
+    def outbox_ids(self) -> list[str]:
+        """Read stable cfg IDs from Cudy's stored/sent SMS list."""
+        url = self.root + "admin/network/gcom/sms/smslist?smsbox=sto&iface=4g"
+        page = self._authenticated_page(url)
+        ids = re.findall(
+            r'/sms/readsms"\s*,\s*"iface=4g&cfg=([A-Za-z0-9_-]+)&smsbox=sto"',
+            page.document,
+            flags=re.IGNORECASE,
+        )
+        return list(dict.fromkeys(ids))
+
+    def outbox_message(self, cfg: str) -> dict:
+        """Read one Outbox item using the same endpoint as 'More Details'."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", cfg or ""):
+            raise CudyError("Ugyldigt Cudy Outbox-id")
+
+        query = urllib.parse.urlencode(
+            {"iface": "4g", "cfg": cfg, "smsbox": "sto"}
+        )
+        url = self.root + "admin/network/gcom/sms/readsms?" + query
+        page = self._authenticated_page(url)
+        form = page.containing("cbid.smsread.1.phone")
+        if not form:
+            raise CudyError("Routerens Outbox-detaljer genkendes ikke")
+
+        recipient = str(
+            form["fields"].get("cbid.smsread.1.phone", "")
+        ).strip()
+        body = page.textareas.get("cbid.smsread.1.content")
+        if body is None and page.textareas:
+            body = next(iter(page.textareas.values()))
+        body = (body or "").strip()
+
+        return {"cfg": cfg, "recipient": recipient, "body": body}
+
+    def send_sms(
+        self,
+        recipient: str,
+        body: str,
+        *,
+        confirm_seconds: float = 12.0,
+        poll_seconds: float = 0.5,
+    ) -> dict:
+        """Send one SMS with SMS Enable on and reconcile it against Outbox.
+
+        Cudy's Outbox timestamp is the queue time, not a delivery report. A new
+        cfg ID matching recipient and body is therefore treated as router/modem
+        acceptance, not handset delivery.
+        """
+        # Validate before changing router state.
+        if not isinstance(recipient, str) or not re.fullmatch(
+            r"\+[1-9][0-9]{7,14}", recipient
+        ):
+            raise CudyError("Modtager skal være ét telefonnummer med landekode")
+        if not isinstance(body, str) or not body.strip() or len(body) > 160:
+            raise CudyError("SMS skal indeholde 1–160 tegn")
+
+        before = set(self.outbox_ids())
+        original_enabled = self.sms_enabled()
+        accepted_cfg = None
+        submission_error = None
+        restore_error = None
+
+        try:
+            if not original_enabled:
+                self.set_sms_enabled(True)
+
+            # Fetch a fresh SMS form after changing router configuration so its
+            # CSRF/token state cannot be stale.
+            action, fields = self.prepare_sms(recipient, body)
+            try:
+                self._request(action, fields)
+            except Exception as exc:  # noqa: BLE001
+                # A transport failure may happen after Cudy accepted the POST.
+                # Reconcile Outbox before deciding whether the send failed.
+                submission_error = exc
+
+            deadline = time.monotonic() + max(1.0, float(confirm_seconds))
+            interval = max(0.1, float(poll_seconds))
+            while True:
+                for cfg in self.outbox_ids():
+                    if cfg in before:
+                        continue
+                    try:
+                        item = self.outbox_message(cfg)
+                    except CudyError:
+                        continue
+                    if (
+                        item["recipient"] == recipient
+                        and item["body"].strip() == body.strip()
+                    ):
+                        accepted_cfg = cfg
+                        break
+                if accepted_cfg or time.monotonic() >= deadline:
+                    break
+                time.sleep(interval)
+        finally:
+            if not original_enabled:
+                try:
+                    self.set_sms_enabled(False)
+                except CudyError as exc:
+                    restore_error = str(exc)
+
+        if accepted_cfg:
+            return {
+                "cfg": accepted_cfg,
+                "accepted": True,
+                "restore_error": restore_error,
+            }
+
+        if submission_error is not None:
+            raise CudyError(
+                "Cudy-afsendelsen er usikker: formular-kaldet fejlede og "
+                "ingen ny matchende Outbox-post blev fundet"
+            ) from submission_error
+
+        raise CudyError(
+            "Cudy kvitterede ikke med en ny matchende Outbox-post inden timeout"
+        )
+
     def probe(self):
         self.connect()
-        result = {"transport": "cudy", "capability": "receive-only", "at": self.command("AT")}
+        send_enabled = os.getenv("CUDY_SMS_SEND_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+        result = {"transport": "cudy", "capability": "send-receive" if send_enabled else "receive-only", "at": self.command("AT")}
         for name, command in [("sim", "AT+CPIN?"), ("network", "AT+CEREG?"), ("signal", "AT+CSQ"), ("storage", "AT+CPMS?")]:
             result[name] = self.command(command)
         if "ERROR" in result["network"]:
