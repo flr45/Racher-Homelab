@@ -508,6 +508,7 @@ def claim_outgoing():
         body=message.body,
         status=message.status,
         attempts=message.attempts,
+        created_at=message.created_at.isoformat() if message.created_at else None,
     )
 
 
