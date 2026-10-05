@@ -15,7 +15,10 @@ reader = pager.reader
 log = logging.getLogger("sms-cudy-reader")
 POLL_SECONDS = max(2.0, float(os.getenv("CUDY_POLL_SECONDS", "5")))
 SEND_ENABLED = os.getenv("CUDY_SMS_SEND_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
-SEND_SETTLE_SECONDS = max(0.0, float(os.getenv("CUDY_SMS_SEND_SETTLE_SECONDS", "10")))
+SMS_ENGINE_CHECK_SECONDS = max(
+    10.0,
+    float(os.getenv("CUDY_SMS_ENGINE_CHECK_SECONDS", "60")),
+)
 CAPABILITY = "send-receive" if SEND_ENABLED else "receive-only"
 
 
@@ -140,68 +143,40 @@ def process_outbox(client):
                     else:
                         missing_parts.append(part)
 
-            original_enabled = None
-            restore_error = None
-            try:
-                if missing_parts and not reader.SMS_DRY_RUN:
-                    original_enabled = client.sms_enabled()
-                    if not original_enabled:
-                        client.set_sms_enabled(True)
+            if missing_parts and not reader.SMS_DRY_RUN:
+                # SMS Enable is infrastructure, not a per-message switch.
+                # Keep it permanently enabled so both receive and send work
+                # unattended, including after a Cudy reboot.
+                client.ensure_sms_enabled()
 
-                for part in missing_parts:
-                    if reader.SMS_DRY_RUN:
-                        log.info(
-                            "DRY RUN Cudy SMS %s til %s: %s",
-                            message_id,
-                            recipient,
-                            part,
-                        )
-                        result = {
-                            "accepted": True,
-                            "cfg": "dry-run",
-                            "restore_error": None,
-                        }
-                    else:
-                        # The batch owns SMS Enable, so individual parts can
-                        # skip their own post-send drain wait. One shared drain
-                        # window runs after the final accepted part.
-                        result = client.send_sms(
-                            recipient,
-                            part,
-                            settle_seconds=0,
-                        )
+            for part in missing_parts:
+                if reader.SMS_DRY_RUN:
+                    log.info(
+                        "DRY RUN Cudy SMS %s til %s: %s",
+                        message_id,
+                        recipient,
+                        part,
+                    )
+                    result = {
+                        "accepted": True,
+                        "cfg": "dry-run",
+                        "sms_engine_enabled": True,
+                    }
+                else:
+                    result = client.send_sms(recipient, part)
 
-                    cfgs.append(str(result.get("cfg") or ""))
-
-                if (
-                    missing_parts
-                    and not reader.SMS_DRY_RUN
-                    and SEND_SETTLE_SECONDS > 0
-                ):
-                    time.sleep(min(30.0, SEND_SETTLE_SECONDS))
-            finally:
-                if original_enabled is False:
-                    try:
-                        client.set_sms_enabled(False)
-                    except CudyError as exc:
-                        restore_error = str(exc)
+                cfgs.append(str(result.get("cfg") or ""))
 
             reader.complete_outgoing(message_id, "sent")
-            status = {
-                "state": "online",
-                "transport": "cudy",
-                "capability": CAPABILITY,
-                "last_sent_sms_at": reader.utc_iso(),
-                "last_sent_recipient": recipient,
-                "last_error": None,
-            }
-            if restore_error:
-                status["state"] = "degraded"
-                status["last_error"] = (
-                    "SMS blev accepteret, men Cudy SMS Enable kunne ikke "
-                    "gendannes: " + restore_error
-                )[:240]
-            reader.write_status(**status)
+            reader.write_status(
+                state="online",
+                transport="cudy",
+                capability=CAPABILITY,
+                sms_engine="enabled",
+                last_sent_sms_at=reader.utc_iso(),
+                last_sent_recipient=recipient,
+                last_error=None,
+            )
             log.info(
                 "Udgående Cudy SMS %s accepteret til %s (%s del(e), cfg=%s)",
                 message_id,
@@ -241,19 +216,36 @@ def run():
             probe = client.probe()
             if "READY" not in probe["sim"]:
                 raise CudyError("Routerens SIM er ikke klar; kontrollér SIM-kort og PIN i Cudy")
+
+            # Physical LT300 testing confirmed that the stock SMS service must
+            # stay enabled. Self-heal it on startup so no browser action is
+            # required after a router/container restart.
+            client.ensure_sms_enabled()
+
             retry_seconds = 2
             next_check = 0.0
+            next_sms_engine_check = 0.0
             network = probe["network"]
             strength = probe["signal"]
             while reader.running:
-                if time.monotonic() >= next_check:
+                now = time.monotonic()
+                if now >= next_check:
                     network = client.command("AT+CEREG?")
                     if "ERROR" in network:
                         network = client.command("AT+CREG?")
                     strength = client.command("AT+CSQ")
                     reader.write_status(storage=read_storage(client))
-                    next_check = time.monotonic() + 30
-                reader.write_status(state="online" if registered(network) else "degraded", network=network.strip(), signal=strength.strip(), sim=probe["sim"].strip(), transport="cudy", capability=CAPABILITY, last_error=None if registered(network) else "Routeren er ikke registreret på mobilnettet")
+                    next_check = now + 30
+
+                if now >= next_sms_engine_check:
+                    if not client.sms_enabled():
+                        log.warning(
+                            "Cudy SMS Enable var slået fra; aktiverer automatisk"
+                        )
+                        client.set_sms_enabled(True)
+                    next_sms_engine_check = now + SMS_ENGINE_CHECK_SECONDS
+
+                reader.write_status(state="online" if registered(network) else "degraded", network=network.strip(), signal=strength.strip(), sim=probe["sim"].strip(), transport="cudy", capability=CAPABILITY, sms_engine="enabled", last_error=None if registered(network) else "Routeren er ikke registreret på mobilnettet")
                 for message in read_inbox(client):
                     try:
                         import_message(client, message)
