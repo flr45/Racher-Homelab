@@ -276,6 +276,11 @@ class CudyClient:
             raise CudyError("Ukendt SMS Enable-formularadresse")
 
         self._request(action, fields)
+
+        # Applying the LuCI configuration can rotate/replace form tokens.
+        # Never reuse an AT form captured before the configuration POST.
+        self.at_form = None
+
         time.sleep(1)
         current = self.sms_enabled()
         if current is not bool(enabled):
@@ -365,8 +370,8 @@ class CudyClient:
             r"\+[1-9][0-9]{7,14}", recipient
         ):
             raise CudyError("Modtager skal være ét telefonnummer med landekode")
-        if not isinstance(body, str) or not body.strip() or len(body) > 160:
-            raise CudyError("SMS skal indeholde 1–160 tegn")
+        if not isinstance(body, str) or not body.strip() or len(body) > MAX_SMS_CHARS:
+            raise CudyError(f"SMS skal indeholde 1–{MAX_SMS_CHARS} tegn")
 
         before = set(self.outbox_ids())
         accepted_cfg = None
