@@ -473,7 +473,7 @@ base.process_incoming = process_incoming
 def cudy_send_enabled() -> bool:
     if os.getenv("SMS_MODEM_DRIVER", "usb") != "cudy":
         return True
-    return os.getenv("CUDY_SMS_SEND_ENABLED", "false").lower() in {
+    return os.getenv("CUDY_SMS_SEND_ENABLED", "true").lower() in {
         "1", "true", "yes", "on"
     }
 
