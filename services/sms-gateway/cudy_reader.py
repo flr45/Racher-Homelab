@@ -14,12 +14,16 @@ from cudy_client import CudyClient, CudyError
 reader = pager.reader
 log = logging.getLogger("sms-cudy-reader")
 POLL_SECONDS = max(2.0, float(os.getenv("CUDY_POLL_SECONDS", "5")))
-SEND_ENABLED = os.getenv("CUDY_SMS_SEND_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+SEND_ENABLED = os.getenv("CUDY_SMS_SEND_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 SMS_ENGINE_CHECK_SECONDS = max(
     10.0,
     float(os.getenv("CUDY_SMS_ENGINE_CHECK_SECONDS", "60")),
 )
 CAPABILITY = "send-receive" if SEND_ENABLED else "receive-only"
+MAX_SMS_CHARS = max(
+    1,
+    min(160, int(os.getenv("CUDY_SMS_MAX_CHARS", "70"))),
+)
 
 
 def registered(response):
@@ -68,7 +72,7 @@ def import_message(client, message):
 
 
 def outgoing_sms_parts(message: dict) -> list[str]:
-    """Create <=160-char parts with a stable per-queue-job marker."""
+    """Create Cudy-safe SMS parts with a stable per-queue-job marker."""
     body = " ".join(str(message.get("body") or "").split())
     if not body:
         raise ValueError("SMS-teksten er tom")
@@ -82,13 +86,13 @@ def outgoing_sms_parts(message: dict) -> list[str]:
     )
     tag = hashlib.sha256(stable.encode("utf-8")).hexdigest()[:6].upper()
     single_prefix = f"[SBR {tag}] "
-    if len(single_prefix) + len(body) <= 160:
+    if len(single_prefix) + len(body) <= MAX_SMS_CHARS:
         return [single_prefix + body]
 
     total_guess = 2
     while True:
         longest_prefix = f"[SBR {tag} {total_guess}/{total_guess}] "
-        width = max(1, 160 - len(longest_prefix))
+        width = max(1, MAX_SMS_CHARS - len(longest_prefix))
         chunks = textwrap.wrap(
             body,
             width=width,
