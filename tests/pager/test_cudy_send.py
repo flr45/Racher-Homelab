@@ -44,7 +44,7 @@ class FakeCudy(CudyClient):
         return object()
 
 
-def test_cudy_send_enables_before_submit_and_restores_afterwards():
+def test_cudy_send_enables_before_submit_and_leaves_engine_on():
     client = FakeCudy()
 
     result = client.send_sms(
@@ -57,12 +57,12 @@ def test_cudy_send_enables_before_submit_and_restores_afterwards():
 
     assert result["accepted"] is True
     assert result["cfg"] == "cfg-new"
-    assert client.enabled is False
+    assert client.enabled is True
+    assert result["sms_engine_enabled"] is True
     assert client.events == [
         ("enabled", True),
         ("prepare", "+4522270396", "Alarmtest", True),
         ("submit", True),
-        ("enabled", False),
     ]
 
 
@@ -79,7 +79,7 @@ def test_cudy_send_reconciles_outbox_after_ambiguous_submit_error():
 
     assert result["accepted"] is True
     assert result["cfg"] == "cfg-new"
-    assert client.enabled is False
+    assert client.enabled is True
 
 
 def test_cudy_send_fails_closed_without_new_outbox_entry():
@@ -97,7 +97,18 @@ def test_cudy_send_fails_closed_without_new_outbox_entry():
     else:
         raise AssertionError("Cudy send skulle have fejlet uden Outbox-kvittering")
 
-    assert client.enabled is False
+    assert client.enabled is True
+
+
+def test_sms_engine_self_heal_is_idempotent():
+    client = FakeCudy()
+
+    assert client.ensure_sms_enabled() is True
+    assert client.enabled is True
+    assert client.events == [("enabled", True)]
+
+    assert client.ensure_sms_enabled() is True
+    assert client.events == [("enabled", True)]
 
 
 def test_cudy_outgoing_api_requires_explicit_send_flag(g, monkeypatch):
@@ -221,7 +232,6 @@ def test_cudy_reader_keeps_sms_enabled_for_whole_multipart_batch(monkeypatch):
     completed = []
 
     monkeypatch.setattr(cudy_reader, "SEND_ENABLED", True)
-    monkeypatch.setattr(cudy_reader, "SEND_SETTLE_SECONDS", 0)
     monkeypatch.setattr(cudy_reader.reader, "SMS_DRY_RUN", False)
     monkeypatch.setattr(cudy_reader.reader, "OUTBOX_BATCH_SIZE", 20)
     monkeypatch.setattr(cudy_reader.reader, "running", True)
@@ -257,19 +267,23 @@ def test_cudy_reader_keeps_sms_enabled_for_whole_multipart_batch(monkeypatch):
             self.enable_events.append(self.enabled)
             return self.enabled
 
-        def send_sms(self, recipient, part, *, settle_seconds=None):
+        def ensure_sms_enabled(self):
+            if not self.enabled:
+                self.set_sms_enabled(True)
+            return True
+
+        def send_sms(self, recipient, part):
             assert self.enabled is True
-            assert settle_seconds == 0
             self.sent.append((recipient, part))
             return {
                 "accepted": True,
                 "cfg": f"cfg{len(self.sent)}",
-                "restore_error": None,
+                "sms_engine_enabled": True,
             }
 
     client = BatchClient()
     cudy_reader.process_outbox(client)
 
-    assert client.enable_events == [True, False]
+    assert client.enable_events == [True]
     assert [part for _, part in client.sent] == expected_parts
     assert completed == [(77, "sent", None, False)]
