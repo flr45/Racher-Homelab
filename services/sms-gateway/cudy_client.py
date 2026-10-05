@@ -17,6 +17,12 @@ import urllib.request
 from html.parser import HTMLParser
 
 
+MAX_SMS_CHARS = max(
+    1,
+    min(160, int(os.getenv("CUDY_SMS_MAX_CHARS", "70"))),
+)
+
+
 class CudyError(RuntimeError):
     pass
 
@@ -202,8 +208,8 @@ class CudyClient:
         """
         if not isinstance(recipient, str) or not re.fullmatch(r"\+[1-9][0-9]{7,14}", recipient):
             raise CudyError("Modtager skal være ét telefonnummer med landekode")
-        if not isinstance(body, str) or not body.strip() or len(body) > 160:
-            raise CudyError("SMS skal indeholde 1–160 tegn")
+        if not isinstance(body, str) or not body.strip() or len(body) > MAX_SMS_CHARS:
+            raise CudyError(f"SMS skal indeholde 1–{MAX_SMS_CHARS} tegn")
         if any(ord(char) < 32 and char not in "\n\r\t" for char in body):
             raise CudyError("SMS-teksten indeholder ugyldige kontroltegn")
         url = self.root + "admin/network/gcom/sms/smsnew?nomodal=&iface=4g"
@@ -425,7 +431,7 @@ class CudyClient:
 
     def probe(self):
         self.connect()
-        send_enabled = os.getenv("CUDY_SMS_SEND_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+        send_enabled = os.getenv("CUDY_SMS_SEND_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
         result = {"transport": "cudy", "capability": "send-receive" if send_enabled else "receive-only", "at": self.command("AT")}
         for name, command in [("sim", "AT+CPIN?"), ("network", "AT+CEREG?"), ("signal", "AT+CSQ"), ("storage", "AT+CPMS?")]:
             result[name] = self.command(command)
