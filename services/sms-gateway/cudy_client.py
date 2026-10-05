@@ -278,6 +278,18 @@ class CudyClient:
             )
         return current
 
+    def ensure_sms_enabled(self) -> bool:
+        """Keep Cudy's own SMS engine enabled for unattended send/receive.
+
+        The LT300 can store a web Outbox entry while its SMS engine is disabled.
+        SBR Pager therefore treats SMS Enable as a required router service, not
+        as a per-message switch. If the router reboots or the setting is changed,
+        the reader can safely self-heal it back to enabled.
+        """
+        if self.sms_enabled():
+            return True
+        return self.set_sms_enabled(True)
+
     def outbox_ids(self) -> list[str]:
         """Read stable cfg IDs from Cudy's stored/sent SMS list."""
         url = self.root + "admin/network/gcom/sms/smslist?smsbox=sto&iface=4g"
@@ -336,10 +348,10 @@ class CudyClient:
         poll_seconds: float = 0.5,
         settle_seconds: float | None = None,
     ) -> dict:
-        """Send one SMS with SMS Enable on and reconcile it against Outbox.
+        """Send one SMS while keeping Cudy's SMS engine permanently enabled.
 
         Cudy's Outbox timestamp is the queue time, not a delivery report. A new
-        cfg ID matching recipient and body is therefore treated as router/modem
+        cfg ID matching recipient and body is therefore treated as router
         acceptance, not handset delivery.
         """
         # Validate before changing router state.
@@ -351,68 +363,54 @@ class CudyClient:
             raise CudyError("SMS skal indeholde 1–160 tegn")
 
         before = set(self.outbox_ids())
-        original_enabled = self.sms_enabled()
         accepted_cfg = None
         submission_error = None
-        restore_error = None
 
+        # SMS Enable is a permanent service prerequisite. Never turn it off
+        # after a send: the physical LT300 test proved that disabling it can
+        # leave messages in Cudy Outbox without transmitting them.
+        self.ensure_sms_enabled()
+
+        # Fetch a fresh SMS form after checking router configuration so its
+        # CSRF/token state cannot be stale.
+        action, fields = self.prepare_sms(recipient, body)
         try:
-            if not original_enabled:
-                self.set_sms_enabled(True)
+            self._request(action, fields)
+        except Exception as exc:  # noqa: BLE001
+            # A transport failure may happen after Cudy accepted the POST.
+            # Reconcile Outbox before deciding whether the send failed.
+            submission_error = exc
 
-            # Fetch a fresh SMS form after changing router configuration so its
-            # CSRF/token state cannot be stale.
-            action, fields = self.prepare_sms(recipient, body)
-            try:
-                self._request(action, fields)
-            except Exception as exc:  # noqa: BLE001
-                # A transport failure may happen after Cudy accepted the POST.
-                # Reconcile Outbox before deciding whether the send failed.
-                submission_error = exc
-
-            deadline = time.monotonic() + max(1.0, float(confirm_seconds))
-            interval = max(0.1, float(poll_seconds))
-            while True:
-                for cfg in self.outbox_ids():
-                    if cfg in before:
-                        continue
-                    try:
-                        item = self.outbox_message(cfg)
-                    except CudyError:
-                        continue
-                    if (
-                        item["recipient"] == recipient
-                        and item["body"].strip() == body.strip()
-                    ):
-                        accepted_cfg = cfg
-                        break
-                if accepted_cfg or time.monotonic() >= deadline:
-                    break
-                time.sleep(interval)
-
-            # The physical LT300 test showed that Outbox insertion can precede
-            # handset delivery. Keep SMS Enable on for a short drain window so
-            # the modem has time to hand the accepted message to the network.
-            if accepted_cfg:
-                settle = (
-                    float(os.getenv("CUDY_SMS_SEND_SETTLE_SECONDS", "10"))
-                    if settle_seconds is None
-                    else float(settle_seconds)
-                )
-                if settle > 0:
-                    time.sleep(min(30.0, settle))
-        finally:
-            if not original_enabled:
+        deadline = time.monotonic() + max(1.0, float(confirm_seconds))
+        interval = max(0.1, float(poll_seconds))
+        while True:
+            for cfg in self.outbox_ids():
+                if cfg in before:
+                    continue
                 try:
-                    self.set_sms_enabled(False)
-                except CudyError as exc:
-                    restore_error = str(exc)
+                    item = self.outbox_message(cfg)
+                except CudyError:
+                    continue
+                if (
+                    item["recipient"] == recipient
+                    and item["body"].strip() == body.strip()
+                ):
+                    accepted_cfg = cfg
+                    break
+            if accepted_cfg or time.monotonic() >= deadline:
+                break
+            time.sleep(interval)
+
+        # Retain the parameter for compatibility with older callers, but there
+        # is deliberately no post-send disable/drain cycle anymore.
+        _ = settle_seconds
 
         if accepted_cfg:
             return {
                 "cfg": accepted_cfg,
                 "accepted": True,
-                "restore_error": restore_error,
+                "sms_engine_enabled": True,
+                "restore_error": None,
             }
 
         if submission_error is not None:
