@@ -110,6 +110,41 @@ def test_sms_engine_self_heal_is_idempotent():
     assert client.ensure_sms_enabled() is True
     assert client.events == [("enabled", True)]
 
+def test_set_sms_enabled_discards_stale_at_form_before_verification(monkeypatch):
+    document = """
+    <form action="/cgi-bin/luci/admin/network/gcom/config/sms">
+      <input name="token" value="secret">
+      <input name="cbid.sms.4g.enabled" value="0">
+      <button name="cbi.apply" value="Save & Apply"></button>
+    </form>
+    """
+
+    class ConfigClient(CudyClient):
+        def __init__(self):
+            self.root = "http://cudy.test/cgi-bin/luci/"
+            self.at_form = {"fields": {"token": "old-at-token"}}
+            self.at_form_seen_during_verify = "not-called"
+
+        def _authenticated_page(self, url):
+            return FormPage(document)
+
+        def _same_origin(self, url):
+            return url
+
+        def _request(self, url, fields=None):
+            return FormPage("")
+
+        def sms_enabled(self):
+            self.at_form_seen_during_verify = self.at_form
+            return True
+
+    monkeypatch.setattr("cudy_client.time.sleep", lambda _seconds: None)
+
+    client = ConfigClient()
+    assert client.set_sms_enabled(True) is True
+    assert client.at_form_seen_during_verify is None
+
+
 
 def test_cudy_outgoing_api_is_enabled_by_default_and_has_kill_switch(g, monkeypatch):
     monkeypatch.setenv("SMS_MODEM_DRIVER", "cudy")
