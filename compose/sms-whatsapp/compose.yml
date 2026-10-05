@@ -32,6 +32,40 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  openwa-backup:
+    profiles: ["whatsapp-backup"]
+    image: ghcr.io/rmyndharis/openwa:latest
+    container_name: racher-sms-openwa-backup
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: 2785
+      LOG_LEVEL: ${SMS_WHATSAPP_OPENWA_LOG_LEVEL:-info}
+      CSP_UPGRADE_INSECURE_REQUESTS: "false"
+      AUTO_START_SESSIONS: ${SMS_WHATSAPP_OPENWA_AUTO_START_SESSIONS:-false}
+      WWEBJS_AUTH_TIMEOUT_MS: ${SMS_WHATSAPP_OPENWA_AUTH_TIMEOUT_MS:-120000}
+      PUPPETEER_PROTOCOL_TIMEOUT_MS: ${SMS_WHATSAPP_OPENWA_PROTOCOL_TIMEOUT_MS:-300000}
+    volumes:
+      - sms_whatsapp_openwa_backup_data:/app/data
+    tmpfs:
+      - /tmp
+    ports:
+      - "127.0.0.1:${SMS_WHATSAPP_OPENWA_BACKUP_PORT:-2786}:2785"
+    networks:
+      backend:
+        aliases:
+          - openwa-backup
+    pids_limit: 1024
+    mem_limit: ${SMS_WHATSAPP_OPENWA_BACKUP_MEM_LIMIT:-1200m}
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   sms-whatsapp:
     build:
       context: ../../services/sms-whatsapp
@@ -68,6 +102,13 @@ services:
       OPENWA_BASE_URL: ${SMS_WHATSAPP_OPENWA_URL:-http://openwa:2785/api}
       OPENWA_API_KEY: ${SMS_WHATSAPP_OPENWA_API_KEY:?SMS_WHATSAPP_OPENWA_API_KEY must be set}
       OPENWA_SESSION_ID: ${SMS_WHATSAPP_OPENWA_SESSION_ID:?SMS_WHATSAPP_OPENWA_SESSION_ID must be set}
+      BACKUP_OPENWA_BASE_URL: ${SMS_WHATSAPP_OPENWA_BACKUP_URL:-}
+      BACKUP_OPENWA_API_KEY: ${SMS_WHATSAPP_OPENWA_BACKUP_API_KEY:-}
+      BACKUP_OPENWA_SESSION_ID: ${SMS_WHATSAPP_OPENWA_BACKUP_SESSION_ID:-}
+      SMS_FALLBACK_GATEWAY_URL: ${SMS_WHATSAPP_FALLBACK_SMS_GATEWAY_URL:-}
+      SMS_FALLBACK_GATEWAY_TOKEN: ${SMS_WHATSAPP_FALLBACK_SMS_GATEWAY_TOKEN:-}
+      SMS_FALLBACK_WAIT_SECONDS: ${SMS_WHATSAPP_FALLBACK_SMS_WAIT_SECONDS:-45}
+      SMS_FALLBACK_POLL_SECONDS: ${SMS_WHATSAPP_FALLBACK_SMS_POLL_SECONDS:-1}
       SBR_PAGER_AUTO_GEOCODE: ${SMS_WHATSAPP_AUTO_GEOCODE:-true}
       SBR_PAGER_GEOCODER_URL: ${SMS_WHATSAPP_GEOCODER_URL:-https://adressevaelger.dk/vask/}
       SBR_PAGER_GEOCODER_TOKEN: ${SMS_WHATSAPP_GEOCODER_TOKEN:-adressevaelger123}
@@ -100,6 +141,7 @@ services:
 volumes:
   sms_whatsapp_data:
   sms_whatsapp_openwa_data:
+  sms_whatsapp_openwa_backup_data:
 
 networks:
   backend:

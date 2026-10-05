@@ -33,11 +33,12 @@ def test_crash_before_source_receipt_does_not_repeat_command(g):
     assert g.CommandRequest.query.count() == 1
 
 
-def test_cudy_keeps_usb_outgoing_jobs_and_rejects_unsupported_sending(g, monkeypatch):
+def test_cudy_keeps_usb_outgoing_jobs_when_kill_switch_is_off(g, monkeypatch):
     c = g.app.test_client()
     queued = c.post("/api/outgoing", json={"recipient": "+4511111111", "body": "test"}, headers=HEADERS)
     assert queued.status_code == 202
     monkeypatch.setenv("SMS_MODEM_DRIVER", "cudy")
+    monkeypatch.setenv("CUDY_SMS_SEND_ENABLED", "false")
     assert c.post("/api/outgoing", json={"recipient": "+4511111111", "body": "test"}, headers=HEADERS).status_code == 409
     assert c.post("/api/outgoing/claim", json={}, headers=HEADERS).status_code == 204
     assert g.OutboundMessage.query.one().status == "pending"

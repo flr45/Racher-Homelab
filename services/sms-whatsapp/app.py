@@ -154,24 +154,36 @@ def check_csrf() -> None:
 app.jinja_env.globals["csrf_token"] = csrf_token
 
 
-def openwa_base_url() -> str:
-    base = os.getenv("OPENWA_BASE_URL", "http://openwa:2785/api").strip().rstrip("/")
+def _normalize_openwa_base_url(value: str) -> str:
+    base = value.strip().rstrip("/")
     if not base.endswith("/api"):
         base += "/api"
     return base
 
 
-def openwa_request(path: str, method: str = "GET", payload: dict | None = None, timeout: int = 12):
-    api_key = os.getenv("OPENWA_API_KEY", "").strip()
+def openwa_base_url() -> str:
+    return _normalize_openwa_base_url(
+        os.getenv("OPENWA_BASE_URL", "http://openwa:2785/api")
+    )
+
+
+def _openwa_request_explicit(
+    base_url: str,
+    api_key: str,
+    path: str,
+    method: str = "GET",
+    payload: dict | None = None,
+    timeout: int = 12,
+):
     if not api_key:
-        raise RuntimeError("OPENWA_API_KEY mangler")
+        raise RuntimeError("OpenWA API-nøgle mangler")
     data = None
     headers = {"X-API-Key": api_key}
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(
-        f"{openwa_base_url()}/{path.lstrip('/')}",
+        f"{_normalize_openwa_base_url(base_url)}/{path.lstrip('/')}",
         data=data,
         headers=headers,
         method=method,
@@ -187,6 +199,20 @@ def openwa_request(path: str, method: str = "GET", payload: dict | None = None, 
         raise RuntimeError(f"OpenWA kan ikke kontaktes: {exc.reason}") from exc
 
 
+def openwa_request(path: str, method: str = "GET", payload: dict | None = None, timeout: int = 12):
+    api_key = os.getenv("OPENWA_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OPENWA_API_KEY mangler")
+    return _openwa_request_explicit(
+        openwa_base_url(),
+        api_key,
+        path,
+        method=method,
+        payload=payload,
+        timeout=timeout,
+    )
+
+
 def openwa_session_id() -> str:
     value = os.getenv("OPENWA_SESSION_ID", "").strip()
     if not value:
@@ -194,22 +220,244 @@ def openwa_session_id() -> str:
     return value
 
 
+def backup_openwa_config() -> dict | None:
+    base_url = os.getenv("BACKUP_OPENWA_BASE_URL", "").strip()
+    api_key = os.getenv("BACKUP_OPENWA_API_KEY", "").strip()
+    session_id = os.getenv("BACKUP_OPENWA_SESSION_ID", "").strip()
+    configured = [bool(base_url), bool(api_key), bool(session_id)]
+    if not any(configured):
+        return None
+    if not all(configured):
+        return {
+            "invalid": True,
+            "base_url": base_url,
+            "api_key": api_key,
+            "session_id": session_id,
+        }
+    return {
+        "base_url": _normalize_openwa_base_url(base_url),
+        "api_key": api_key,
+        "session_id": session_id,
+    }
+
+
+def backup_openwa_request(path: str, method: str = "GET", payload: dict | None = None, timeout: int = 12):
+    config = backup_openwa_config()
+    if config is None:
+        raise RuntimeError("Backup-OpenWA er ikke konfigureret")
+    if config.get("invalid"):
+        raise RuntimeError("Backup-OpenWA er kun delvist konfigureret")
+    return _openwa_request_explicit(
+        config["base_url"],
+        config["api_key"],
+        path,
+        method=method,
+        payload=payload,
+        timeout=timeout,
+    )
+
+
 def phone_to_chat_id(phone: str) -> str:
     return re.sub(r"\D", "", normalize_phone(phone)) + "@c.us"
+
+
+def sms_fallback_config() -> dict | None:
+    base_url = os.getenv("SMS_FALLBACK_GATEWAY_URL", "").strip().rstrip("/")
+    token = os.getenv("SMS_FALLBACK_GATEWAY_TOKEN", "").strip()
+    if not base_url and not token:
+        return None
+    if not base_url or not token:
+        return {"invalid": True, "base_url": base_url, "token": token}
+    return {
+        "base_url": base_url,
+        "token": token,
+        "wait_seconds": max(5, int(os.getenv("SMS_FALLBACK_WAIT_SECONDS", "45"))),
+        "poll_seconds": max(0.25, float(os.getenv("SMS_FALLBACK_POLL_SECONDS", "1"))),
+    }
+
+
+def _fallback_sms_request(
+    url: str,
+    token: str,
+    *,
+    method: str = "GET",
+    payload: dict | None = None,
+    timeout: int = 10,
+):
+    data = None
+    headers = {"Authorization": f"Bearer {token}"}
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            return json.loads(body) if body else {}
+    except urllib.error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"SMS fallback HTTP {exc.code}: {details[:500]}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"SMS fallback kan ikke kontaktes: {exc.reason}") from exc
+
+
+def send_fallback_sms(phone: str, message: str) -> str:
+    config = sms_fallback_config()
+    if config is None:
+        raise RuntimeError("SMS fallback er ikke konfigureret")
+    if config.get("invalid"):
+        raise RuntimeError("SMS fallback er kun delvist konfigureret")
+
+    queued = _fallback_sms_request(
+        f"{config['base_url']}/api/outgoing",
+        config["token"],
+        method="POST",
+        payload={"recipient": normalize_phone(phone), "body": message},
+    )
+    message_id = queued.get("id") if isinstance(queued, dict) else None
+    if not message_id:
+        raise RuntimeError("SMS fallback-køen kvitterede ikke med et id")
+
+    deadline = time.monotonic() + config["wait_seconds"]
+    while time.monotonic() < deadline:
+        current = _fallback_sms_request(
+            f"{config['base_url']}/api/outgoing/{message_id}",
+            config["token"],
+            timeout=8,
+        )
+        status = str(current.get("status") or "").lower()
+        if status == "sent":
+            return f"sms-fallback:{message_id}"
+        if status in {"failed", "unknown"}:
+            raise RuntimeError(
+                current.get("error")
+                or f"SMS fallback endte med status={status}"
+            )
+        time.sleep(config["poll_seconds"])
+
+    raise TimeoutError(
+        "SMS fallback blev ikke bekræftet sendt inden timeout; beholdes i retry-kø"
+    )
+
+
+def _definitive_openwa_rejection(exc: Exception) -> bool:
+    """True only when OpenWA explicitly rejected before accepting the send.
+
+    Transport timeouts and connection loss are deliberately excluded because
+    the message may already have been handed to WhatsApp and immediate failover
+    could create a duplicate alarm.
+    """
+    detail = str(exc).lower()
+    return (
+        "session" in detail
+        and ("is not active" in detail or "not active" in detail)
+        and "openwa http 400" in detail
+    )
+
+
+def _send_whatsapp_via(
+    requester,
+    session_id: str,
+    phone: str,
+    message: str,
+) -> str:
+    result = requester(
+        f"sessions/{session_id}/messages/send-text",
+        method="POST",
+        payload={"chatId": phone_to_chat_id(phone), "text": message[:4096]},
+    )
+    if not isinstance(result, dict) or not result.get("messageId"):
+        raise RuntimeError("OpenWA kvitterede ikke med et besked-id")
+    return str(result["messageId"])
 
 
 def send_whatsapp(phone: str, message: str) -> str | None:
     body = (message or "").strip()
     if not body:
         raise ValueError("Beskeden er tom")
-    result = openwa_request(
-        f"sessions/{openwa_session_id()}/messages/send-text",
-        method="POST",
-        payload={"chatId": phone_to_chat_id(phone), "text": body[:4096]},
+
+    backup = backup_openwa_config()
+    sms_fallback = sms_fallback_config()
+
+    # Preserve the established single-channel path when no failover transport is
+    # configured. This avoids an extra status round-trip in existing installs.
+    if backup is None and sms_fallback is None:
+        return _send_whatsapp_via(openwa_request, openwa_session_id(), phone, body)
+
+    if backup is not None and backup.get("invalid"):
+        raise RuntimeError("Backup-OpenWA er kun delvist konfigureret")
+    if sms_fallback is not None and sms_fallback.get("invalid"):
+        raise RuntimeError("SMS fallback er kun delvist konfigureret")
+
+    # Fail over only before the external send side effect. If a channel was
+    # reported ready and its actual send call becomes ambiguous, propagate that
+    # error to the durable retry queue instead of risking a duplicate on the
+    # next transport.
+    primary = _primary_openwa_status_uncached()
+    if primary.get("state") == "ready":
+        try:
+            return _send_whatsapp_via(openwa_request, openwa_session_id(), phone, body)
+        except Exception as exc:  # noqa: BLE001
+            if not _definitive_openwa_rejection(exc):
+                raise
+            primary = {"state": "rejected", "detail": str(exc)[:180]}
+
+    backup_status = {"state": "disabled", "detail": "Backup er ikke konfigureret"}
+    if backup is not None:
+        backup_status = _backup_openwa_status_uncached()
+        if backup_status.get("state") == "ready":
+            try:
+                return _send_whatsapp_via(
+                    backup_openwa_request,
+                    str(backup["session_id"]),
+                    phone,
+                    body,
+                )
+            except Exception as exc:  # noqa: BLE001
+                if not _definitive_openwa_rejection(exc):
+                    raise
+                backup_status = {"state": "rejected", "detail": str(exc)[:180]}
+
+    if sms_fallback is not None:
+        return send_fallback_sms(phone, body)
+
+    raise RuntimeError(
+        "Ingen WhatsApp-forbindelse er klar "
+        f"(primær={primary.get('state', 'unknown')}, "
+        f"backup={backup_status.get('state', 'unknown')})"
     )
-    if not isinstance(result, dict) or not result.get("messageId"):
-        raise RuntimeError("OpenWA kvitterede ikke med et besked-id")
-    return str(result["messageId"])
+
+
+def _session_status(requester, session_id: str, detail_fallback: str) -> dict:
+    try:
+        sessions = requester("sessions", timeout=3)
+        if not isinstance(sessions, list):
+            return {"state": "unknown", "detail": "Uventet svar fra OpenWA"}
+        match = next((item for item in sessions if str(item.get("id")) == session_id), None)
+        if not match:
+            return {"state": "missing", "detail": "Sessionen findes ikke"}
+        status = str(match.get("status") or "unknown").lower()
+        return {"state": status, "detail": match.get("name") or detail_fallback}
+    except Exception as exc:  # noqa: BLE001
+        return {"state": "offline", "detail": str(exc)[:180]}
+
+
+def _primary_openwa_status_uncached() -> dict:
+    try:
+        session_id = openwa_session_id()
+    except Exception as exc:  # noqa: BLE001
+        return {"state": "offline", "detail": str(exc)[:180]}
+    return _session_status(openwa_request, session_id, session_id)
+
+
+def _backup_openwa_status_uncached() -> dict:
+    config = backup_openwa_config()
+    if config is None:
+        return {"state": "disabled", "detail": "Backup er ikke konfigureret"}
+    if config.get("invalid"):
+        return {"state": "misconfigured", "detail": "Backup er kun delvist konfigureret"}
+    session_id = str(config["session_id"])
+    return _session_status(backup_openwa_request, session_id, session_id)
 
 
 def openwa_status() -> dict:
@@ -223,18 +471,38 @@ def openwa_status() -> dict:
 
 
 def _openwa_status_uncached() -> dict:
-    try:
-        session_id = openwa_session_id()
-        sessions = openwa_request("sessions", timeout=3)
-        if not isinstance(sessions, list):
-            return {"state": "unknown", "detail": "Uventet svar fra OpenWA"}
-        match = next((item for item in sessions if str(item.get("id")) == session_id), None)
-        if not match:
-            return {"state": "missing", "detail": "Sessionen findes ikke"}
-        status = str(match.get("status") or "unknown").lower()
-        return {"state": status, "detail": match.get("name") or session_id}
-    except Exception as exc:  # noqa: BLE001
-        return {"state": "offline", "detail": str(exc)[:180]}
+    primary = _primary_openwa_status_uncached()
+    backup_config = backup_openwa_config()
+    if backup_config is None:
+        return primary
+
+    backup = _backup_openwa_status_uncached()
+    if primary.get("state") == "ready":
+        return {
+            "state": "ready",
+            "detail": f"Primær · {primary.get('detail', 'OpenWA')}",
+            "active": "primary",
+            "primary": primary,
+            "backup": backup,
+        }
+    if backup.get("state") == "ready":
+        return {
+            "state": "ready",
+            "detail": f"Backup aktiv · {backup.get('detail', 'OpenWA')}",
+            "active": "backup",
+            "primary": primary,
+            "backup": backup,
+        }
+    return {
+        "state": "offline",
+        "detail": (
+            f"Primær {primary.get('state', 'unknown')} · "
+            f"backup {backup.get('state', 'unknown')}"
+        ),
+        "active": None,
+        "primary": primary,
+        "backup": backup,
+    }
 
 
 def require_ingest_token() -> None:

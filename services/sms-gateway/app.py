@@ -474,7 +474,7 @@ def health():
         modem={
             "state": modem_state,
             "transport": os.getenv("SMS_MODEM_DRIVER", "usb"),
-            "capability": "receive-only" if os.getenv("SMS_MODEM_DRIVER", "usb") == "cudy" else "send-receive",
+            "capability": ("send-receive" if os.getenv("CUDY_SMS_SEND_ENABLED", "false").lower() in {"1", "true", "yes", "on"} else "receive-only") if os.getenv("SMS_MODEM_DRIVER", "usb") == "cudy" else "send-receive",
             "device": modem_status.get("device") or os.getenv("MODEM_DEVICE", "/dev/ttyUSB0"),
             "updated_at": modem_status.get("updated_at"),
             "last_message_at": modem_status.get("last_message_at"),
