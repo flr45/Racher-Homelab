@@ -10,6 +10,7 @@ the same station routing.
 from __future__ import annotations
 
 import os
+import math
 import re
 from datetime import timedelta
 
@@ -30,6 +31,7 @@ _STATION_RE = re.compile(r"\(([ASLKRB])\)", re.IGNORECASE)
 _TEST_RE = re.compile(r"(?<!\w)test(?!\w)", re.IGNORECASE)
 _SENDING_2_RE = re.compile(r"\bsending\s*2\b", re.IGNORECASE)
 PREALERT_DELAY_KEY = "prealert_delay_seconds"
+ACCEPT_ALL_SENDERS_KEY = "accept_all_sms_senders"
 
 
 class RecipientStationFilter(db.Model):
@@ -59,6 +61,36 @@ class PagerRuntimeSetting(db.Model):
         default=base.utcnow,
         onupdate=base.utcnow,
     )
+
+
+def accept_all_sms_senders() -> bool:
+    row = PagerRuntimeSetting.query.filter_by(key=ACCEPT_ALL_SENDERS_KEY).first()
+    return row is not None and row.value == "true"
+
+
+def sms_sender_allowed(sender: str) -> bool:
+    return accept_all_sms_senders() or base.AllowedSender.query.filter_by(phone=sender, active=True).first() is not None
+
+
+# The base view resolves this helper at request time. The default remains the
+# existing allowlist until the administrator explicitly enables the checkbox.
+base.sms_sender_allowed = sms_sender_allowed
+
+
+@app.post("/indstillinger/afsenderfilter")
+@base.login_required
+def update_sender_filter():
+    base.check_csrf()
+    enabled = request.form.get("accept_all", "") == "1"
+    with base.ingest_lock:
+        row = PagerRuntimeSetting.query.filter_by(key=ACCEPT_ALL_SENDERS_KEY).first()
+        if row is None:
+            row = PagerRuntimeSetting(key=ACCEPT_ALL_SENDERS_KEY, value="false")
+            db.session.add(row)
+        row.value = "true" if enabled else "false"
+        db.session.commit()
+    flash("SMS fra alle telefonnumre videresendes nu." if enabled else "Kun godkendte SMS-afsendere videresendes nu.")
+    return redirect(url_for("settings_page"))
 
 
 def _default_prealert_delay_seconds() -> float:
@@ -112,23 +144,34 @@ def configured_stations(recipient_id: int) -> set[str]:
     return values or {ALL_STATIONS}
 
 
-def recipient_accepts(recipient_id: int, station: str | None) -> bool:
-    selected = configured_stations(recipient_id)
-    normalized = station.upper() if station else None
+def subscription_map():
+    result = {}
+    for row in RecipientStationFilter.query.all():
+        result.setdefault(row.recipient_id, set()).add(row.station.upper())
+    return result
 
-    # TEST er opt-in. "*" dækker kun de almindelige stationer.
+
+def accepts_selection(selected, station):
+    normalized = station.upper() if station else None
     if normalized == TEST_STATION:
         return TEST_STATION in selected
+    return ALL_STATIONS in selected or (normalized is not None and normalized in selected)
 
-    if ALL_STATIONS in selected:
-        return True
-    return normalized is not None and normalized in selected
+
+def recipient_accepts(recipient_id: int, station: str | None) -> bool:
+    return accepts_selection(configured_stations(recipient_id), station)
 
 
 def station_for_inbound(inbound: base.InboundMessage) -> str | None:
     station = detect_station(inbound.body)
     if station:
         return station
+
+    linked = events.AlarmEventMessage.query.filter_by(inbound_id=inbound.id).first()
+    if linked:
+        parent = db.session.get(events.AlarmEvent, linked.event_id)
+        if parent and parent.station:
+            return parent.station.upper()
 
     # The modem gateway supplies the exact parent event key for Sending 2.
     # Use it before the time-based fallback so recipient routing matches the
@@ -361,7 +404,7 @@ def update_prealert_delay():
         flash("Delay-tiden skal være et tal.", "error")
         return redirect(request.referrer or url_for("dashboard"))
 
-    if value < 0 or value > 120:
+    if not math.isfinite(value) or value < 0 or value > 120:
         flash("Delay-tiden skal være mellem 0 og 120 sekunder.", "error")
         return redirect(request.referrer or url_for("dashboard"))
 

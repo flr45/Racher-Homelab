@@ -29,6 +29,7 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 .venv/
+.pytest_cache/
 
 # Logs
 *.log

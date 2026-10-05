@@ -84,6 +84,7 @@ def write_status(**values):
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
     current.update(values, updated_at=utc_iso(), device=MODEM_DEVICE)
+    current.setdefault("transport", os.getenv("SMS_MODEM_DRIVER", "usb"))
     STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
     temporary = STATUS_FILE.with_suffix(".tmp")
     temporary.write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
@@ -93,6 +94,15 @@ def write_status(**values):
 def stop(_signum, _frame):
     global running
     running = False
+
+
+def read_storage(port):
+    """Read-only, optional diagnostics; unsupported storage must not stop SMS."""
+    try:
+        response = command(port, 'AT+CPMS?', timeout=3)
+        return response.strip() if '+CPMS:' in response else None
+    except Exception:
+        return None
 
 
 def network_registration_status(response: str) -> int | None:
@@ -430,6 +440,7 @@ def run():
                     if now >= next_network_check:
                         network = command(port, "AT+CREG?")
                         signal_quality = command(port, "AT+CSQ")
+                        write_status(storage=read_storage(port))
                         if network_is_registered(network):
                             if network_failures:
                                 log.info(

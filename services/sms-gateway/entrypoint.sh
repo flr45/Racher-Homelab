@@ -57,7 +57,11 @@ do
 done
 
 echo "SMS Gateway web-API er klar; starter modem-reader."
-python modem_reader_sbr.py &
+case "${SMS_MODEM_DRIVER:-usb}" in
+  usb) python modem_reader_sbr.py & ;;
+  cudy) python cudy_reader.py & ;;
+  *) echo "FEJL: SMS_MODEM_DRIVER skal være usb eller cudy." >&2; exit 1 ;;
+esac
 READER_PID=$!
 
 while :; do

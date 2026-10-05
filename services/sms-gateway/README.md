@@ -1,94 +1,55 @@
-# SMS Alarm Gateway
+# SMS Gateway
 
-Alle `/api/*`-kald kræver `Authorization: Bearer $SMS_GATEWAY_API_TOKEN`.
-Healthchecket er fortsat offentligt, men API-kald afvises, hvis tokenet ikke er
-konfigureret.
+Den eksisterende USB-reader understøtter SIM800C (CH340/CH341), Huawei og
+AT-kompatible modemer. Kun én reader ejer USB-porten. Der er nu også en
+netværksreader til Cudy LT300s originale LuCI AT-webformular.
 
-USB-modem-baseret SMS-tjeneste til Racher OS. Første melding videresendes straks, når den indeholder en stationskode. Efterfølgende meldinger fra samme afsender videresendes også straks i et tidsvindue; tidsvinduet bruges kun til at koble melding 2 til den aktive alarm og skaber ingen forsinkelse.
+## Valg af SMS-kilde
 
-## Stationskoder
+| Kilde | Compose-fil | Modtagelse | Afsendelse |
+|---|---|---|---|
+| USB, standard | `compose/sms-gateway/docker-compose.yml` | Ja | Ja |
+| Cudy LT300, skal routertestes | `compose/sms-gateway/cudy.yml` | Forberedt | Ikke understøttet af adapteren |
 
-| Kode | Station |
-|---|---|
-| `(A)` | Slagelse |
-| `(S)` | Sorø |
-| `(K)` | Korsør |
-| `(L)` | Skælskør |
-| `(R)` | Ruds Vedby |
+Kør kun én af dem ad gangen. Cudy-filen har ingen USB-device mapping,
+men genbruger samme `sms-gateway` projektnavn, container og datavolumen.
+Boot og watchdog vælger fil ud fra `SMS_MODEM_DRIVER=usb` eller `cudy` i `.env`.
+Se [opdaterings- og Cudy-guide](../../docs/SBR-PAGER-UPDATE.md).
 
-## SMS-kommandoer
+Begge readers genbruger PDU-dekodning, delte SMS'er, pre-alarmer,
+Sending 2/parent-kobling, redigering af persondata og direkte SBR Pager-ingest.
+SMS slettes først fra kilden, når importen er kvitteret. Modem-id'er gemmes
+som kvitteringer, så et nyt importforsøg ikke opretter endnu en statuskommando.
+En beskadiget PDU stopper ikke behandlingen af de øvrige alarmer.
 
-Godkendte afsendere kan sende `status` til modemnummeret. Kommandoen bliver lagt i en separat kommandokø og bliver ikke sendt videre til Vagtbytte. `scripts/sms-status-responder.py` henter kommandoen og svarer med én status-SMS for Raspberry Pi'en og én for mini-PC'en med bl.a. temperatur, disk, RAM, load, Docker-status og uptime.
-
-`RACHER_MONITOR_SMS_TO` er automatisk godkendt som kommandonummer, når variablen gives videre til containeren. Yderligere numre kan angives kommasepareret i `SMS_COMMAND_ALLOWED_NUMBERS`.
-
-## Første test uden modem
-
-Start med `SMS_DRY_RUN=true`, så SMS'er logges uden at blive sendt.
-
-```bash
-cd compose/sms-gateway
-SMS_DRY_RUN=true docker compose up --build
-```
-
-Opret en brandmand:
-
-```bash
-curl -X POST http://127.0.0.1:8090/api/firefighters \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Testperson","phone":"+4512345678","stations":["A","S"],"active":true}'
-```
-
-Simulér første alarmmelding:
-
-```bash
-curl -X POST http://127.0.0.1:8090/api/incoming \
-  -H 'Content-Type: application/json' \
-  -d '{"sender":"+4599999999","body":"20:10:28 26-07-29 (A)M+R Redn.-Fastklemt, Maskine o.l."}'
-```
-
-Simulér melding 2 fra samme nummer:
-
-```bash
-curl -X POST http://127.0.0.1:8090/api/incoming \
-  -H 'Content-Type: application/json' \
-  -d '{"sender":"+4599999999","body":"Supplerende oplysninger fra alarmcentralen"}'
-```
-
-Begge meldinger behandles med det samme.
-
-## Huawei E180
-
-Find modemportene på Raspberry Pi:
-
-```bash
-lsusb
-dmesg | grep -E 'ttyUSB|ttyACM'
-```
-
-Huawei-modemer opretter ofte flere porte. Test dem med et terminalprogram og kommandoen `AT`; den korrekte AT-port svarer `OK`. Sæt derefter f.eks.:
-
-```bash
-SMS_MODEM_DEVICE=/dev/ttyUSB2
-SMS_DRY_RUN=false
-```
-
-Tjenesten sender i SMS-teksttilstand med `AT+CMGF=1` og `AT+CMGS`.
+Cudy-adapteren følger det observerede login og AT-formularformat i Cudys
+[LT300-emulator](https://support.cudy.com/emulator/LT300/).
+Det er en firmwareafhængig webgrænseflade, ikke en dokumenteret SMS-API.
+Den ændrer ikke APN, netværk, SIM-lager eller radiofunktion og udfører ingen
+router-reset. SMS-tilstanden gendannes efter læsning. Routerens egen
+SMS-funktion må ikke samtidig slette beskeder før import.
 
 ## API
 
-- `GET /health`
-- `GET /api/stations`
-- `GET /api/firefighters`
-- `POST /api/firefighters`
-- `PUT /api/firefighters/<id>`
-- `POST /api/incoming`
-- `GET /api/messages`
-- `POST /api/outgoing`
-- `POST /api/outgoing/claim`
-- `POST /api/commands/claim`
-- `POST /api/commands/<id>/complete`
+Alle `/api/*`-kald kræver `Authorization: Bearer $SMS_GATEWAY_API_TOKEN`.
+`GET /health` er offentligt og viser, hvis reader-status er forældet.
 
-## Næste hardwaretrin
+- `POST /api/incoming`, `GET /api/messages`
+- `POST /api/outgoing`, `POST /api/outgoing/claim`
+- `GET /api/outgoing/<id>`, `POST /api/outgoing/<id>/complete`
+- `POST /api/commands/claim`, `POST /api/commands/<id>/complete`
+- `POST /api/cudy/probe`: godkendt test af login, SIM, signal, registrering og lager.
 
-Den indgående modemlæser skal kobles til Huawei-portens nye-SMS-notifikationer eller polling af modemlageret. `/api/incoming` er allerede den fælles indgang, så videresendelseslogikken, stationsvalg, modtagere og logning kan testes før modemmet tilsluttes.
+Ved Cudy-kilden afvises nye udgående SMS med HTTP 409; eksisterende
+USB-outboxjobs beholdes og claim'es ikke. SMS-statuskommandoer kan derfor
+ikke besvares via denne adapter. Vagtbytte-forwarding forbliver styret af den
+eksisterende `VAGTBYTTE_FORWARD_ENABLED` og er som standard slået fra i Compose.
+
+## Prøve uden fysisk router
+
+```bash
+python -m pip install -r services/sms-whatsapp/requirements.txt pyserial==3.5 -r tests/pager/requirements.txt
+python -m pytest -q tests/pager
+```
+
+Testene bruger simulerede router- og WhatsApp-svar og sender ingen beskeder.

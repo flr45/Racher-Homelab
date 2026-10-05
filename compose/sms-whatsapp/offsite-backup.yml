@@ -1,0 +1,18 @@
+# Optional only after the host directory is mounted from another machine.
+# Compose CLI: add this file after compose.yml on every start/update.
+services:
+  sms-whatsapp:
+    environment:
+      SMS_WHATSAPP_OFFSITE_DIR: /offsite
+      SMS_WHATSAPP_OFFSITE_KEY_FILE: /run/secrets/pager_offsite_key
+    volumes:
+      - type: bind
+        source: ${SMS_WHATSAPP_OFFSITE_HOST_DIR:?Set the existing mounted backup directory}
+        target: /offsite
+        bind:
+          create_host_path: false
+    secrets:
+      - pager_offsite_key
+secrets:
+  pager_offsite_key:
+    file: ${SMS_WHATSAPP_OFFSITE_KEY_HOST_FILE:?Set the existing private backup key file}

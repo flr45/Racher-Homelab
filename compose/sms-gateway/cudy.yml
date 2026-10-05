@@ -1,0 +1,68 @@
+# Cudy uses LAN; this stack deliberately has no USB device mapping.
+# Reuses the existing project name and persistent sms_gateway_data volume.
+name: sms-gateway
+services:
+  sms-gateway:
+    build:
+      context: ../../services/sms-gateway
+    container_name: racher-sms-gateway
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:////data/sms-gateway.db
+      SMS_MODEM_DRIVER: cudy
+      CUDY_BASE_URL: ${CUDY_BASE_URL:-http://192.168.10.1}
+      CUDY_USERNAME: ${CUDY_USERNAME:-admin}
+      CUDY_PASSWORD: ${CUDY_PASSWORD:?CUDY_PASSWORD must be set for Cudy mode}
+      CUDY_POLL_SECONDS: ${CUDY_POLL_SECONDS:-5}
+      CUDY_HTTP_TIMEOUT_SECONDS: ${CUDY_HTTP_TIMEOUT_SECONDS:-15}
+      CUDY_SMS_SEND_ENABLED: ${CUDY_SMS_SEND_ENABLED:-true}
+      CUDY_SMS_SEND_SETTLE_SECONDS: ${CUDY_SMS_SEND_SETTLE_SECONDS:-10}
+      CUDY_SMS_MAX_CHARS: ${CUDY_SMS_MAX_CHARS:-70}
+      CUDY_SMS_ENGINE_CHECK_SECONDS: ${CUDY_SMS_ENGINE_CHECK_SECONDS:-60}
+      MODEM_DEVICE: ${CUDY_BASE_URL:-http://192.168.10.1}
+      MODEM_BAUDRATE: ${SMS_MODEM_BAUDRATE:-115200}
+      MODEM_POLL_SECONDS: ${SMS_MODEM_POLL_SECONDS:-0.5}
+      MODEM_STATUS_FILE: /data/modem-status.json
+      GATEWAY_STATUS_FILE: /data/gateway-status.json
+      MODEM_NETWORK_CHECK_SECONDS: ${SMS_MODEM_NETWORK_CHECK_SECONDS:-30}
+      MODEM_NETWORK_FAILURES_BEFORE_RESET: ${SMS_MODEM_NETWORK_FAILURES_BEFORE_RESET:-4}
+      MODEM_NETWORK_RADIO_RESET_ENABLED: ${SMS_MODEM_NETWORK_RADIO_RESET_ENABLED:-true}
+      MODEM_NETWORK_RECOVERY_SETTLE_SECONDS: ${SMS_MODEM_NETWORK_RECOVERY_SETTLE_SECONDS:-8}
+      DELETE_SMS_AFTER_IMPORT: ${SMS_DELETE_AFTER_IMPORT:-true}
+      ALARM_SOURCE_WINDOW_MINUTES: ${SMS_ALARM_SOURCE_WINDOW_MINUTES:-10}
+      SMS_DRY_RUN: ${SMS_DRY_RUN:-true}
+      VAGTBYTTE_FORWARD_ENABLED: ${VAGTBYTTE_FORWARD_ENABLED:-false}
+      VAGTBYTTE_ALARM_FEED_URL: ${VAGTBYTTE_ALARM_FEED_URL:-http://vagtbytte-web:3000/api/alarm-feed/ingest}
+      VAGTBYTTE_ALARM_FEED_TOKEN: ${VAGTBYTTE_ALARM_FEED_INGEST_TOKEN}
+      SBR_PAGER_INGEST_URL: ${SBR_PAGER_INGEST_URL:-http://sms-whatsapp:8080/api/incoming}
+      SBR_PAGER_INGEST_TOKEN: ${SMS_WHATSAPP_INGEST_TOKEN:-}
+      SBR_PAGER_PREALERT_DELAY_SECONDS: ${SMS_WHATSAPP_PREALERT_DELAY_SECONDS:-10}
+      SBR_PAGER_PARENT_STATE_FILE: /data/sbr-pager-parent-events.json
+      SBR_PAGER_PARENT_MAX_AGE_SECONDS: ${SMS_WHATSAPP_PARENT_MAX_AGE_SECONDS:-7200}
+      SBR_PAGER_FOLLOWUP_WINDOW_SECONDS: ${SMS_WHATSAPP_FOLLOWUP_WINDOW_SECONDS:-60}
+      RACHER_MONITOR_SMS_TO: ${RACHER_MONITOR_SMS_TO:-}
+      SMS_COMMAND_ALLOWED_NUMBERS: ${SMS_COMMAND_ALLOWED_NUMBERS:-}
+      SMS_GATEWAY_API_TOKEN: ${SMS_GATEWAY_API_TOKEN:?SMS_GATEWAY_API_TOKEN must be set}
+    volumes:
+      - sms_gateway_data:/data
+    # Default remains localhost-only. Set SMS_GATEWAY_BIND_IP to the host's
+    # Tailscale IP when the dedicated Pager host needs remote status access.
+    ports:
+      - "${SMS_GATEWAY_BIND_IP:-127.0.0.1}:${SMS_GATEWAY_PORT:-8090}:8080"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  sms_gateway_data:
+
+networks:
+  backend:
+    external: true
