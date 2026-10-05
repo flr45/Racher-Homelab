@@ -111,26 +111,28 @@ def test_sms_engine_self_heal_is_idempotent():
     assert client.events == [("enabled", True)]
 
 
-def test_cudy_outgoing_api_requires_explicit_send_flag(g, monkeypatch):
+def test_cudy_outgoing_api_is_enabled_by_default_and_has_kill_switch(g, monkeypatch):
     monkeypatch.setenv("SMS_MODEM_DRIVER", "cudy")
     monkeypatch.delenv("CUDY_SMS_SEND_ENABLED", raising=False)
     client = g.app.test_client()
     headers = {"Authorization": "Bearer test-gateway"}
 
-    blocked = client.post(
-        "/api/outgoing",
-        json={"recipient": "+4522270396", "body": "Alarmtest"},
-        headers=headers,
-    )
-    assert blocked.status_code == 409
-
-    monkeypatch.setenv("CUDY_SMS_SEND_ENABLED", "true")
     queued = client.post(
         "/api/outgoing",
         json={"recipient": "+4522270396", "body": "Alarmtest"},
         headers=headers,
     )
     assert queued.status_code == 202
+
+    monkeypatch.setenv("CUDY_SMS_SEND_ENABLED", "false")
+    blocked = client.post(
+        "/api/outgoing",
+        json={"recipient": "+4522270396", "body": "Alarmtest 2"},
+        headers=headers,
+    )
+    assert blocked.status_code == 409
+
+    monkeypatch.setenv("CUDY_SMS_SEND_ENABLED", "true")
 
     claimed = client.post(
         "/api/outgoing/claim",
@@ -200,10 +202,10 @@ def test_short_outgoing_sms_gets_stable_job_marker():
     assert len(first) == 1
     assert first[0].startswith("[SBR ")
     assert first[0].endswith("Kort alarm")
-    assert len(first[0]) <= 160
+    assert len(first[0]) <= cudy_reader.MAX_SMS_CHARS
 
 
-def test_long_outgoing_sms_is_split_into_numbered_parts_under_160_chars():
+def test_long_outgoing_sms_is_split_into_cudy_safe_parts():
     body = " ".join(["Alarmtekst"] * 80)
     message = {
         "id": 43,
@@ -215,7 +217,7 @@ def test_long_outgoing_sms_is_split_into_numbered_parts_under_160_chars():
     parts = outgoing_sms_parts(message)
 
     assert len(parts) > 1
-    assert all(len(part) <= 160 for part in parts)
+    assert all(len(part) <= cudy_reader.MAX_SMS_CHARS for part in parts)
     assert all(f"{index}/{len(parts)}" in part for index, part in enumerate(parts, 1))
 
 def test_cudy_reader_keeps_sms_enabled_for_whole_multipart_batch(monkeypatch):
