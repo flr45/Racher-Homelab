@@ -3,7 +3,7 @@ set -u
 
 APP="/opt/SBR-Pager-Gateway"
 ENV_FILE="$APP/.env"
-CONTAINER="racher-sms-gateway"
+CONTAINER="sbr-pager-sms-gateway"
 HEALTH_URL="http://127.0.0.1:8090/health"
 LOCK_FILE="/run/lock/sbr-modem-watchdog.lock"
 STATE_DIR="/var/lib/sbr-modem-watchdog"

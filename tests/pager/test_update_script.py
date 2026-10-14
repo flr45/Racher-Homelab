@@ -31,7 +31,7 @@ elif name == "docker":
         if "up" in args and failure == "startup" and not any("rollback-" in part for part in args): sys.exit(1)
     elif args[0] == "inspect":
         if "{{.State.Running}}" in args:
-            print("false" if os.getenv("UPDATE_TEST_STOPPED") == "true" and args[1] == "racher-sms-gateway" else "true")
+            print("false" if os.getenv("UPDATE_TEST_STOPPED") == "true" and args[1] == "sbr-pager-sms-gateway" else "true")
         else: print("sha256:old-image")
     elif args[0] == "cp":
         if args[1].endswith("/data/."):
@@ -134,10 +134,10 @@ def test_stopped_usb_gateway_backup_does_not_start_reader(tmp_path):
     assert len(helpers) == 1
     assert "none" in helpers[0] and "--read-only" in helpers[0]
     assert helpers[0][helpers[0].index("--entrypoint") + 1] == "python"
-    assert not any(call[:3] == ["docker", "exec", "racher-sms-gateway"] and "sqlite3" in " ".join(call) for call in calls)
+    assert not any(call[:3] == ["docker", "exec", "sbr-pager-sms-gateway"] and "sqlite3" in " ".join(call) for call in calls)
     backup = next((application / "manual-backups").iterdir())
     assert (backup / "sms-gateway.db").read_bytes() == b"consistent-backup"
-    assert not (backup / "racher-sms-gateway-source").exists()
+    assert not (backup / "sbr-pager-sms-gateway-source").exists()
     assert (backup / "env.backup").read_text() == "SMS_MODEM_DRIVER=usb\n"
 
 

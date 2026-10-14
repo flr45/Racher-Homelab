@@ -27,7 +27,7 @@ STATE_FILE = Path(
 )
 COMPONENTS = ("gateway", "pager", "openwa")
 CONTAINERS = {
-    "gateway": "racher-sms-gateway",
+    "gateway": "sbr-pager-sms-gateway",
     "pager": "sbr-sms-whatsapp",
     "openwa": "racher-sms-openwa",
 }

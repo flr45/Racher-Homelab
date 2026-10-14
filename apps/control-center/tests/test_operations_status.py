@@ -17,7 +17,7 @@ def make_app():
         SECRET_KEY="test-secret",
         RBAC_VIEWER_EMAILS={"viewer@example.com"},
         OPERATIONS_STATUS_CONTAINERS=(
-            "racher-sms-gateway",
+            "sbr-pager-sms-gateway",
             "vagtbytte-web",
             "cloudflared",
         ),
@@ -48,7 +48,7 @@ def sample_report():
         ],
         "containers": [
             {
-                "name": "racher-sms-gateway",
+                "name": "sbr-pager-sms-gateway",
                 "status": "running",
                 "health": "healthy",
                 "state": "healthy",
@@ -95,7 +95,7 @@ def test_report_marks_nonempty_sms_queue_as_warning(monkeypatch):
             "healthy": "healthy",
             "protected": True,
         }
-        for name in ("racher-sms-gateway", "vagtbytte-web", "cloudflared")
+        for name in ("sbr-pager-sms-gateway", "vagtbytte-web", "cloudflared")
     ]
     monkeypatch.setattr(
         operations_status_extension,

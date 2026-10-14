@@ -503,7 +503,7 @@ Automatisk registrering af aktiv Wi-Fi/4G-forbindelse er endnu ikke aktiveret. E
 ```bash
 cd /opt/SBR-Pager-Gateway &&
 git fetch origin codex/sms-whatsapp-review-cudy &&
-git show FETCH_HEAD:scripts/probe-cudy-features.py | docker exec -i racher-sms-gateway python -
+git show FETCH_HEAD:scripts/probe-cudy-features.py | docker exec -i sbr-pager-sms-gateway python -
 ```
 
 Kontrollen logger ind med containerens eksisterende routeropsætning og læser fire sider. Den sender ingen SMS og viser kun feltnavne, felttyper og en begrænset liste af statusord, aldrig feltværdier, beskedtekster eller loginhemmeligheder. Output skal bruges til næste adapterændring; der må ikke gættes på en afsendelses-API.
