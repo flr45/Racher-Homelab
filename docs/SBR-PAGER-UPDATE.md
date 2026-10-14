@@ -515,9 +515,32 @@ Statusfragmenterne viste både Cellular/Connected og WAN/Connected, mens WISP-fr
 
 ## Driftsrettelser 14. oktober 2026 · 2026.10-reliability.1
 
+Serverens lokale Cudy-diff fra `771b54f` er sammenholdt med opdateringen:
+70-tegnsgrænsen, stabile multipart-jobmarkører og permanent SMS Enable er
+bevaret. Containeren hedder fortsat `sbr-pager-sms-gateway`. De bekræftede
+projekter/volumener er `sms-whatsapp` / `sms-whatsapp_sms_whatsapp_data` og
+`sms-gateway` / `sms-gateway_sms_gateway_data`.
+
+Til denne drift kan `scripts/apply-reviewed-pager.sh COMMIT_SHA` anvendes
+fra en midlertidig kopi hentet med `git show`. Scriptet kræver den fulde,
+gennemgåede commit-SHA og stopper før ændringer ved afvigende gren, projekter,
+datavolumener eller modemtype. Det gemmer original Git-gren/commit, et arkiv
+af den tidligere kode, staged/unstaged patches og en privat kopi af `.env`
+under `.git/pager-review-backups/`. Lokale ændringer gemmes desuden i en
+beholdt stash. Usporede filer bevares; en checkout-konflikt stopper opdateringen.
+
+Installationen bruger en ny `deploy/pager-review-*`-gren. Cudy-hotfixes er
+allerede indarbejdet, så den gamle stash genanvendes ikke efter succes. Ved
+installationsfejl forsøger det almindelige update-script image-rollback, og
+review-scriptet skifter derefter tilbage til original kode og genanvender
+den bevarede stash med staged-status. OpenWA-sessionen genskabes ikke.
+
 - Docker kontrollerer nu `/health/live`, som kun kontrollerer databasen. Den
   fulde `/health` viser fortsat WhatsApp og køen. Et langsomt WhatsApp-kald
   gør ikke alene Pager-containeren usund.
+- En læsende værtsrapport med afsendelsesarbejderen deaktiveret ændrer ikke
+  længere igangværende leveringer til tilbageholdte genstartsjob. Normal
+  worker-opstart bevarer genopretning af afbrudte afsendelser.
 - Watchdog’en genlæser sessionen før recovery. Forbundne sessioner og QR-
   parring afbrydes ikke. En fastlåst, afkoblet session kan stoppes og startes
   med det eksisterende login. Der bruges aldrig logout eller sessionssletning.

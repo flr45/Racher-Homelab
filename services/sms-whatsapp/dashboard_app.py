@@ -251,8 +251,9 @@ import offsite_backup
 import resilience
 
 # No pending job may run before operational controls and crash recovery.
-with app.app_context():
-    operations.recover_interrupted_alarms()
+if deliveries.RETRY_WORKER_ENABLED:
+    with app.app_context():
+        operations.recover_interrupted_alarms()
 deliveries.start_retry_worker()
 resilience.start_monitor()
 offsite_backup.start_worker()
