@@ -175,7 +175,7 @@ BOOT_CHANGED=true
 "${GW[@]}" up -d --no-build --no-deps sms-gateway
 
 check_health() {
-  docker exec sbr-sms-whatsapp python -c 'import json,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=6)); assert d["database"] == "online"' >/dev/null 2>&1 &&
+  docker exec sbr-sms-whatsapp python -c 'import json,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health/live", timeout=6)); assert d["database"] == "online"' >/dev/null 2>&1 &&
   docker exec racher-sms-gateway python -c 'import json,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=6)); assert d["gateway"]["database"] == "online" and d["modem"]["state"] == "online"' >/dev/null 2>&1
 }
 READY=false

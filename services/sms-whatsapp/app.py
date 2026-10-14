@@ -6,10 +6,13 @@ import json
 import os
 import re
 import secrets
+import socket
 import threading
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from functools import wraps
 
@@ -34,6 +37,30 @@ db = SQLAlchemy(app)
 ingest_lock = threading.RLock()
 _status_lock = threading.Lock()
 _status_cache = (0.0, {})
+_send_attempt_key = ContextVar("whatsapp_send_attempt_key", default=None)
+
+
+class DeliveryOutcomeUnknown(RuntimeError):
+    """The transport may have sent; automatic resubmission is unsafe."""
+
+    def __init__(self, message, message_id=None):
+        super().__init__(message)
+        self.message_id = message_id
+
+
+@contextmanager
+def send_attempt_key(value):
+    token = _send_attempt_key.set(value)
+    try:
+        yield
+    finally:
+        _send_attempt_key.reset(token)
+
+
+def _connection_refused_before_send(exc):
+    cause = exc.__cause__ or exc
+    reason = cause.reason if isinstance(cause, urllib.error.URLError) else cause
+    return isinstance(reason, (ConnectionRefusedError, socket.gaierror))
 
 
 class AllowedSender(db.Model):
@@ -179,6 +206,8 @@ def _openwa_request_explicit(
         raise RuntimeError("OpenWA API-nøgle mangler")
     data = None
     headers = {"X-API-Key": api_key}
+    if method == "POST" and path.endswith("/messages/send-text") and _send_attempt_key.get():
+        headers["Idempotency-Key"] = _send_attempt_key.get()
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -308,35 +337,53 @@ def send_fallback_sms(phone: str, message: str) -> str:
     if config.get("invalid"):
         raise RuntimeError("SMS fallback er kun delvist konfigureret")
 
-    queued = _fallback_sms_request(
-        f"{config['base_url']}/api/outgoing",
-        config["token"],
-        method="POST",
-        payload={"recipient": normalize_phone(phone), "body": message},
-    )
+    try:
+        queued = _fallback_sms_request(
+            f"{config['base_url']}/api/outgoing",
+            config["token"],
+            method="POST",
+            payload={"recipient": normalize_phone(phone), "body": message},
+        )
+    except Exception as exc:
+        cause = exc.__cause__ or exc
+        if _connection_refused_before_send(exc) or (
+            isinstance(cause, urllib.error.HTTPError) and cause.code in {400, 401, 403, 404, 409}
+        ):
+            raise
+        raise DeliveryOutcomeUnknown("SMS fallback kan være sat i kø; kontrollér gatewayen før genafsendelse") from exc
     message_id = queued.get("id") if isinstance(queued, dict) else None
     if not message_id:
-        raise RuntimeError("SMS fallback-køen kvitterede ikke med et id")
+        raise DeliveryOutcomeUnknown("SMS fallback-køen kvitterede ikke med et id")
 
     deadline = time.monotonic() + config["wait_seconds"]
     while time.monotonic() < deadline:
-        current = _fallback_sms_request(
-            f"{config['base_url']}/api/outgoing/{message_id}",
-            config["token"],
-            timeout=8,
-        )
+        try:
+            current = _fallback_sms_request(
+                f"{config['base_url']}/api/outgoing/{message_id}",
+                config["token"],
+                timeout=8,
+            )
+            if not isinstance(current, dict):
+                raise ValueError("Uventet SMS-status")
+        except Exception as exc:
+            raise DeliveryOutcomeUnknown(
+                f"SMS fallback #{message_id} er allerede i gatewayens kø; status kunne ikke bekræftes",
+                message_id=f"sms-fallback:{message_id}",
+            ) from exc
         status = str(current.get("status") or "").lower()
         if status == "sent":
             return f"sms-fallback:{message_id}"
         if status in {"failed", "unknown"}:
-            raise RuntimeError(
+            raise DeliveryOutcomeUnknown(
                 current.get("error")
-                or f"SMS fallback endte med status={status}"
+                or f"SMS fallback endte med status={status}; kontrollér gatewayen før genafsendelse",
+                message_id=f"sms-fallback:{message_id}",
             )
         time.sleep(config["poll_seconds"])
 
-    raise TimeoutError(
-        "SMS fallback blev ikke bekræftet sendt inden timeout; beholdes i retry-kø"
+    raise DeliveryOutcomeUnknown(
+        f"SMS fallback #{message_id} blev ikke bekræftet inden timeout; jobbet kan stadig blive sendt",
+        message_id=f"sms-fallback:{message_id}",
     )
 
 
@@ -361,13 +408,23 @@ def _send_whatsapp_via(
     phone: str,
     message: str,
 ) -> str:
-    result = requester(
-        f"sessions/{session_id}/messages/send-text",
-        method="POST",
-        payload={"chatId": phone_to_chat_id(phone), "text": message[:4096]},
-    )
+    # Validate before crossing the external send boundary.
+    payload = {"chatId": phone_to_chat_id(phone), "text": message[:4096]}
+    try:
+        result = requester(
+            f"sessions/{session_id}/messages/send-text",
+            method="POST",
+            payload=payload,
+        )
+    except Exception as exc:
+        cause = exc.__cause__ or exc
+        if _definitive_openwa_rejection(exc) or _connection_refused_before_send(exc):
+            raise
+        if isinstance(cause, urllib.error.HTTPError) and cause.code in {401, 403, 404}:
+            raise
+        raise DeliveryOutcomeUnknown(f"WhatsApp-afsendelsens udfald er ukendt: {exc}") from exc
     if not isinstance(result, dict) or not result.get("messageId"):
-        raise RuntimeError("OpenWA kvitterede ikke med et besked-id")
+        raise DeliveryOutcomeUnknown("OpenWA kvitterede ikke med et besked-id; kontrollér WhatsApp før genafsendelse")
     return str(result["messageId"])
 
 
@@ -391,8 +448,8 @@ def send_whatsapp(phone: str, message: str) -> str | None:
 
     # Fail over only before the external send side effect. If a channel was
     # reported ready and its actual send call becomes ambiguous, propagate that
-    # error to the durable retry queue instead of risking a duplicate on the
-    # next transport.
+    # error to the durable queue for review instead of risking a duplicate on
+    # the next transport or on a later retry.
     primary = _primary_openwa_status_uncached()
     if primary.get("state") == "ready":
         try:
@@ -433,11 +490,12 @@ def _session_status(requester, session_id: str, detail_fallback: str) -> dict:
         sessions = requester("sessions", timeout=3)
         if not isinstance(sessions, list):
             return {"state": "unknown", "detail": "Uventet svar fra OpenWA"}
-        match = next((item for item in sessions if str(item.get("id")) == session_id), None)
+        match = next((item for item in sessions if isinstance(item, dict) and str(item.get("id")) == session_id), None)
         if not match:
             return {"state": "missing", "detail": "Sessionen findes ikke"}
         status = str(match.get("status") or "unknown").lower()
-        return {"state": status, "detail": match.get("name") or detail_fallback}
+        return {"state": status, "detail": match.get("name") or detail_fallback,
+                "engineLoaded": match.get("engineLoaded"), "updatedAt": match.get("updatedAt")}
     except Exception as exc:  # noqa: BLE001
         return {"state": "offline", "detail": str(exc)[:180]}
 
@@ -463,7 +521,7 @@ def _backup_openwa_status_uncached() -> dict:
 def openwa_status() -> dict:
     global _status_cache
     with _status_lock:
-        if time.monotonic() - _status_cache[0] < 10:
+        if _status_cache[1] and time.monotonic() - _status_cache[0] < 10:
             return dict(_status_cache[1])
         result = _openwa_status_uncached()
         _status_cache = (time.monotonic(), result)
@@ -511,7 +569,7 @@ def require_ingest_token() -> None:
         abort(503, "SMS_WHATSAPP_INGEST_TOKEN mangler")
     authorization = request.headers.get("Authorization", "")
     scheme, separator, supplied = authorization.partition(" ")
-    if not separator or scheme.lower() != "bearer" or not hmac.compare_digest(supplied.strip(), configured):
+    if not separator or scheme.lower() != "bearer" or not hmac.compare_digest(supplied.strip().encode("utf-8"), configured.encode("utf-8")):
         abort(401)
 
 
@@ -632,6 +690,18 @@ def health():
         db_state = "offline"
     wa = openwa_status()
     return jsonify(status="ok" if db_state == "online" else "degraded", database=db_state, openwa=wa), (200 if db_state == "online" else 503)
+
+
+@app.get("/health/live")
+def liveness():
+    # Container liveness must not wait for a disconnected external service.
+    # /health remains the full operational status used by the host watchdog.
+    try:
+        db.session.execute(text("SELECT 1"))
+    except Exception:
+        db.session.rollback()
+        return jsonify(status="degraded", database="offline"), 503
+    return jsonify(status="ok", database="online")
 
 
 @app.route("/login", methods=["GET", "POST"])

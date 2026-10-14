@@ -10,6 +10,7 @@ import ssl
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -212,18 +213,27 @@ def collect_checks() -> tuple[dict[str, str | None], dict]:
         else:
             queue = pager_payload.get("deliveryQueue") or {}
             failed = int(queue.get("failed", 0) or 0)
+            held = int(queue.get("held", 0) or 0)
             oldest = queue.get("oldestMinutes")
             oldest_limit = float(os.getenv("SBR_WATCHDOG_RETRY_OLDEST_MINUTES", "15"))
             if failed > 0:
                 checks["pager"] = f"WhatsApp retry-kø har {failed} permanent fejlede leveringer"
+            elif held > 0:
+                checks["pager"] = f"WhatsApp retry-kø har {held} tilbageholdte leveringer"
             elif isinstance(oldest, (int, float)) and oldest >= oldest_limit:
                 checks["pager"] = f"WhatsApp retry-køens ældste besked er {oldest:.0f} min"
 
     if checks["openwa"] is None and pager_payload is not None:
         openwa = pager_payload.get("openwa") or {}
         state = str(openwa.get("state", "unknown")).lower()
+        aggregate_state = state
+        primary = openwa.get("primary")
+        if isinstance(primary, dict):
+            # The aggregate may be offline because both channels need QR.
+            # Recovery must use the actual primary state, never that aggregate.
+            state = str(primary.get("state", "unknown")).lower()
         active_channel = str(openwa.get("active") or "").lower()
-        if state == "ready" and active_channel == "backup":
+        if aggregate_state == "ready" and active_channel == "backup":
             primary = openwa.get("primary") or {}
             primary_state = str(primary.get("state", "unknown")).lower()
             checks["openwa"] = f"OpenWA primær status={primary_state}; backup aktiv"
@@ -287,11 +297,44 @@ def recover_openwa_session() -> str:
             except RuntimeError:
                 time.sleep(2)
 
-    openwa_api_request(
-        f"sessions/{session_id}/start",
-        method="POST",
-        timeout=75,
-    )
+    path = "sessions/" + urllib.parse.quote(session_id, safe="")
+    current = openwa_api_request(path, timeout=5)
+    if not isinstance(current, dict):
+        raise RuntimeError("OpenWA gav en ukendt session-status")
+    state = str(current.get("status") or "unknown").lower()
+    if state == "ready":
+        return "OpenWA er allerede forbundet; ingen recovery nødvendig"
+    if state in {"qr_ready", "authenticated", "auth_failure"}:
+        return "OpenWA kræver parring eller afventer login; ingen automatisk genstart"
+    if state not in {"disconnected", "failed", "initializing", "starting", "connecting"}:
+        return f"OpenWA status={state}; kontrollér sessionen manuelt"
+    if state in {"initializing", "starting", "connecting"}:
+        try:
+            updated = datetime.fromisoformat(str(current.get("updatedAt")).replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - updated.astimezone(timezone.utc)).total_seconds()
+            if age < max(0, int(os.getenv("SBR_WATCHDOG_OPENWA_STARTUP_GRACE_SECONDS", "300"))):
+                return "OpenWA-sessionen starter stadig; afventer opstartsro"
+        except (TypeError, ValueError):
+            return "OpenWA starter; statusalder kunne ikke bekræftes, ingen genstart"
+
+    # Stop preserves linked-device credentials. Never logout/delete the session.
+    # A disconnected engine can still be registered: /start alone then does
+    # nothing except answer 'already started' indefinitely.
+    if current.get("engineLoaded") is True:
+        openwa_api_request(path + "/stop", method="POST", timeout=45)
+    try:
+        openwa_api_request(path + "/start", method="POST", timeout=75)
+    except RuntimeError as exc:
+        if "session is already started" not in str(exc).lower():
+            raise
+        latest = openwa_api_request(path, timeout=5)
+        latest_state = str(latest.get("status") or "unknown").lower()
+        if latest_state not in {"disconnected", "failed"}:
+            return "OpenWA-session er startet eller genoprettet; ingen containerrestart"
+        # Older images do not expose engineLoaded. Recheck before stopping so a
+        # concurrently recovered/QR-ready session is left untouched.
+        openwa_api_request(path + "/stop", method="POST", timeout=45)
+        openwa_api_request(path + "/start", method="POST", timeout=75)
     return f"OpenWA session start {session_id[:8]}…"
 
 
@@ -343,6 +386,8 @@ def openwa_session_state_from_issue(issue: str | None) -> str | None:
 def recover_component(component: str, issue: str | None = None) -> str:
     if component == "gateway" and issue and issue.startswith("SMS-modem"):
         return "modem-recovery delegeret til sbr-modem-watchdog"
+    if component == "pager" and issue and issue.startswith("WhatsApp retry-kø"):
+        return "Køen kræver kontrol; ingen containerrestart"
 
     if component == "openwa":
         state = openwa_session_state_from_issue(issue)
@@ -350,8 +395,12 @@ def recover_component(component: str, issue: str | None = None) -> str:
         # qr_ready means the linked-device authentication is no longer usable.
         # Restarting the container cannot repair that state and previously caused
         # an endless restart/start loop while the operator still had to scan QR.
-        if state == "qr_ready":
+        if state in {"qr_ready", "auth_failure"}:
             return "QR-parring kræves; ingen automatisk containerrestart"
+        if state == "missing":
+            return "Sessionen mangler; kontrollér session-id, ingen containerrestart"
+        if state == "authenticated":
+            return "Login er godkendt; afventer sessionstart, ingen containerrestart"
 
         # For a running OpenWA with a non-ready session, try the least invasive
         # recovery only. In particular, "Session is already started" is not a
@@ -466,7 +515,7 @@ def queue_sms(body: str) -> bool:
     return True
 
 
-def notify(subject: str, body: str, sms_body: str, *, allow_sms: bool) -> None:
+def notify(subject: str, body: str, sms_body: str, *, allow_sms: bool) -> bool:
     sent = []
     try:
         if send_email(subject, body):
@@ -485,6 +534,18 @@ def notify(subject: str, body: str, sms_body: str, *, allow_sms: bool) -> None:
         print("Watchdog-notifikation sendt via " + ", ".join(sent))
     else:
         print("Ingen watchdog-notifikationskanal er konfigureret eller tilgængelig")
+    return bool(sent)
+
+
+def issue_kind(issue: str | None) -> str | None:
+    """Changing queue counts/ages are the same incident, not new failures."""
+    if issue and issue.startswith("WhatsApp retry-kø"):
+        if "permanent fejlede" in issue:
+            return "queue_failed"
+        if "tilbageholdte" in issue:
+            return "queue_held"
+        return "queue_age"
+    return issue
 
 
 def report_body(component: str, issue: str, action: str | None = None) -> str:
@@ -531,11 +592,14 @@ def main() -> int:
         alerted = bool(item.get("alerted", False))
         last_recovery = int(item.get("last_recovery_at", 0) or 0)
         last_notified = int(item.get("last_notified", 0) or 0)
+        last_notice_attempt = int(item.get("last_notice_attempt", 0) or 0)
         previous_issue = str(item.get("issue") or "")
 
         if not issue:
-            if alerted:
-                notify(
+            recovered_notice_sent = not alerted
+            if alerted and now - last_notice_attempt >= 300:
+                item["last_notice_attempt"] = now
+                recovered_notice_sent = notify(
                     "[SBR Pager] Systemet fungerer igen",
                     report_body(component, "Fejlen er væk"),
                     f"SBR Pager OK: {component} fungerer igen.",
@@ -543,7 +607,7 @@ def main() -> int:
                 )
             item.update(
                 failures=0,
-                alerted=False,
+                alerted=alerted and not recovered_notice_sent,
                 issue=None,
                 recovered_at=now if alerted else item.get("recovered_at"),
             )
@@ -552,8 +616,11 @@ def main() -> int:
         # A changed failure mode starts a new consecutive-failure streak.
         # This keeps the threshold meaningful (e.g. disconnected -> qr_ready)
         # instead of carrying a months-long counter into a different incident.
-        if previous_issue and issue != previous_issue:
+        changed_kind = issue_kind(issue) != issue_kind(previous_issue)
+        if previous_issue and changed_kind:
             failures = 0
+            alerted = False
+            item["alerted"] = False
 
         failures += 1
         item["failures"] = failures
@@ -576,18 +643,20 @@ def main() -> int:
 
         should_notify = failures >= threshold and (
             not alerted
-            or issue != previous_issue
+            or changed_kind
             or now - last_notified >= repeat_seconds
         )
-        if should_notify:
-            notify(
+        if should_notify and (changed_kind or now - last_notice_attempt >= 300):
+            item["last_notice_attempt"] = now
+            sent_notice = notify(
                 f"[SBR Pager] FEJL: {component}",
                 report_body(component, issue, action),
                 f"SBR Pager FEJL {component}: {issue}",
                 allow_sms=component != "gateway" and checks.get("gateway") is None,
             )
-            item["alerted"] = True
-            item["last_notified"] = now
+            if sent_notice:
+                item["alerted"] = True
+                item["last_notified"] = now
 
     state["checked_at"] = now
     state["checks"] = checks

@@ -125,10 +125,11 @@ def run_single_test():
         db.session.commit()
         started = time.monotonic()
         try:
-            row.message_id = base.send_whatsapp(row.recipient_phone, f"✅ SBR Pager · forbindelsestest #{test.id}\nKun sendt til det valgte nummer.")
+            with base.send_attempt_key("sbr-test-" + test.token):
+                row.message_id = base.send_whatsapp(row.recipient_phone, f"✅ SBR Pager · forbindelsestest #{test.id}\nKun sendt til det valgte nummer.")
             test.status = "sent"
         except Exception as exc:
-            test.status = "failed"
+            test.status = "uncertain" if isinstance(exc, base.DeliveryOutcomeUnknown) else "failed"
             test.error = str(exc)[:1000]
         test.elapsed_ms = max(0, round((time.monotonic() - started) * 1000))
     test.completed_at = base.utcnow()
@@ -156,7 +157,7 @@ def explain_inbound(inbound):
     if not rows:
         return "Ingen leveringsjobs registreret; ældre beskeder kan mangle en registreret årsag"
     counts = {key: sum(row.status == key for row in rows) for key in {row.status for row in rows}}
-    labels = {"sent": "kvitteret af OpenWA", "pending": "venter i kø", "retrying": "venter på nyt forsøg", "failed": "fejlet", "cancelled": "annulleret", "held": "afventer godkendelse af gammel alarm"}
+    labels = {"sent": "kvitteret af OpenWA", "pending": "venter i kø", "retrying": "venter på nyt forsøg", "failed": "fejlet", "cancelled": "annulleret", "held": "afventer kontrol og godkendelse"}
     return ", ".join(f"{count} {labels.get(key, key)}" for key, count in sorted(counts.items()))
 
 

@@ -131,7 +131,10 @@ class CudyClient:
     def _request(self, url, fields=None):
         url = self._same_origin(url)
         data, content_type = multipart_form(fields) if fields is not None else (None, None)
-        headers = {"Accept": "text/html", "User-Agent": "SBR-Pager-Cudy/1.0"}
+        parsed = urllib.parse.urlsplit(self.base_url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        headers = {"Accept": "text/html", "User-Agent": "SBR-Pager-Cudy/1.0",
+                   "Origin": origin, "Referer": url, "X-Requested-With": "XMLHttpRequest"}
         if content_type:
             headers["Content-Type"] = content_type
         try:

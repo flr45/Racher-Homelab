@@ -51,14 +51,17 @@ Genstart er også fysisk bekræftet: boot-service og alle tre applikationer
 startede korrekt, og operatøren bekræftede SMS efter genstart.
 Netværksudfald og USB-skift er endnu ikke fysisk bekræftet.
 
-**På denne firmware skal Cudy-appens SMS → Aktivér være slået fra under
-AT-baseret modtagelse.** Med routerens egen SMS-indbakke aktiveret så vores
-læser kun del 1 af 2, før gruppen forsvandt; andre beskeder lå i routerens
-indbakke. Efter deaktivering bekræftede operatøren levering af hele den lange
-testbesked. Det peger på konkurrerende læsere af samme modemlager. Routerens
-internetforbindelse forblev i brug. Behold routerindbakken deaktiveret under
-drift; ændr ikke radio, APN eller modemets SMS-indstillinger for dette skift.
-Andre firmwareversioner kræver deres egen korte og delte SMS-test.
+**På den senest afprøvede LT300 V3 skal Cudy-appens SMS → Aktivér være
+slået til permanent.** Testen 5. oktober viste, at routeren kan oprette en
+Outbox-post uden at sende, hvis dens SMS-engine er slået fra. Readeren sikrer
+automatisk aktivering ved opstart og kontrollerer den normalt hvert 60. sekund.
+`CUDY_SMS_SEND_ENABLED=false` stopper kun udgående køjobs; modtagelsen fortsætter.
+
+Tidligere test med SMS-engine slået til viste konkurrerende læsning af
+multipart-dele. Den risiko kræver fortsat en fysisk kort og delt SMS-test på
+den konkrete firmware. Den nuværende driver læser modemlageret via AT;
+routerens egen web-indbakke er ikke en separat importkilde. En router-Outbox-
+post beviser accept i routerens kø, ikke levering på modtagerens telefon.
 
 Gem en privat kopi af `.env`, før routeroplysninger tilføjes. Behold USB som
 valgt driver under forberedelsen. Tilføj `CUDY_BASE_URL`, `CUDY_USERNAME` og
@@ -334,7 +337,7 @@ Scriptet pauser Pager-watchdog og stopper Pager før filskift. OpenWA og SMS Gat
 | Historikoprydning | Som standard deaktiveret. Valgfrit 30–3650 dage, begrænsede portioner efter en vellykket dagsbackup. Ventende/tilbageholdte alarmer bevares; også afsluttede testlogs og gammel ændringslog ryddes |
 | LT300-status | SIM, signal og registreret mobilnet vises, når Gateway faktisk leverer dem. V3.0 / 2.5.12 er afprøvet med kort og delt SMS; andre firmwareversioner skal verificeres |
 
-Udgående SMS via LT300 er fortsat en hardwareafhængig opgave. Den eksisterende adapter er modtagelse alene, og der er ikke tilføjet en uverificeret afsendelseskommando. USB-afsendelse og statusresponder bevares under indkøringen.
+Udgående SMS via LT300 bruger nu den afprøvede webformular gennem den vedvarende kø. Telefonlevering kræver fysisk kontrol, fordi routerens Outbox kun beviser accept i routeren. USB-afsendelse og statusresponder bevares.
 
 ### Modtagere, delte SMS’er og daglig rapport
 
@@ -349,7 +352,7 @@ Udgående SMS via LT300 er fortsat en hardwareafhængig opgave. Den eksisterende
 
 Mobilvisningen har en sammenklappelig menu og genveje til enkeltpersonstest, fejl og drift. Beskedhistorikkens seneste søgefiltre huskes i browserens login-session; **Nulstil** rydder dem. En anden browser har egne filtre.
 
-**Indkøring** har separate, manuelt udfyldte LT300- og USB-forløb med 12 kontrolpunkter: backup, internet/LAN, modem, kort og delt SMS, stationsvalg, WhatsApp, genstart, afbrudt forbindelse, USB-skift, udgående SMS og normal drift. Gem resultat og noter efter den fysiske test. Bestået kræver en særskilt bekræftelse og gemmes i ændringsloggen; siden sender ingen beskeder. LT300-afsendelse kan ikke markeres bestået, før en understøttet afsendelsesmetode er implementeret og fysisk verificeret.
+**Indkøring** har separate, manuelt udfyldte LT300- og USB-forløb med 12 kontrolpunkter: backup, internet/LAN, modem, kort og delt SMS, stationsvalg, WhatsApp, genstart, afbrudt forbindelse, USB-skift, udgående SMS og normal drift. Gem resultat og noter efter den fysiske test. Bestået kræver en særskilt bekræftelse og gemmes i ændringsloggen; siden sender ingen beskeder. LT300-afsendelse kan markeres bestået, når den aktive Cudy-reader understøtter afsendelse, og operatøren udtrykkeligt bekræfter fysisk modtagelse på telefonen.
 
 De nye tabeller til forsøgsmålinger, backupkontrol og indkøringsresultater er additive. En fuld restore kræver en backup med det aktuelle databaseskema; tidligere konfigurationsbackups kan stadig bruges til opsætningsgendannelse.
 
@@ -495,7 +498,7 @@ hårde genindlæsninger, som kan omgå browserens cache.
 
 ### Afventende firmwarekontrol
 
-Automatisk registrering af aktiv Wi-Fi/4G-forbindelse og udgående LT300-SMS er endnu ikke aktiveret. En tilsluttet mobilradio beviser ikke, at internettet går over 4G. Afsendelsesformular og kvittering skal først verificeres på den konkrete firmware. Kør denne strukturkontrol på racherserver:
+Automatisk registrering af aktiv Wi-Fi/4G-forbindelse er endnu ikke aktiveret. En tilsluttet mobilradio beviser ikke, at internettet går over 4G. Udgående LT300-SMS er implementeret på den afprøvede firmware; andre firmwareversioner kræver deres egen struktur- og leveringstest. Kør denne strukturkontrol på racherserver:
 
 ```bash
 cd /opt/SBR-Pager-Gateway &&
@@ -505,6 +508,43 @@ git show FETCH_HEAD:scripts/probe-cudy-features.py | docker exec -i racher-sms-g
 
 Kontrollen logger ind med containerens eksisterende routeropsætning og læser fire sider. Den sender ingen SMS og viser kun feltnavne, felttyper og en begrænset liste af statusord, aldrig feltværdier, beskedtekster eller loginhemmeligheder. Output skal bruges til næste adapterændring; der må ikke gættes på en afsendelses-API.
 
-LT300 V3.0/2.5.12 formularstruktur er nu fysisk aflæst: `cbid.smsnew.1.phone`, `cbid.smsnew.1.content` og knappen `cbid.smsnew.1.send`. Adapterens `prepare_sms()` validerer telefonnummer, kort prøvetekst, token, felter og samme lokale formularadresse uden at sende. Den bruges endnu ikke af driftskøen. HTTP 200 er ikke en afsendelseskvittering. Næste fysiske kontrol er én tydeligt mærket prøve-SMS fra routerens webformular, herunder kvitteringen og modtagelsen på telefonen. Den native SMS-læser skal fortsat forblive deaktiveret.
+LT300 V3.0/2.5.12 formularstruktur er nu fysisk aflæst: `cbid.smsnew.1.phone`, `cbid.smsnew.1.content` og knappen `cbid.smsnew.1.send`. Adapterens `prepare_sms()` validerer telefonnummer, kort prøvetekst, token, felter og samme lokale formularadresse uden at sende. `send_sms()` bruger derefter den validerede formular og kontrollerer en ny matchende Outbox-post. HTTP 200 alene er ikke en afsendelseskvittering. SMS Enable holdes permanent aktiveret; kontrollér stadig den faktiske modtagelse af en kort og delt SMS på telefonen.
 
 Statusfragmenterne viste både Cellular/Connected og WAN/Connected, mens WISP-fragmentet kun viste WISP. Det beviser ikke aktiv internetrute; automatisk Wi-Fi/4G-kildevisning må derfor stadig ikke udledes af disse ord alene.
+
+
+## Driftsrettelser 14. oktober 2026 · 2026.10-reliability.1
+
+- Docker kontrollerer nu `/health/live`, som kun kontrollerer databasen. Den
+  fulde `/health` viser fortsat WhatsApp og køen. Et langsomt WhatsApp-kald
+  gør ikke alene Pager-containeren usund.
+- Watchdog’en genlæser sessionen før recovery. Forbundne sessioner og QR-
+  parring afbrydes ikke. En fastlåst, afkoblet session kan stoppes og startes
+  med det eksisterende login. Der bruges aldrig logout eller sessionssletning.
+  Opstartsro og recovery-cooldown bevares. Et vedvarende krav om ny QR kan
+  stadig kun løses ved parring på telefonen.
+- Køfejl udløser kontrol og eventuel varsling, ikke en containergenstart.
+  Stigende køalder/antal nulstiller ikke længere fejlstreaken. En driftsbesked
+  registreres kun som afleveret, når mindst én kanal accepterer den; et
+  mislykket forsøg kan genforsøges efter fem minutter.
+- En WhatsApp-timeout, et manglende besked-id eller en ukendt serverfejl kan
+  betyde, at beskeden allerede er sendt. Jobbet holdes derfor tilbage under
+  Drift. Kontrollér telefonen før godkendelse eller annullering. Afviste
+  forbindelser og eksplicit afvisning før afsendelse kan fortsat genforsøges.
+- Alarm- og enkeltpersonstest bruger en stabil `Idempotency-Key`, som nyere
+  OpenWA-versioner understøtter. Et almindeligt genforsøg genbruger nøglen;
+  udtrykkelig godkendelse af et tilbageholdt job får en ny nøgle. Ældre images
+  kan ignorere headeren, så timeouts holdes fortsat tilbage. Nøglen er ingen
+  telefonleveringskvittering.
+- En SMS-fallback, der allerede har fået et gateway-id, genoprettes ikke som
+  endnu en SMS ved status-timeout. Id’et gemmes til kontrol af det oprindelige
+  job. Cudy får de browserheaders, der var nødvendige i den fysiske test, og
+  behandler normalt ét udgående job mellem indgående scanninger.
+
+Ændringerne bygger på GitHub-grenen `codex/sms-whatsapp-review-cudy` ved
+`9f2b7d4`. De installerer ikke sig selv på racherserver. Opdateringsscriptet
+bevarer OpenWA-containeren og dens login samt `.env`, laver backup og kan
+rulle applikationsimages tilbage. Efter installation kræves stadig en fysisk
+kort og delt SMS-test, WhatsApp-modtagelse på telefonen og kontrol af genopretning.
+En Cudy native web-indbakke, der fjerner beskeder fra modemlageret før AT-
+readerens læsning, er fortsat en firmwareafhængig begrænsning.
