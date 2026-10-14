@@ -44,6 +44,7 @@ class FormPage(HTMLParser):
             self.forms.append(self.form)
         elif tag == "input" and self.form is not None and attrs.get("name"):
             self.form["fields"][attrs["name"]] = attrs.get("value", "")
+            self.form.setdefault("controls", {})[attrs["name"]] = attrs
         elif tag == "button" and self.form is not None and attrs.get("name"):
             self.form.setdefault("buttons", {})[attrs["name"]] = attrs.get("value", "")
         elif tag == "textarea":
@@ -252,6 +253,11 @@ class CudyClient:
         form = page.containing("cbid.sms.4g.enabled")
         if not form or not form["fields"].get("token"):
             raise CudyError("Routerens SMS Enable-formular genkendes ikke")
+        control = form.get("controls", {}).get("cbid.sms.4g.enabled", {})
+        if str(control.get("type", "")).lower() == "checkbox":
+            # An unchecked LuCI checkbox still has value="1" in the HTML.
+            # Its current state is carried by 'checked', not by 'value'.
+            return "checked" in control
         value = str(form["fields"].get("cbid.sms.4g.enabled", "")).strip()
         if value not in {"0", "1"}:
             raise CudyError("Routerens SMS Enable-status er ukendt")

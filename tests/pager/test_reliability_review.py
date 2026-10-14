@@ -271,3 +271,23 @@ def test_connection_page_distinguishes_disconnect_from_qr(p, client, monkeypatch
     response = client.get("/forbindelser")
     assert response.status_code == 200
     assert expected in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("checked,expected", [("", False), (" checked", True), (' checked="checked"', True)])
+def test_cudy_sms_checkbox_reads_actual_state_instead_of_constant_value(monkeypatch, checked, expected):
+    from cudy_client import CudyClient, FormPage
+    page = FormPage('<form><input name="token" value="synthetic"><input type="checkbox" name="cbid.sms.4g.enabled" value="1"' + checked + '></form>')
+    client = CudyClient()
+    monkeypatch.setattr(client, "_authenticated_page", lambda url: page)
+    assert client.sms_enabled() is expected
+
+
+def test_cudy_unchecked_sms_checkbox_triggers_self_healing(monkeypatch):
+    from cudy_client import CudyClient, FormPage
+    page = FormPage('<form><input name="token" value="synthetic"><input type="checkbox" name="cbid.sms.4g.enabled" value="1"></form>')
+    client = CudyClient()
+    monkeypatch.setattr(client, "_authenticated_page", lambda url: page)
+    enabled = []
+    monkeypatch.setattr(client, "set_sms_enabled", lambda value: enabled.append(value) or True)
+    assert client.ensure_sms_enabled() is True
+    assert enabled == [True]

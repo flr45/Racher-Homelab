@@ -2,7 +2,7 @@
 
 Opdateringen bygger videre på `feature/sms-whatsapp-gateway` og bevarer
 SIM800C USB-seriel, OpenWA-session, stationsvalg, Test opt-in og datavolumener.
-Den er forberedt på branchen `codex/sms-whatsapp-review-cudy`.
+Den er forberedt på branchen `codex/pager-reliability-review`.
 Den bliver ikke automatisk installeret på racherserver.
 
 ## Opdater med dit nuværende USB-modem
@@ -12,10 +12,10 @@ Kør på **racherserver**, ikke racher-pi2:
 ```bash
 cd /opt/SBR-Pager-Gateway
 git status --short
-git remote set-branches --add origin codex/sms-whatsapp-review-cudy
-git fetch origin codex/sms-whatsapp-review-cudy
-git switch codex/sms-whatsapp-review-cudy
-git merge --ff-only origin/codex/sms-whatsapp-review-cudy
+git remote set-branches --add origin codex/pager-reliability-review
+git fetch origin codex/pager-reliability-review
+git switch codex/pager-reliability-review
+git merge --ff-only origin/codex/pager-reliability-review
 bash scripts/update-sbr-pager.sh
 ```
 
@@ -531,6 +531,8 @@ Statusfragmenterne viste både Cellular/Connected og WAN/Connected, mens WISP-fr
   betyde, at beskeden allerede er sendt. Jobbet holdes derfor tilbage under
   Drift. Kontrollér telefonen før godkendelse eller annullering. Afviste
   forbindelser og eksplicit afvisning før afsendelse kan fortsat genforsøges.
+- Cudys SMS Enable-checkbox læses efter dens faktiske afkrydsning. Et felt
+  med `value="1"` uden `checked` tælles som slået fra og kan selvhelbredes.
 - Alarm- og enkeltpersonstest bruger en stabil `Idempotency-Key`, som nyere
   OpenWA-versioner understøtter. Et almindeligt genforsøg genbruger nøglen;
   udtrykkelig godkendelse af et tilbageholdt job får en ny nøgle. Ældre images
