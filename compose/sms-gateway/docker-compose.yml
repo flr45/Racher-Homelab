@@ -2,7 +2,7 @@ services:
   sms-gateway:
     build:
       context: ../../services/sms-gateway
-    container_name: racher-sms-gateway
+    container_name: sbr-pager-sms-gateway
     restart: unless-stopped
     environment:
       DATABASE_URL: sqlite:////data/sms-gateway.db

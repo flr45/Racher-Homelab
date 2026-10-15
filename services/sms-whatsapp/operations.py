@@ -22,7 +22,7 @@ import diagnostics
 
 app, base, db = delivery.app, delivery.base, delivery.db
 log = logging.getLogger("sbr-pager-operations")
-VERSION = "2026.10-operations.3"
+VERSION = "2026.10-reliability.1"
 BOOTED_AT = base.utcnow()
 try:
     BUILD_AT = base.parse_received_at(json.loads(Path(__file__).with_name("build_info.json").read_text())["built_at"])
@@ -103,6 +103,11 @@ def outgoing_body(inbound):
     if stations.station_for_inbound(inbound) == stations.TEST_STATION and not inbound.body.startswith("🧪 TEST"):
         return "🧪 TEST · ØVELSE\n" + inbound.body
     return inbound.body
+
+
+def send_generation(row):
+    approval = QueueApproval.query.filter_by(delivery_id=row.id).first()
+    return delivery._aware(approval.approved_at).isoformat() if approval else "initial"
 
 
 def loop_reason(body):
@@ -730,6 +735,7 @@ delivery.operations_before_enqueue = before_enqueue
 delivery.operations_paused = sending_paused
 delivery.operations_hold_stale = hold_stale
 delivery.operations_body = outgoing_body
+delivery.operations_send_generation = send_generation
 delivery.operations_housekeeping = housekeeping
 
 delivery.operations_recover = recover_interrupted_alarms

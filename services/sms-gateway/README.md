@@ -9,12 +9,18 @@ netværksreader til Cudy LT300s originale LuCI AT-webformular.
 | Kilde | Compose-fil | Modtagelse | Afsendelse |
 |---|---|---|---|
 | USB, standard | `compose/sms-gateway/docker-compose.yml` | Ja | Ja |
-| Cudy LT300, skal routertestes | `compose/sms-gateway/cudy.yml` | Forberedt | Ikke understøttet af adapteren |
+| Cudy LT300 V3, afprøvet firmware 2.5.12 | `compose/sms-gateway/cudy.yml` | Ja, via AT | Ja, via routerens SMS-formular og kø |
 
 Kør kun én af dem ad gangen. Cudy-filen har ingen USB-device mapping,
 men genbruger samme `sms-gateway` projektnavn, container og datavolumen.
 Boot og watchdog vælger fil ud fra `SMS_MODEM_DRIVER=usb` eller `cudy` i `.env`.
 Se [opdaterings- og Cudy-guide](../../docs/SBR-PAGER-UPDATE.md).
+
+Cudy SMS Enable holdes aktiveret ved opstart og under drift. `CUDY_SMS_SEND_ENABLED=false`
+stopper kun udgående jobs. En Cudy Outbox-post beviser routeraccept, ikke
+telefonlevering. Readeren behandler som standard ét udgående job mellem
+indgående SMS-scanninger, så en stor kø ikke spærrer alle senere læsninger.
+Kontrollér kort og delt SMS samt levering på telefonen på den konkrete firmware.
 
 Begge readers genbruger PDU-dekodning, delte SMS'er, pre-alarmer,
 Sending 2/parent-kobling, redigering af persondata og direkte SBR Pager-ingest.
@@ -40,10 +46,10 @@ Alle `/api/*`-kald kræver `Authorization: Bearer $SMS_GATEWAY_API_TOKEN`.
 - `POST /api/commands/claim`, `POST /api/commands/<id>/complete`
 - `POST /api/cudy/probe`: godkendt test af login, SIM, signal, registrering og lager.
 
-Ved Cudy-kilden afvises nye udgående SMS med HTTP 409; eksisterende
-USB-outboxjobs beholdes og claim'es ikke. SMS-statuskommandoer kan derfor
-ikke besvares via denne adapter. Vagtbytte-forwarding forbliver styret af den
-eksisterende `VAGTBYTTE_FORWARD_ENABLED` og er som standard slået fra i Compose.
+Ved Cudy-kilden er udgående SMS og statuskommandoer understøttet via den
+vedvarende kø. `CUDY_SMS_SEND_ENABLED=false` afviser nye udgående SMS med
+HTTP 409 og pauser claim af eksisterende køjobs. Vagtbytte-forwarding styres
+fortsat af `VAGTBYTTE_FORWARD_ENABLED` og er som standard slået fra i Compose.
 
 ## Prøve uden fysisk router
 

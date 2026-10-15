@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -224,10 +225,23 @@ def attempt_delivery(
                 log.exception("Kunne ikke gemme tidsmåling; leveringsstatus er allerede gemt")
     try:
         formatter = globals().get("operations_body", lambda row: row.body)
-        message_id = base.send_whatsapp(delivery.recipient_phone, formatter(inbound))
+        generation = globals().get("operations_send_generation", lambda row: "initial")(delivery)
+        stable = f"{delivery.id}|{inbound.source_id}|{inbound.created_at}|{delivery.recipient_phone}|{generation}"
+        key = "sbr-wa-" + hashlib.sha256(stable.encode()).hexdigest()
+        with base.send_attempt_key(key):
+            message_id = base.send_whatsapp(delivery.recipient_phone, formatter(inbound))
     except Exception as exc:  # noqa: BLE001
         elapsed = time.monotonic() - measured_start
-        _queue_failure(delivery, exc)
+        if isinstance(exc, base.DeliveryOutcomeUnknown):
+            _queue_failure(delivery, exc)
+            state = _state_for(delivery.id)
+            delivery.status = "held"
+            delivery.message_id = exc.message_id
+            delivery.error = ("Uafklaret afsendelse: kontrollér WhatsApp/SMS-køen før godkendelse. " + str(exc))[:1000]
+            state.last_error = delivery.error
+            state.next_attempt_at, state.completed_at = None, None
+        else:
+            _queue_failure(delivery, exc)
         db.session.commit()
         measured(False, elapsed)
         log.warning(
@@ -494,6 +508,7 @@ def queue_snapshot() -> dict:
     retrying = alarms.filter_by(status="retrying").count()
     pending = alarms.filter_by(status="pending").count()
     failed = alarms.filter_by(status="failed").count()
+    held = alarms.filter_by(status="held").count()
     active = WhatsAppRetryState.query.filter(WhatsAppRetryState.completed_at.is_(None)).count()
 
     oldest = (
@@ -512,6 +527,7 @@ def queue_snapshot() -> dict:
         "retrying": retrying,
         "pending": pending,
         "failed": failed,
+        "held": held,
         "oldestMinutes": oldest_minutes,
         "maxAttempts": RETRY_MAX_ATTEMPTS,
         "maxAgeHours": RETRY_MAX_AGE_HOURS,

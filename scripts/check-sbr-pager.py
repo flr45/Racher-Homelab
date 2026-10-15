@@ -30,7 +30,7 @@ def check():
         enabled, _ = run(['systemctl', 'is-enabled', '--quiet', name])
         active, _ = run(['systemctl', 'is-active', '--quiet', name])
         add(name, 'ok' if enabled == active == 0 else 'warning', 'Aktiv og aktiveret ved opstart' if enabled == active == 0 else 'Kontrollér systemd-status')
-    for name in ('sbr-sms-whatsapp', 'racher-sms-gateway', 'racher-sms-openwa'):
+    for name in ('sbr-sms-whatsapp', 'sbr-pager-sms-gateway', 'racher-sms-openwa'):
         code, output = run(['docker', 'inspect', name, '--format', '{{json .State}}'])
         try:
             state = json.loads(output)
