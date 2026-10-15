@@ -18,7 +18,7 @@ done
 
 git pull --ff-only
 
-for stack in compose/core compose/data compose/minutregnskab compose/indsatsbrief compose/control-center compose/vagtbytte; do
+for stack in compose/core compose/data compose/minutregnskab compose/indsatsbrief compose/control-center compose/vagtbytte compose/sbr-portal; do
   compose_file="$stack/compose.yml"
   if [[ ! -f "$compose_file" ]]; then
     echo "Springer over $stack: $compose_file findes ikke"

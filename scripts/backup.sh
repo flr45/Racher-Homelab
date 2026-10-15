@@ -42,6 +42,8 @@ CONTROL_CENTER_GID="${CONTROL_CENTER_GID:-$(read_env_value CONTROL_CENTER_GID)}"
 CONTROL_CENTER_GID="${CONTROL_CENTER_GID:-1001}"
 POSTGRES_USER="${POSTGRES_USER:-$(read_env_value POSTGRES_USER)}"
 POSTGRES_DB="${POSTGRES_DB:-$(read_env_value POSTGRES_DB)}"
+SBR_PORTAL_DB_NAME="${SBR_PORTAL_DB_NAME:-$(read_env_value SBR_PORTAL_DB_NAME)}"
+SBR_PORTAL_DB_NAME="${SBR_PORTAL_DB_NAME:-sbr_portal}"
 NPM_DB_USER="${NPM_DB_USER:-$(read_env_value NPM_DB_USER)}"
 NPM_DB_PASSWORD="${NPM_DB_PASSWORD:-$(read_env_value NPM_DB_PASSWORD)}"
 NPM_DB_NAME="${NPM_DB_NAME:-$(read_env_value NPM_DB_NAME)}"
@@ -124,6 +126,18 @@ else
   fail "PostgreSQL-containeren kører ikke."
 fi
 
+if docker exec postgres psql --username "$POSTGRES_USER" --dbname postgres --tuples-only --no-align --command "SELECT 1 FROM pg_database WHERE datname = '$SBR_PORTAL_DB_NAME'" | grep -qx 1; then
+  log "Opretter konsistent PostgreSQL-dump af SBR Portal"
+  docker exec postgres pg_dump \
+    --username "$POSTGRES_USER" \
+    --dbname "$SBR_PORTAL_DB_NAME" \
+    --format=custom \
+    --no-owner \
+    --no-privileges > "$DEST/postgres-sbr-portal.dump"
+else
+  log "Springer over SBR Portal-databasen: $SBR_PORTAL_DB_NAME findes ikke"
+fi
+
 if container_running npm-db; then
   log "Opretter konsistent MariaDB-dump til Nginx Proxy Manager"
   docker exec \
@@ -174,6 +188,7 @@ backup_volume racher-homelab-core_uptime_kuma_data uptime-kuma
 backup_volume racher-homelab-data_redis_data redis
 backup_volume vagtbytte_vagtbytte_backups vagtbytte-backups
 backup_volume vagtbytte_vagtbytte_operativ_portal vagtbytte-operativ-portal
+backup_volume sbr-portal_sbr_portal_operativ sbr-portal-operativ
 backup_volume sms-gateway_sms_gateway_data sms-gateway
 backup_volume minutregnskab_data minutregnskab
 backup_volume ordberedskab_ordberedskab_data ordberedskab
@@ -191,6 +206,7 @@ cat > "$DEST/MANIFEST.json" <<EOF
   "control_center_container": "$CONTROL_CENTER_CONTAINER",
   "control_center_data_dir": "$CONTROL_CENTER_DATA_DIR",
   "postgres_database": "$POSTGRES_DB",
+  "sbr_portal_database": "$SBR_PORTAL_DB_NAME",
   "npm_database": "$NPM_DB_NAME"
 }
 EOF

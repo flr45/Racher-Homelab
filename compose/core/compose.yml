@@ -97,7 +97,7 @@ services:
       NPM_URL: ${CONTROL_CENTER_NPM_URL:-http://racher-pi.local:81}
       SMS_GATEWAY_HEALTH_URL: ${CONTROL_CENTER_SMS_GATEWAY_HEALTH_URL:-http://sms-gateway:8080/health}
       VAGTBYTTE_HEALTH_URL: ${CONTROL_CENTER_VAGTBYTTE_HEALTH_URL:-http://vagtbytte-web:3000/api/health}
-      OPERATIONS_STATUS_CONTAINERS: ${RACHER_MONITOR_CONTAINERS:-nginx-proxy-manager,control-center,portainer,uptime-kuma,npm-db,postgres,redis,vagtbytte-web,vagtbytte-worker,racher-sms-gateway,minutregnskab,cloudflared}
+      OPERATIONS_STATUS_CONTAINERS: ${RACHER_MONITOR_CONTAINERS:-nginx-proxy-manager,control-center,portainer,uptime-kuma,npm-db,postgres,redis,vagtbytte-web,vagtbytte-worker,sbr-portal-web,racher-sms-gateway,minutregnskab,cloudflared}
       VAGTBYTTE_BACKUP_MAX_AGE_HOURS: ${RACHER_MONITOR_BACKUP_MAX_HOURS:-30}
       APP_ACTIONS_ENABLED: ${APP_ACTIONS_ENABLED:-false}
       RBAC_ADMIN_EMAILS: ${RBAC_ADMIN_EMAILS:-}

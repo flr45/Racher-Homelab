@@ -1,0 +1,42 @@
+name: sbr-portal
+
+services:
+  sbr-portal-web:
+    image: ${SBR_PORTAL_IMAGE:-ghcr.io/flr45/sbr-portal:latest}
+    container_name: sbr-portal-web
+    restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    environment:
+      TZ: ${TZ:-Europe/Copenhagen}
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: postgresql://${SBR_PORTAL_DB_USER}:${SBR_PORTAL_DB_PASSWORD}@postgres:5432/${SBR_PORTAL_DB_NAME:-sbr_portal}?schema=public
+      AUTH_SECRET: ${SBR_PORTAL_AUTH_SECRET}
+      APP_BASE_URL: ${SBR_PORTAL_APP_BASE_URL:-}
+      MFA_ISSUER: SBR Portal
+      OPERATIV_PORTAL_DATA_DIRECTORY: /data/operativ-portal
+    command: ["sh", "-c", "npm run db:deploy && node server.js"]
+    expose:
+      - "3000"
+    volumes:
+      - sbr_portal_operativ:/data/operativ-portal
+    networks:
+      - proxy
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  sbr_portal_operativ:
+
+networks:
+  proxy:
+    external: true
+  backend:
+    external: true
