@@ -573,3 +573,25 @@ rulle applikationsimages tilbage. Efter installation kræves stadig en fysisk
 kort og delt SMS-test, WhatsApp-modtagelse på telefonen og kontrol af genopretning.
 En Cudy native web-indbakke, der fjerner beskeder fra modemlageret før AT-
 readerens læsning, er fortsat en firmwareafhængig begrænsning.
+
+## Cudy-opfølgning 15. oktober 2026
+
+Installationen af `556a8cb` på racherserver gennemførte backup, image-builds
+og opstart. Efter opstart var alle statuskontroller grønne, og en fysisk kort
+SMS blev modtaget og videresendt. Den lange test blev sendt tre gange, men kun
+ét langt forsøg ses i Pager. De to dele af dette forsøg var til stede ved
+første komplette aflæsning; importen kom cirka 15 sekunder efter SMSC-tiden,
+og WhatsApp-afsendelsen blev registreret cirka seks sekunder efter importen.
+Modtagelsens stabilitet er derfor endnu ikke fysisk godkendt.
+
+Serverens egen AT-formular indeholder submit-knappen
+`cbid.atcmd.1.refresh`. Adapteren medsender nu dens aktuelle formularværdi,
+også efter et nyt login. Manglende/tomme AT-svar viser nu den berørte kommando
+og svarlængden, uden at skrive SMS-indhold eller formularhemmeligheder i loggen.
+Der er ingen nye automatiske genforsøg af AT-kommandoer. Den tidligere tekst,
+der generelt lovede at beholde SMS på routeren ved et ukendt svar, er fjernet:
+et ukendt svar på en sletning beviser ikke, om sletningen blev udført.
+
+En regressionstest kræver den observerede submit-knap, både ved normal drift
+og efter sessionsudløb. Den fysiske retest skal sende hver kort/lang besked
+præcis én gang og kontrollere hele teksten samt efterfølgende AT-fejl i loggen.

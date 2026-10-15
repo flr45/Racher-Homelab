@@ -185,16 +185,14 @@ class CudyClient:
             raise CudyError("Denne AT-kommando er ikke tilladt i Cudy-adapteren")
         if self.at_form is None:
             self.connect()
-        fields = dict(self.at_form["fields"])
-        fields.update({self.COMMAND_FIELD: command, "cbi.submit": "1", "timeclock": str(int(time.time()))})
+        fields = self._command_fields(command)
         action = urllib.parse.urljoin(self.at_url, self.at_form["action"] or self.at_url)
         page = self._request(action, fields)
         if page.containing("luci_password"):
             # The login form proves the command was not accepted. Retry once.
             self.at_form = None
             self.connect()
-            fields = dict(self.at_form["fields"])
-            fields.update({self.COMMAND_FIELD: command, "cbi.submit": "1", "timeclock": str(int(time.time()))})
+            fields = self._command_fields(command)
             page = self._request(urllib.parse.urljoin(self.at_url, self.at_form["action"] or self.at_url), fields)
         form = page.containing(self.COMMAND_FIELD)
         if form:
@@ -202,8 +200,26 @@ class CudyClient:
         result = page.textareas.get(self.RESULT_FIELD)
         if not result or not re.search(r"(?:^|\n)\s*(?:OK|ERROR|\+CM[ES] ERROR:.*)\s*(?:\n|$)", result.replace("\r", "")):
             self.at_form = None
-            raise CudyError("Cudy gav ikke et genkendeligt AT-svar; SMS beholdes på routeren")
+            kind = "mangler" if result is None else "tomt" if not result.strip() else "ufuldstændigt"
+            # Identify the failing operation without logging HTML, tokens or
+            # SMS/PDU contents. A lost deletion response does not prove that
+            # the modem retained the message, so do not promise that here.
+            raise CudyError(
+                f"Cudy gav ikke et genkendeligt AT-svar til {command} "
+                f"(resultatfelt={kind}, tegn={len(result or '')})"
+            )
         return result
+
+    def _command_fields(self, command: str) -> dict:
+        fields = dict(self.at_form["fields"])
+        fields.update({self.COMMAND_FIELD: command, "cbi.submit": "1", "timeclock": str(int(time.time()))})
+        # Match the clicked submit button on the observed LT300 AT form.
+        # Rebuild from the current form after login/token renewal as well.
+        refresh = "cbid.atcmd.1.refresh"
+        buttons = self.at_form.get("buttons", {})
+        if refresh in buttons:
+            fields[refresh] = buttons[refresh]
+        return fields
 
     def prepare_sms(self, recipient: str, body: str):
         """Validate and prepare the observed LT300 V3 SMS form.

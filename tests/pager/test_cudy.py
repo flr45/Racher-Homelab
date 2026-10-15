@@ -51,6 +51,66 @@ def test_official_form_login_challenge_and_session_expiry():
     assert len([req for req in router.requests if req.data and b'luci_password' in req.data]) == 2
 
 
+@pytest.mark.parametrize("expire", [False, True])
+def test_at_command_submits_observed_button_including_after_session_expiry(expire):
+    class SubmitRouter(Router):
+        # Observed on the user's LT300 V3 and the official V2/V3 AT forms.
+        # An ordinary browser includes the clicked submit button in its POST.
+        button_value = "AT Command"
+
+        def page(self, document):
+            if 'name="cbid.atcmd.1.command"' in document:
+                document = document.replace('</form>',
+                    '<button type="submit" name="cbid.atcmd.1.refresh" '
+                    f'value="{self.button_value}">AT Command</button></form>')
+            return document
+
+        def open(self, request, timeout):
+            body = request.data.decode() if request.data else ""
+            if 'name="cbid.atcmd.1.command"' in body:
+                expected = 'name="cbid.atcmd.1.refresh"\r\n\r\n' + self.button_value
+                if expected not in body:
+                    self.requests.append(request)
+                    return Response(self.page(FORM.format(result="")).encode())
+            response = super().open(request, timeout)
+            document = response.read().decode()
+            response.close()
+            if 'name="luci_password"' in body:
+                self.button_value = "AT Command after login"
+            return Response(self.page(document).encode())
+
+    router = SubmitRouter()
+    router.logged_in = True
+    router.expire_once = expire
+    client = CudyClient("http://192.168.10.1", password="päss", opener=router)
+    assert "+CSQ: 21" in client.command("AT+CSQ")
+    posts = [req for req in router.requests
+             if req.data and b'name="cbid.atcmd.1.command"' in req.data]
+    assert len(posts) == (2 if expire else 1)
+
+
+@pytest.mark.parametrize("result", [None, "", "private SMS body without a terminal result"])
+def test_unconfirmed_at_result_identifies_command_without_exposing_response(result):
+    requests = []
+
+    def open_page(request, timeout):
+        requests.append(request)
+        document = FORM.format(result=result or "")
+        if result is None:
+            document = document[:document.index('<textarea')]
+        return Response(document.encode())
+
+    client = CudyClient(opener=type('Router', (), {'open': staticmethod(open_page)})())
+    with pytest.raises(CudyError) as error:
+        client.command("AT+CMGD=7")
+    detail = str(error.value)
+    assert "AT+CMGD=7" in detail
+    assert "tegn=" in detail
+    assert "private SMS body" not in detail and "at-token" not in detail
+    # A missing result must not cause an ambiguous deletion to be retried.
+    assert len([req for req in requests if req.data]) == 1
+
+
 @pytest.mark.parametrize("status", [401, 403])
 def test_http_login_challenge_and_expired_session(status):
     router = Router()
