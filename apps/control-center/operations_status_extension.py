@@ -37,7 +37,7 @@ DEFAULT_REQUIRED_CONTAINERS = (
     "redis",
     "vagtbytte-web",
     "vagtbytte-worker",
-    "racher-sms-gateway",
+    "sbr-pager-sms-gateway",
     "minutregnskab",
     "cloudflared",
 )
@@ -504,7 +504,7 @@ def build_operations_status_report():
 
     cards = [
         *_host_cards(),
-        _sms_card(sms_result, container_map.get("racher-sms-gateway")),
+        _sms_card(sms_result, container_map.get("sbr-pager-sms-gateway")),
         _vagtbytte_card(vagtbytte_result, container_map.get("vagtbytte-web")),
         _backup_card(homelab_backup, vagtbytte_backup),
         _cloudflare_card(container_map.get("cloudflared")),

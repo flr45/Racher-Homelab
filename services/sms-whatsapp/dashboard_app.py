@@ -231,6 +231,7 @@ for _delete_endpoint in ("delete_alarm_event", "delete_alarm_events"):
 import operations
 app.config["PAGER_OPERATION_ENDPOINTS"] = ["message_detail"]
 STATUS_LABELS.update(sending="Afsender", held="Afventer godkendelse", uncertain="Ukendt udfald", pilot="Prøvetilstand")
+STATUS_LABELS.update(disconnected="Afbrudt", qr_ready="Scan QR-kode", auth_failure="Parring kræves", authenticated="Login godkendt · starter", starting="Starter")
 # Configuration writes must not change recipients halfway through a send.
 for _endpoint in operations.AUDIT_ENDPOINTS:
     if _endpoint in app.view_functions:
@@ -250,8 +251,9 @@ import offsite_backup
 import resilience
 
 # No pending job may run before operational controls and crash recovery.
-with app.app_context():
-    operations.recover_interrupted_alarms()
+if deliveries.RETRY_WORKER_ENABLED:
+    with app.app_context():
+        operations.recover_interrupted_alarms()
 deliveries.start_retry_worker()
 resilience.start_monitor()
 offsite_backup.start_worker()

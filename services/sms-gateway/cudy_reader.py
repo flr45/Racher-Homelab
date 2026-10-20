@@ -24,6 +24,7 @@ MAX_SMS_CHARS = max(
     1,
     min(160, int(os.getenv("CUDY_SMS_MAX_CHARS", "70"))),
 )
+OUTBOX_BATCH_SIZE = min(reader.OUTBOX_BATCH_SIZE, max(1, int(os.getenv("CUDY_OUTBOX_BATCH_SIZE", "1"))))
 
 
 def registered(response):
@@ -92,7 +93,9 @@ def outgoing_sms_parts(message: dict) -> list[str]:
     total_guess = 2
     while True:
         longest_prefix = f"[SBR {tag} {total_guess}/{total_guess}] "
-        width = max(1, MAX_SMS_CHARS - len(longest_prefix))
+        width = MAX_SMS_CHARS - len(longest_prefix)
+        if width < 1:
+            raise ValueError("CUDY_SMS_MAX_CHARS er for lille til en SMS-del med jobmarkør")
         chunks = textwrap.wrap(
             body,
             width=width,
@@ -118,16 +121,17 @@ def process_outbox(client):
         return
 
     processed = 0
-    while reader.running and processed < reader.OUTBOX_BATCH_SIZE:
+    # Return to incoming polling between jobs; a 20-job SMS batch used to
+    # monopolize the only router/modem owner during an alarm burst.
+    while reader.running and processed < OUTBOX_BATCH_SIZE:
         message = reader.claim_outgoing()
         if message is None:
             return
 
         message_id = message["id"]
         recipient = message["recipient"]
-        parts = outgoing_sms_parts(message)
-
         try:
+            parts = outgoing_sms_parts(message)
             cfgs = []
             missing_parts = []
 
@@ -195,7 +199,7 @@ def process_outbox(client):
                 message_id,
                 "failed",
                 error=str(exc),
-                retry=True,
+                retry=not isinstance(exc, ValueError),
             )
             reader.write_status(
                 state="degraded",

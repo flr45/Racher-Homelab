@@ -12,6 +12,7 @@ on:
       - 'scripts/sbr-pager-boot.sh'
       - 'scripts/sbr-modem-watchdog.sh'
       - 'scripts/update-sbr-pager.sh'
+      - 'scripts/update-openwa.py'
       - 'tests/pager/**'
       - '.github/workflows/sbr-pager-linux-ci.yml'
   push:
@@ -27,6 +28,7 @@ on:
       - 'scripts/sbr-pager-boot.sh'
       - 'scripts/sbr-modem-watchdog.sh'
       - 'scripts/update-sbr-pager.sh'
+      - 'scripts/update-openwa.py'
       - 'tests/pager/**'
       - '.github/workflows/sbr-pager-linux-ci.yml'
   workflow_dispatch:
@@ -44,7 +46,7 @@ jobs:
       - name: Compile SBR Pager Python
         run: |
           python -m compileall -q services/sms-whatsapp services/sms-gateway
-          python -m py_compile scripts/sbr-pager-watchdog.py
+          python -m py_compile scripts/sbr-pager-watchdog.py scripts/update-openwa.py
           bash -n scripts/sbr-pager-boot.sh scripts/sbr-modem-watchdog.sh scripts/update-sbr-pager.sh
           sh -n services/sms-gateway/entrypoint.sh
 
@@ -55,6 +57,13 @@ jobs:
 
       - name: Test delivery recovery, UI, USB and Cudy transport
         run: python -m pytest -q tests/pager
+
+      - name: Verify pinned OpenWA image and full data rollback utilities
+        env:
+          SBR_TEST_OPENWA_DOCKER: '1'
+        run: |
+          docker pull ghcr.io/rmyndharis/openwa:0.25.0
+          python -m pytest -q tests/pager/test_openwa_update_docker.py
 
       - name: Validate watchdog systemd units
         run: |

@@ -245,7 +245,7 @@ STEPS=[
  ('restart','Genstart','Brug vedligeholdelse, gem en test i køen og genstart Pager efter backup. Kontrollér kø og tilstand. Godkend kun tilbageholdte testjobs efter kontrol.'),
  ('outage','Internetudfald','Afbryd internet kortvarigt med lokal adgang og mulighed for at forbinde igen. Kontrollér offline-status, bevaret testkø og genopretning; ingen rigtige alarmer bruges til testen.'),
  ('usb','USB-backup','Ved LT300: afprøv det manuelle skift tilbage til USB med samme SIM. Kontrollér én testmodtagelse, og vælg derefter den ønskede primære kilde.'),
- ('smsout','Udgående SMS','USB-afsendelse kan afprøves særskilt. LT300-afsendelse er uverificeret og skal markeres Afventer, indtil firmware og fysisk afsendelse er undersøgt.'),
+ ('smsout','Udgående SMS','Send én tydeligt markeret prøve-SMS gennem programmets kø. Kontrollér modtagelse på telefonen; en Cudy Outbox-post alene er ikke en leveringskvittering.'),
  ('release','Normal drift','Vælg normal drift og korrekt SMS-kilde, kontrollér modtagere, kø, backup og watchdogs. Gem eventuelle udeståender før ibrugtagning.')]
 
 @app.get('/indkoering')
@@ -264,7 +264,11 @@ def save_commissioning(driver,step):
     result=request.form.get('result')
     if driver not in ('usb','cudy') or step not in {s[0] for s in STEPS} or result not in {'pending','passed','failed','skipped'}:abort(400)
     if result=='passed' and request.form.get('confirm')!='1':abort(400,'Bekræft at testen er udført fysisk')
-    if driver=='cudy' and step=='smsout' and result=='passed':abort(409,'LT300-afsendelse er endnu ikke understøttet eller verificeret')
+    if driver=='cudy' and step=='smsout' and result=='passed':
+        import dashboard_app
+        modem=dashboard_app.gateway_status().get('modem') or {}
+        if modem.get('transport')!='cudy' or modem.get('state')!='online' or modem.get('capability')!='send-receive':
+            abort(409,'Aktivér og kontrollér Cudy-afsendelse før en fysisk leveringstest kan godkendes')
     row=CommissioningStep.query.filter_by(driver=driver,step=step).first()
     if not row:row=CommissioningStep(driver=driver,step=step,result=result,actor=base.audit_actor());db.session.add(row)
     row.result,row.notes,row.actor,row.updated_at=result,request.form.get('notes','').strip()[:1000],base.audit_actor(),base.utcnow()

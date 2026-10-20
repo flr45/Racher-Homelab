@@ -121,12 +121,12 @@ target.close(); source.close()
   chmod 600 "$BACKUP_DIR/$database"
 }
 backup_db sbr-sms-whatsapp sms-whatsapp.db
-backup_db racher-sms-gateway sms-gateway.db
+backup_db sbr-pager-sms-gateway sms-gateway.db
 
 PAGER_ROLLBACK="sbr-pager-rollback:$STAMP"
 GATEWAY_ROLLBACK="sbr-gateway-rollback:$STAMP"
 docker tag "$(docker inspect sbr-sms-whatsapp --format '{{.Image}}')" "$PAGER_ROLLBACK"
-docker tag "$(docker inspect racher-sms-gateway --format '{{.Image}}')" "$GATEWAY_ROLLBACK"
+docker tag "$(docker inspect sbr-pager-sms-gateway --format '{{.Image}}')" "$GATEWAY_ROLLBACK"
 printf 'services:\n  sms-whatsapp:\n    image: %s\n' "$PAGER_ROLLBACK" > "$BACKUP_DIR/rollback-pager.yml"
 printf 'services:\n  sms-gateway:\n    image: %s\n' "$GATEWAY_ROLLBACK" > "$BACKUP_DIR/rollback-gateway.yml"
 
@@ -175,8 +175,8 @@ BOOT_CHANGED=true
 "${GW[@]}" up -d --no-build --no-deps sms-gateway
 
 check_health() {
-  docker exec sbr-sms-whatsapp python -c 'import json,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=6)); assert d["database"] == "online"' >/dev/null 2>&1 &&
-  docker exec racher-sms-gateway python -c 'import json,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=6)); assert d["gateway"]["database"] == "online" and d["modem"]["state"] == "online"' >/dev/null 2>&1
+  docker exec sbr-sms-whatsapp python -c 'import json,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health/live", timeout=6)); assert d["database"] == "online"' >/dev/null 2>&1 &&
+  docker exec sbr-pager-sms-gateway python -c 'import json,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=6)); assert d["gateway"]["database"] == "online" and d["modem"]["state"] == "online"' >/dev/null 2>&1
 }
 READY=false
 for ((attempt = 0; attempt < 18; attempt++)); do

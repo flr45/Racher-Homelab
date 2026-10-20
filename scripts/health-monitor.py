@@ -27,7 +27,7 @@ STATE_FILE = Path(
 )
 DEFAULT_CONTAINERS = (
     "nginx-proxy-manager,control-center,portainer,uptime-kuma,npm-db,"
-    "postgres,redis,vagtbytte-web,vagtbytte-worker,racher-sms-gateway,"
+    "postgres,redis,vagtbytte-web,vagtbytte-worker,sbr-pager-sms-gateway,"
     "minutregnskab,cloudflared"
 )
 
@@ -324,7 +324,7 @@ def send_sms_direct(body: str, recipient: str) -> None:
             f"ALERT_TO={recipient}",
             "-e",
             f"ALERT_BODY={sms_text(body)}",
-            "racher-sms-gateway",
+            "sbr-pager-sms-gateway",
             "python",
             "-c",
             code,
