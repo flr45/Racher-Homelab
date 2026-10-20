@@ -352,246 +352,76 @@ Udgående SMS via LT300 bruger nu den afprøvede webformular gennem den vedvaren
 
 Mobilvisningen har en sammenklappelig menu og genveje til enkeltpersonstest, fejl og drift. Beskedhistorikkens seneste søgefiltre huskes i browserens login-session; **Nulstil** rydder dem. En anden browser har egne filtre.
 
-**Indkøring** har separate, manuelt udfyldte LT300- og USB-forløb med 12 kontrolpunkter: backup, internet/LAN, modem, kort og delt SMS, stationsvalg, WhatsApp, genstart, afbrudt forbindelse, USB-skift, udgående SMS og normal drift. Gem resultat og noter efter den fysiske test. Bestået kræver en særskilt bekræftelse og gemmes i ændringsloggen; siden sender ingen beskeder. LT300-afsendelse kan markeres bestået, når den aktive Cudy-reader understøtter afsendelse, og operatøren udtrykkeligt bekræfter fysisk modtagelse på telefonen.
-
-De nye tabeller til forsøgsmålinger, backupkontrol og indkøringsresultater er additive. En fuld restore kræver en backup med det aktuelle databaseskema; tidligere konfigurationsbackups kan stadig bruges til opsætningsgendannelse.
-
-## Driftsværn, personlige logins og ekstern backup
-
-**Administratorer** opretter personlige administrator- og læsekonti. Det eksisterende miljølogin bevares som nødadgang, men fremgår som miljølogin i ændringsloggen. Adgangskoder er saltede scrypt-hashes; adgangskoder og hashes skrives ikke i ændringsloggen. En kontoændring afslutter kontoens eksisterende sessioner. Den sidste aktive personlige administrator kan ikke deaktiveres eller ændres til læseadgang. Loginforsøg begrænses pr. kilde/brugernavn. Ældre login-cookies kræver nyt login efter opdateringen; fuld databasegendannelse afslutter alle eksisterende login-sessioner. Opsætningsgendannelse ændrer ikke operatørkonti.
-
-Læsekonti kan se alarmhistorik, modtagere og drift. Ændringer og afsendelse afvises på serveren; formularerne deaktiveres også i visningen. Kontoadministration og download af den fulde databasebackup kræver administratoradgang. Et nyt personligt login ændrer ikke alarmmodtagerens stationsvalg.
-
-### Målinger og driftsbeskeder
-
-**Driftsværn** måler internet, modem, WhatsApp, kø og lager cirka hvert minut i en særskilt tråd. Der oprettes kun historik ved ændret forbindelse, med en særskilt første observation. Højst 10.000 tilstandsskift og 90 dages historik beholdes; siden viser de seneste 200. Tidspunkterne afslører forældede målinger. Korte udfald mellem målingerne og perioder, hvor programmet er stoppet, kan ikke måles. Selve serverens nedetid skal overvåges fra en anden maskine.
-
-Diskkontrollen måler Pagers datavolumen og database/journalstørrelse. Standardadvarsel er mindre end 512 MiB eller 10 % ledig plads. SMS-lageret læses med `AT+CPMS?` af den eksisterende ene modemejer og varsles ved 80 %. Manglende firmwareunderstøttelse vises som ukendt og stopper ikke SMS-readerens drift. Ingen SMS slettes af kontrollen.
-
-Driftsbeskeder er **deaktiveret som standard**. Vælg én separat kanal på serveren, og aktivér derefter under Driftsværn. Aktive fejl kan udløse beskeder efter aktivering. Der sendes ingen testbesked med Gem. Kanaloplysninger og hemmeligheder vises ikke i UI eller eksport.
-
-Eksempel på en HTTPS-webhook, som accepterer JSON med felterne `title`, `message`, `component` og `recovered`:
-
-```dotenv
-SMS_WHATSAPP_ALERT_CHANNEL=webhook
-SMS_WHATSAPP_ALERT_WEBHOOK_URL=https://DIN_DRIFTSKANAL/endpoint
-SMS_WHATSAPP_ALERT_WEBHOOK_TOKEN='DIT_SEPARATE_TOKEN'
-```
-
-HTTP-redirects følges ikke, så bearer-token ikke videresendes. Alternativt mail via TLS:
-
-```dotenv
-SMS_WHATSAPP_ALERT_CHANNEL=smtp
-SMS_WHATSAPP_ALERT_SMTP_HOST=DIN_MAILSERVER
-SMS_WHATSAPP_ALERT_SMTP_PORT=587
-SMS_WHATSAPP_ALERT_SMTP_MODE=starttls
-SMS_WHATSAPP_ALERT_SMTP_USERNAME=DIT_LOGIN
-SMS_WHATSAPP_ALERT_SMTP_PASSWORD='DIN_ADGANGSKODE'
-SMS_WHATSAPP_ALERT_FROM=pager@DIT_DOMAENE.dk
-SMS_WHATSAPP_ALERT_TO=DIN_EGEN_MAIL@DIT_DOMAENE.dk
-```
-
-For implicit TLS bruges `ssl` og normalt port 465. Certifikatkontrol er aktiveret; der er ingen ukrypteret SMTP-tilstand. Begge kanaler bruger internet, men er uafhængige af OpenWA. Et komplet internetudfald eller slukket server kan derfor ikke varsles gennem denne lokale funktion.
-
-Efter genstart er der fem minutters opstartsro, så modem og OpenWA kan blive klar. Derefter varsles vedvarende fejl efter den valgte forsinkelse, normalt 120 sekunder. Gentagelser begrænses normalt til én gang i timen pr. komponent. Fejlede afleveringer kan genforsøges efter fem minutter; timeout kan give en gentagen driftsbesked, hvis kanalen allerede modtog den. Genoprettelsesbesked sendes kun efter en tidligere afleveret advarsel. Beskeder indeholder ingen alarmtekst eller telefonnumre. Køvarsling gælder normalt 20 jobs, fem minutters ventetid eller tilbageholdte jobs; bevidst vedligeholdelse/prøvetilstand udløser ikke køvarsler. Fejl i aktiv ekstern backup kan også varsles.
-
-### Krypteret kopi til anden maskine
-
-Den anden maskines mappe skal først monteres på **racherserver**, fx en mappe fra racher-pi/NAS. Valg af maskine, sti og mountmetode sker ved installationen. Programmet opretter ikke selv en netværksforbindelse eller indsamler SSH-/NAS-adgangskoder.
-
-Opret på den reelle destination en fil `.sbr-pager-offsite` med indholdet `SBR-PAGER-OFFSITE-v1`. Filen må kun ligge på den monterede destination, så kontrollen stopper, hvis mountet forsvinder og blot efterlader en tom lokal mappe. Mappen skal kunne læses og skrives af containerens uid 10001. En lokal mappe uden et reelt eksternt mount er ikke beskyttelse mod diskfejl.
-
-Generér en separat nøgle uden at vise den på skærmen, efter at den nye image er bygget. Hjælperen understøtter:
-
-```bash
-python encrypted_backup.py key --output /DIN_PRIVATE_STI/pager-offsite.key
-```
-
-Hjælperen kræver projektets Python-afhængigheder og findes også som `/app/encrypted_backup.py` i den nye Pager-container. Den overskriver ikke eksisterende nøglefiler. Nøglen skal kunne læses af containerens uid 10001 med private filrettigheder. Gem også en sikker kopi af nøglen uden for serveren, adskilt fra backuparkivet. Uden nøglen kan kopien ikke gendannes. Nøglen indgår aldrig i backuparkivet.
-
-Tilføj disse eksisterende, absolutte værtsstier i `.env`:
-
-```dotenv
-SMS_WHATSAPP_OFFSITE_MOUNT=true
-SMS_WHATSAPP_OFFSITE_HOST_DIR=/DIN_MONTEREDE_MAPPE/pager-backup
-SMS_WHATSAPP_OFFSITE_KEY_HOST_FILE=/DIN_PRIVATE_STI/pager-offsite.key
-```
-
-Opdateringsscript, boot, watchdog og fuld restore inkluderer derefter automatisk `compose/sms-whatsapp/offsite-backup.yml`. Ved manuelle Compose-kommandoer skal filen også med, så mount og nøgle bevares:
-
-```bash
-docker compose --env-file .env -f compose/sms-whatsapp/compose.yml -f compose/sms-whatsapp/offsite-backup.yml up -d --no-deps sms-whatsapp
-```
-
-Aktivér derefter **Automatisk krypteret backupkopi** under Driftsværn. En separat kopieringsarbejder pakker den seneste konsistente SQLite-/opsætningsbackup og krypterer med [Fernet](https://cryptography.io/en/latest/fernet/). Den skriver atomisk på destinationen og læser indholdet tilbage til verifikation. En manglende eller forkert mount-markør, nøgle eller rettighed giver fejlstatus; den lokale backup og aktive jobs bevares. En langsom netværksdisk kan holde kopieringsarbejderen, men holder ikke alarmlevering eller driftsmonitor. En kopi, der har været i gang i over ti minutter, eller en seneste succes ældre end 36 timer vises som forældet. Genforsøg sker højst én gang i timen. Nøglerotation skaber en ny fil; gamle nøgler skal beholdes til de gamle kopier.
-
-Denne første version understøtter højst 32 MiB ukrypteret SQLite/JSON pr. kopi for at begrænse hukommelsesforbruget. En større backup fejler tydeligt og kræver en senere streamingløsning. Eksterne backupfiler slettes ikke automatisk; højst 100 lokale overførselsresultater beholdes. Hver ny kopi dekrypteres og prøvegendannes nu i en isoleret midlertidig database. Skema, integritet, fremmednøgler og annullering af gamle afsendelsesjobs kontrolleres. Det erstatter ikke en øvelse med en helt ny server og de separate nøgler.
-
-Dekryptér kun til en **ny mappe**, fx med hjælperen i den nye image:
-
-```bash
-python encrypted_backup.py decrypt --input /STI/pager-backup.fernet --key /DIN_PRIVATE_STI/pager-offsite.key --output /NY_MAPPE
-```
-
-Kopien indeholder `pager.sqlite`, `pager.json` og kontrolsummer. Forkert nøgle, ændret indhold, uventede arkivstier og eksisterende målmapper afvises. Kontroller derefter SQLite-filen og brug den eksisterende eksplicitte, samme-skema restore på den stoppede Pager. Dekryptering starter ingen jobs og overskriver ikke driftsdata. Eksterne destinations- og kanaltests mangler, indtil de reelle oplysninger vælges ved installationen.
-
-## Alarmkort og samlet sletning
-
-Kortbiblioteket Leaflet 1.9.4 leveres nu lokalt med programmet; licensen ligger
-ved de pakkede filer. Baggrundskortet kommer fortsat fra OpenStreetMap og kræver
-internet. Kortet viser en fejltekst ved manglende kortfelter og forklarer, når
-ingen hændelser har gemte koordinater. Eksisterende manuelle placeringer bevares.
-
-DAWA lukkede 1. oktober 2026. Standardopslaget anvender derfor KDS Adressevask
-og derefter Adressevælgerens adresse-ID-opslag. Kun entydige matches (1000/900)
-gemmes; intervaladresser bliver ikke placeret ved gæt. EPSG:25832-koordinater
-konverteres til kortets WGS84. Et tidligere eksplicit DAWA-URL i `.env` skal
-ændres til `SMS_WHATSAPP_GEOCODER_URL=https://adressevaelger.dk/vask/`.
-Token sættes via `SMS_WHATSAPP_GEOCODER_TOKEN`; KDS anbefaler aktuelt
-`adressevaelger123`, indtil brugerstyring indføres. Adresseopslag sker i
-baggrunden og blokerer ikke WhatsApp. Liveopslag fra racherserver skal verificeres.
-
-Gamle hændelser uden placering kan behandles efter opdateringen:
-
-```bash
-docker exec -i sbr-sms-whatsapp python - <<'PYCODE'
-import geocode_app
-print(geocode_app.backfill_missing_locations(limit=100))
-PYCODE
-```
-
-På Alarmstatistik kan administratorer markere enkelte eller alle viste
-hændelser (højst 200). `Slet valgte` viser antallet og kræver en bekræftelse.
-Sletningen fjerner de valgte lokale hændelser, SMS-data, leveringer, ventende
-jobs og placeringer i én transaktion; allerede udsendte WhatsApp-beskeder
-berøres ikke. En forældet markering afviser hele sletningen. Ændringsloggen
-gemmer operatør og hændelsesnumre, uden beskedtekst. Læseadgang kan ikke slette.
-
-LT300 V3 understøtter WISP og failover i rækkefølgen WAN → WISP → Cellular
-ifølge Cudys produktspecifikation. Uden en aktiv WAN-forbindelse kan tilsluttet
-Wi-Fi via WISP være primært, med mobilnet som reserve. Afprøv SMS-modtagelse
-både med Wi-Fi aktivt og efter udfald; SIM/modem skal fortsat være registreret,
-og routerens egen SMS-læser skal fortsat være slået fra.
-
-Kilder: [KDS Adressevask](https://confluence.kds.dk/display/ADV/Adressevask),
-[KDS token](https://confluence.kds.dk/display/ADV/Brugerstyring),
-[Cudy LT300 V3](https://www.cudy.com/en-us/products/lt300-3-0).
-
-
-Kortets browserkald til OpenStreetMap sender nu hjemmesidens origin som
-Referer. Den tidligere `same-origin`-politik skjulte Referer og var i strid
-med OSMs krav; operatørens skærmbillede viste derfor "Access blocked"-felter.
-Kortsiderne bruger `strict-origin-when-cross-origin`, og kortbillederne har
-samme eksplicitte politik. Alarmsti og parametre sendes ikke til OSM.
-Andre administratorsider beholder `same-origin`. En indlæst billedfil
-kaldes ikke længere "Kortet er klar", da OSM også kan returnere en blokering
-som et billede. Genindlæs kortet normalt efter opdateringen; undgå gentagne
-hårde genindlæsninger, som kan omgå browserens cache.
-
-
-## Driftsforbedringer efter LT300-idriftsættelse
-
-- Overblikket advarer om ufuldstændige SMS'er efter 60 sekunder eller straks, hvis delene er forsvundet. Forældede gatewaydata udlægges ikke som en ny konstateret SMS-fejl.
-- Alarmkortet kan filtreres på station og dansk lokal dato. Overlappende markører samles med en tæller og links til alarmerne. Højst 1.000 placerede alarmer vises; de seneste 100 uden placering vises separat.
-- Opdateringsscriptet installerer også den kopierede opstartsfil og gendanner den ved rollback. Efter opdateringen køres `python3 scripts/check-sbr-pager.py`. Kontrollen viser container-, systemd-, modem-, internet-, WhatsApp- og multipartstatus. Den sender ingen testbeskeder og starter ingen afsendelsesarbejdere.
-- Ekstern backup afprøver hver ny kopi med en isoleret gendannelse. Destination og nøgle skal stadig sættes op efter afsnittet ovenfor.
-
-### Afventende firmwarekontrol
-
-Automatisk registrering af aktiv Wi-Fi/4G-forbindelse er endnu ikke aktiveret. En tilsluttet mobilradio beviser ikke, at internettet går over 4G. Udgående LT300-SMS er implementeret på den afprøvede firmware; andre firmwareversioner kræver deres egen struktur- og leveringstest. Kør denne strukturkontrol på racherserver:
-
-```bash
-cd /opt/SBR-Pager-Gateway &&
-git fetch origin codex/sms-whatsapp-review-cudy &&
-git show FETCH_HEAD:scripts/probe-cudy-features.py | docker exec -i sbr-pager-sms-gateway python -
-```
-
-Kontrollen logger ind med containerens eksisterende routeropsætning og læser fire sider. Den sender ingen SMS og viser kun feltnavne, felttyper og en begrænset liste af statusord, aldrig feltværdier, beskedtekster eller loginhemmeligheder. Output skal bruges til næste adapterændring; der må ikke gættes på en afsendelses-API.
-
-LT300 V3.0/2.5.12 formularstruktur er nu fysisk aflæst: `cbid.smsnew.1.phone`, `cbid.smsnew.1.content` og knappen `cbid.smsnew.1.send`. Adapterens `prepare_sms()` validerer telefonnummer, kort prøvetekst, token, felter og samme lokale formularadresse uden at sende. `send_sms()` bruger derefter den validerede formular og kontrollerer en ny matchende Outbox-post. HTTP 200 alene er ikke en afsendelseskvittering. SMS Enable holdes permanent aktiveret; kontrollér stadig den faktiske modtagelse af en kort og delt SMS på telefonen.
-
-Statusfragmenterne viste både Cellular/Connected og WAN/Connected, mens WISP-fragmentet kun viste WISP. Det beviser ikke aktiv internetrute; automatisk Wi-Fi/4G-kildevisning må derfor stadig ikke udledes af disse ord alene.
-
-
-## Driftsrettelser 14. oktober 2026 · 2026.10-reliability.1
-
-Serverens lokale Cudy-diff fra `771b54f` er sammenholdt med opdateringen:
-70-tegnsgrænsen, stabile multipart-jobmarkører og permanent SMS Enable er
-bevaret. Containeren hedder fortsat `sbr-pager-sms-gateway`. De bekræftede
-projekter/volumener er `sms-whatsapp` / `sms-whatsapp_sms_whatsapp_data` og
-`sms-gateway` / `sms-gateway_sms_gateway_data`.
-
-Til denne drift kan `scripts/apply-reviewed-pager.sh COMMIT_SHA` anvendes
-fra en midlertidig kopi hentet med `git show`. Scriptet kræver den fulde,
-gennemgåede commit-SHA og stopper før ændringer ved afvigende gren, projekter,
-datavolumener eller modemtype. Det gemmer original Git-gren/commit, et arkiv
-af den tidligere kode, staged/unstaged patches og en privat kopi af `.env`
-under `.git/pager-review-backups/`. Lokale ændringer gemmes desuden i en
-beholdt stash. Usporede filer bevares; en checkout-konflikt stopper opdateringen.
-
-Installationen bruger en ny `deploy/pager-review-*`-gren. Cudy-hotfixes er
-allerede indarbejdet, så den gamle stash genanvendes ikke efter succes. Ved
-installationsfejl forsøger det almindelige update-script image-rollback, og
-review-scriptet skifter derefter tilbage til original kode og genanvender
-den bevarede stash med staged-status. OpenWA-sessionen genskabes ikke.
-
-- Docker kontrollerer nu `/health/live`, som kun kontrollerer databasen. Den
-  fulde `/health` viser fortsat WhatsApp og køen. Et langsomt WhatsApp-kald
-  gør ikke alene Pager-containeren usund.
-- En læsende værtsrapport med afsendelsesarbejderen deaktiveret ændrer ikke
-  længere igangværende leveringer til tilbageholdte genstartsjob. Normal
-  worker-opstart bevarer genopretning af afbrudte afsendelser.
-- Watchdog’en genlæser sessionen før recovery. Forbundne sessioner og QR-
-  parring afbrydes ikke. En fastlåst, afkoblet session kan stoppes og startes
-  med det eksisterende login. Der bruges aldrig logout eller sessionssletning.
-  Opstartsro og recovery-cooldown bevares. Et vedvarende krav om ny QR kan
-  stadig kun løses ved parring på telefonen.
-- Køfejl udløser kontrol og eventuel varsling, ikke en containergenstart.
-  Stigende køalder/antal nulstiller ikke længere fejlstreaken. En driftsbesked
-  registreres kun som afleveret, når mindst én kanal accepterer den; et
-  mislykket forsøg kan genforsøges efter fem minutter.
-- En WhatsApp-timeout, et manglende besked-id eller en ukendt serverfejl kan
-  betyde, at beskeden allerede er sendt. Jobbet holdes derfor tilbage under
-  Drift. Kontrollér telefonen før godkendelse eller annullering. Afviste
-  forbindelser og eksplicit afvisning før afsendelse kan fortsat genforsøges.
-- Cudys SMS Enable-checkbox læses efter dens faktiske afkrydsning. Et felt
-  med `value="1"` uden `checked` tælles som slået fra og kan selvhelbredes.
-- Alarm- og enkeltpersonstest bruger en stabil `Idempotency-Key`, som nyere
-  OpenWA-versioner understøtter. Et almindeligt genforsøg genbruger nøglen;
-  udtrykkelig godkendelse af et tilbageholdt job får en ny nøgle. Ældre images
-  kan ignorere headeren, så timeouts holdes fortsat tilbage. Nøglen er ingen
-  telefonleveringskvittering.
-- En SMS-fallback, der allerede har fået et gateway-id, genoprettes ikke som
-  endnu en SMS ved status-timeout. Id’et gemmes til kontrol af det oprindelige
-  job. Cudy får de browserheaders, der var nødvendige i den fysiske test, og
-  behandler normalt ét udgående job mellem indgående scanninger.
-
-Ændringerne bygger på GitHub-grenen `codex/sms-whatsapp-review-cudy` ved
-`9f2b7d4`. De installerer ikke sig selv på racherserver. Opdateringsscriptet
-bevarer OpenWA-containeren og dens login samt `.env`, laver backup og kan
-rulle applikationsimages tilbage. Efter installation kræves stadig en fysisk
-kort og delt SMS-test, WhatsApp-modtagelse på telefonen og kontrol af genopretning.
-En Cudy native web-indbakke, der fjerner beskeder fra modemlageret før AT-
-readerens læsning, er fortsat en firmwareafhængig begrænsning.
-
-## Cudy-opfølgning 15. oktober 2026
-
-Installationen af `556a8cb` på racherserver gennemførte backup, image-builds
-og opstart. Efter opstart var alle statuskontroller grønne, og en fysisk kort
-SMS blev modtaget og videresendt. Den lange test blev sendt tre gange, men kun
-ét langt forsøg ses i Pager. De to dele af dette forsøg var til stede ved
-første komplette aflæsning; importen kom cirka 15 sekunder efter SMSC-tiden,
-og WhatsApp-afsendelsen blev registreret cirka seks sekunder efter importen.
-Modtagelsens stabilitet er derfor endnu ikke fysisk godkendt.
-
-Serverens egen AT-formular indeholder submit-knappen
-`cbid.atcmd.1.refresh`. Adapteren medsender nu dens aktuelle formularværdi,
-også efter et nyt login. Manglende/tomme AT-svar viser nu den berørte kommando
-og svarlængden, uden at skrive SMS-indhold eller formularhemmeligheder i loggen.
-Der er ingen nye automatiske genforsøg af AT-kommandoer. Den tidligere tekst,
-der generelt lovede at beholde SMS på routeren ved et ukendt svar, er fjernet:
+**Indkøring** har separate, manuelt udfyldte LT300- og USB-forløb med 12 kontrolpunkter: backup, internet/LAN, modem, kort og delt SMS, stationsvalg, WhatsApp, genstart, afbrudt forbindelse, USB-skift, udgående SMS og normal drift. Gem resultat og noter efter den fysiske test. Bestået kræver en særskilt bekræftelse og gemmes i ændringsloggen; siden sender ingen beskeder. LT300-afsendelse kan markeres bestået, når den aktive Cudy-reader understøtter afsendelse, og operatøren udtrykkeligt bekræfter…4973 tokens truncated…beholde SMS på routeren ved et ukendt svar, er fjernet:
 et ukendt svar på en sletning beviser ikke, om sletningen blev udført.
 
 En regressionstest kræver den observerede submit-knap, både ved normal drift
 og efter sessionsudløb. Den fysiske retest skal sende hver kort/lang besked
 præcis én gang og kontrollere hele teksten samt efterfølgende AT-fejl i loggen.
+
+## Særskilt OpenWA-opdatering 20. oktober 2026
+
+Serveren kørte stadig Pager `556a8cb` og OpenWA 0.23.5, da WhatsApp gik fra
+ready omkring kl. 01.58 til `qr_ready` omkring kl. 01.59 dansk tid. Containeren
+havde kørt siden 14. oktober uden registreret genstart eller OOM. Senere logs
+bekræftede en aktiv motor, der genererede nye QR-koder. Den oprindelige
+udløsende hændelse er ikke fundet; en senere browsergenindlæsning beviser ikke
+årsagen. Efter ny tilknytning viste dashboardet Connected; telefonlevering
+skal stadig bekræftes.
+
+OpenWA 0.23.7 og 0.24.0 har relevante rettelser til loginoplysninger, der
+tidligere kunne blive slettet ved en readiness-frist eller en langsom
+gendannelse af en gemt session. Opdateringen her bruger den publicerede
+0.25.0, som indeholder disse rettelser. Den er ingen garanti mod en reel
+WhatsApp-side afkobling.
+
+`scripts/update-openwa.py` kan hentes fra den gennemgåede commit og køres
+uden at skifte serverens Git-gren eller installere andre Pager/Cudy-ændringer:
+
+```bash
+python3 /sti/til/update-openwa.py --root /opt/SBR-Pager-Gateway
+```
+
+Hjælpen kræver den eksisterende session i ready-tilstand og kontrollerer
+projekt, aktive Compose-filer og det navngivne OpenWA-volume. Den henter
+image 0.25.0 før vedligeholdelsen og fastlåser det fundne repository-digest
+i `.env` med `SMS_WHATSAPP_OPENWA_IMAGE`. En gentagelse på en allerede
+fastlåst, tilsvarende installation laver ingen containergenstart.
+
+Under vedligeholdelsen pauses Pager-watchdoggen og de to containere Pager
+og OpenWA. SMS-gatewayen ændres eller genstartes ikke; videresendelse kan
+blive forsinket, mens Pager er pauset. Hele OpenWA-volumet, inklusive
+main.sqlite, migrationshistorik, skjulte nøglefiler, browserprofil og medier,
+kopieres som tar, mens ingen container bruger det. Checksum, oprindelig
+Compose-fil, `.env`, containerbeskrivelse, logs og en kopi af hjælpen gemmes
+i en privat mappe under `.git/openwa-update-backups/`. Det gamle image får
+en lokal rollback-tag og må ikke ryddes op før opdateringen er godkendt.
+
+Kun den primære OpenWA-service ændres på værten. Hjælpen sætter 75 sekunders
+stopfrist og `AUTO_START_SESSIONS=true`, så den eksisterende session forsøges
+genoprettet ved opstart. Motor, SQLite, datasti, hukommelsesgrænse, API-nøgle,
+sessions-id og netværk bevares. Den sekundære OpenWA-service genskabes ikke.
+Koden i checkout forbliver på sin nuværende commit; Compose-filen får en
+lokal ændring, som også er indarbejdet i review-grenen. Senere kildeopdateringer
+skal bevare image-pinnen i `.env`.
+
+Hvis den nye backend ikke starter eller autentificerer inden opstartsfristen,
+gendannes både det tidligere image og det komplette datasnapshot. De nye
+data gemmes separat før gendannelse. En sund backend, der kræver en ny QR,
+beholdes på 0.25.0 og rapporterer behovet for tilknytning i stedet for at
+starte en genstarts- eller logout-løkke. En fysisk WhatsApp-side afkobling
+kan ikke rulles tilbage med et lokalt snapshot. Ingen testbeskeder sendes,
+og ingen tilbageholdte jobs godkendes automatisk.
+
+En senere udtrykkelig rollback erstatter OpenWA-data med snapshot fra før
+opdateringen. Pagerens beskedhistorik og SMS-gatewayens database gendannes
+ikke. Brug den kopi af hjælpen, der ligger i den konkrete backupmappe:
+
+```bash
+python3 /backupmappe/update-openwa.py --root /opt/SBR-Pager-Gateway --rollback /backupmappe
+```
+
+Efter opdateringen: kør `python3 scripts/check-sbr-pager.py`, kontrollér
+Drift & backup for gamle/tilbageholdte leveringer og udfør én fysisk test
+til et valgt nummer. Connected/ready og HTTP-accept er ikke bevis for
+levering på telefonen.

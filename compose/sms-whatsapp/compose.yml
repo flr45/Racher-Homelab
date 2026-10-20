@@ -1,6 +1,7 @@
 services:
   openwa:
-    image: ghcr.io/rmyndharis/openwa:latest
+    image: ${SMS_WHATSAPP_OPENWA_IMAGE:-ghcr.io/rmyndharis/openwa:0.25.0}
+    stop_grace_period: 75s
     container_name: racher-sms-openwa
     restart: unless-stopped
     init: true
@@ -34,7 +35,8 @@ services:
 
   openwa-backup:
     profiles: ["whatsapp-backup"]
-    image: ghcr.io/rmyndharis/openwa:latest
+    image: ${SMS_WHATSAPP_OPENWA_BACKUP_IMAGE:-ghcr.io/rmyndharis/openwa:0.25.0}
+    stop_grace_period: 75s
     container_name: racher-sms-openwa-backup
     restart: unless-stopped
     init: true
